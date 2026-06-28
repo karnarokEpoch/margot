@@ -303,21 +303,40 @@ margoctl verify [--manifest PATH] [--schema PATH]
 
 ## Project Structure
 
+Follows a **layered architecture**: CLI → Services → Domain / Infra.
+Dependency rule: inner layers never import outer ones. Domain has no I/O.
+
 ```
 margoctl/
 ├── pyproject.toml
-├── margoctl.toml.example       # example config
-├── FEATURES.md                 # this file
+├── margoctl.toml.example            # example config
+├── FEATURES.md                      # this file
 └── src/
     └── margoctl/
         ├── __init__.py
-        ├── main.py             # Typer app, command registration
-        ├── config.py           # dynaconf Settings setup
-        ├── metadata.py         # publish_metadata.json reader
-        ├── tags.py             # semver validation + tag helpers
-        ├── oci.py              # oras-py client wrapper (push/pull/fetch/login/logout)
-        ├── credentials.py      # expiry tracking (~/.config/margoctl/credentials.toml)
-        ├── commands/
+        ├── main.py                  # Typer app + command registration only
+        ├── config.py                # dynaconf Settings (cross-cutting)
+        │
+        ├── domain/                  # pure logic — zero I/O, zero framework imports
+        │   ├── tags.py              # semver validation
+        │   ├── metadata.py          # publish_metadata.json dataclasses + parser
+        │   └── models.py            # PackageType enum, BuildTarget, etc.
+        │
+        ├── services/                # business logic — orchestrates domain + infra
+        │   ├── build.py             # build flow (rsync, sed, tar)
+        │   ├── push.py              # push flow (credential check → oci.push)
+        │   ├── pull.py
+        │   ├── fetch.py
+        │   ├── verify.py            # linkml validation + optional remote check
+        │   └── auth.py              # login/logout + ECR token refresh
+        │
+        ├── infra/                   # I/O adapters — no business logic
+        │   ├── oci.py               # oras-py wrapper (push/pull/fetch/login/logout)
+        │   ├── credentials.py       # ~/.config/margoctl/credentials.toml R/W
+        │   ├── filesystem.py        # rsync, tar, sed helpers
+        │   └── ecr.py               # boto3 ECR token fetch
+        │
+        ├── commands/                # CLI layer — parse args, call service, render output
         │   ├── build.py
         │   ├── push.py
         │   ├── pull.py
@@ -325,11 +344,22 @@ margoctl/
         │   ├── verify.py
         │   ├── login.py
         │   └── logout.py
-        └── validation/
+        │
+        └── validation/              # linkml-specific, called by services/verify.py
             ├── linkml_runner.py
             ├── error_formatter.py
             └── max_cardinality.py
 ```
+
+### Layer responsibilities
+
+| Layer | Rule | Imports |
+|---|---|---|
+| `commands/` | Parse args, call one service, render output. No logic. | `services/`, `config` |
+| `services/` | Orchestrate the feature flow. No CLI, no rich output. | `domain/`, `infra/`, `validation/` |
+| `domain/` | Pure functions and dataclasses. Raise `ValueError` on bad input. | stdlib only |
+| `infra/` | All I/O (filesystem, OCI, ECR, credentials file). | `domain/`, stdlib, third-party |
+| `validation/` | LinkML runner and formatters. | `domain/`, `infra/` |
 
 ---
 
