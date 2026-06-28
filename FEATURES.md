@@ -2,6 +2,8 @@
 
 Developer CLI for building and publishing Margo application packages.
 
+> **Testing:** see [TESTING.md](TESTING.md) for the test plan, structure, and coverage requirements.
+
 ---
 
 ## Tech Stack
