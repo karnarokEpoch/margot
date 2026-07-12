@@ -1,4 +1,4 @@
-# margoctl — Feature Plan
+# margot — Feature Plan
 
 Developer CLI for building and publishing Margo application packages.
 
@@ -22,7 +22,7 @@ Developer CLI for building and publishing Margo application packages.
 code minimal. Rich output integration is first-class.
 
 **Why dynaconf over custom parser?** Supports `settings.toml` + `settings.local.toml` +
-env vars (`MARGOCTL_` prefix) + CLI flags with priority layering, no bespoke code needed.
+env vars (`MARGOT_` prefix) + CLI flags with priority layering, no bespoke code needed.
 
 ### OCI library: oras-py vs ORAS CLI subprocess
 
@@ -60,9 +60,9 @@ client.remote.get_manifest("public.ecr.aws/org/repo:tag")
 ### Priority (highest → lowest)
 
 1. CLI flags
-2. Environment variables (`MARGOCTL_` prefix, e.g. `MARGOCTL_REGISTRY`)
-3. `margoctl.toml` in project directory
-4. `~/.config/margoctl/config.toml` (user defaults)
+2. Environment variables (`MARGOT_` prefix, e.g. `MARGOT_REGISTRY`)
+3. `margot.toml` in project directory
+4. `~/.config/margot/config.toml` (user defaults)
 
 ### Key config keys
 
@@ -109,7 +109,7 @@ Existing format, read from working directory. Contains per-component versions:
 - Annotations: `org.margo.component.type=compose`, `org.margo.component.version`, OCI image annotations
 - Build step: rsync → temp dir, `sed` image tag substitution, `tar -czf`
 - Variants supported: any subdirectory with a `compose.yaml` is a valid variant source
-- Variant tag: caller provides a valid SemVer tag; margoctl validates it, tool does not impose naming
+- Variant tag: caller provides a valid SemVer tag; margot validates it, tool does not impose naming
 - `.rsyncignore` respected if present
 
 ### `quadlet`
@@ -121,19 +121,19 @@ Existing format, read from working directory. Contains per-component versions:
 - Annotations: same pattern as compose with `type=quadlet`
 - Build step: identical to compose
 - Variants: any subdirectory with `.container` files is a valid variant source
-- Variant tag: caller provides a valid SemVer tag; margoctl validates it
+- Variant tag: caller provides a valid SemVer tag; margot validates it
 - `.rsyncignore` respected if present
 
 ---
 
 ## Commands
 
-### `margoctl build`
+### `margot build`
 
 Build one or all package types into `build_dir`.
 
 ```
-margoctl build [--type margo|compose|quadlet|all] [--version VERSION]
+margot build [--type margo|compose|quadlet|all] [--version VERSION]
                [--registry REG] [--repository REPO] [--build-dir DIR]
                [--variant VARIANT]
 ```
@@ -157,7 +157,7 @@ margoctl build [--type margo|compose|quadlet|all] [--version VERSION]
 **all:** run margo + compose (all variants) + quadlet (all variants) in sequence
 
 **Tag naming convention (MANDATORY):**
-All tags pushed by margoctl MUST be valid SemVer. This is a hard requirement — no
+All tags pushed by margot MUST be valid SemVer. This is a hard requirement — no
 freeform strings, no dev suffixes, no deployment-type suffixes baked into the tag.
 
 ```
@@ -181,12 +181,12 @@ tasks is **removed**. Artifact type disambiguation happens via `artifactType` fi
 
 ---
 
-### `margoctl push`
+### `margot push`
 
 Push built artifacts to OCI registry via ORAS.
 
 ```
-margoctl push [--type margo|compose|quadlet|all] [--version VERSION]
+margot push [--type margo|compose|quadlet|all] [--version VERSION]
               [--registry REG] [--repository REPO] [--build-dir DIR]
               [--variant VARIANT]
 ```
@@ -226,16 +226,16 @@ client.push(
 )
 ```
 
-**Registry auth:** credentials must be active. Run `margoctl login` before pushing.
+**Registry auth:** credentials must be active. Run `margot login` before pushing.
 
 ---
 
-### `margoctl pull`
+### `margot pull`
 
 Pull artifacts from OCI registry via ORAS.
 
 ```
-margoctl pull [--type margo|compose|quadlet] [--version VERSION]
+margot pull [--type margo|compose|quadlet] [--version VERSION]
               [--registry REG] [--repository REPO] [--run-dir DIR]
 ```
 
@@ -249,12 +249,12 @@ Pulls each requested artifact type into the run directory.
 
 ---
 
-### `margoctl fetch`
+### `margot fetch`
 
 Fetch and inspect a remote artifact without full pull to disk.
 
 ```
-margoctl fetch [--type margo|compose|quadlet] [--version VERSION]
+margot fetch [--type margo|compose|quadlet] [--version VERSION]
                [--registry REG] [--repository REPO]
 ```
 
@@ -270,12 +270,12 @@ Display: artifact type, layers (filename + media type + digest + size), annotati
 
 ---
 
-### `margoctl verify`
+### `margot verify`
 
 Validate the margo application description and optionally check published artifacts.
 
 ```
-margoctl verify [--manifest PATH] [--schema PATH]
+margot verify [--manifest PATH] [--schema PATH]
                 [--remote] [--version VERSION]
                 [--registry REG] [--repository REPO]
 ```
@@ -307,12 +307,12 @@ Follows a **layered architecture**: CLI → Services → Domain / Infra.
 Dependency rule: inner layers never import outer ones. Domain has no I/O.
 
 ```
-margoctl/
+margot/
 ├── pyproject.toml
-├── margoctl.toml.example            # example config
+├── margot.toml.example            # example config
 ├── FEATURES.md                      # this file
 └── src/
-    └── margoctl/
+    └── margot/
         ├── __init__.py
         ├── main.py                  # Typer app + command registration only
         ├── config.py                # dynaconf Settings (cross-cutting)
@@ -332,7 +332,7 @@ margoctl/
         │
         ├── infra/                   # I/O adapters — no business logic
         │   ├── oci.py               # oras-py wrapper (push/pull/fetch/login/logout)
-        │   ├── credentials.py       # ~/.config/margoctl/credentials.toml R/W
+        │   ├── credentials.py       # ~/.config/margot/credentials.toml R/W
         │   ├── filesystem.py        # rsync, tar, sed helpers
         │   └── ecr.py               # boto3 ECR token fetch
         │
@@ -388,7 +388,7 @@ the tag string entirely.
 
 - Missing `publish_metadata.json` → clear error with instructions
 - Invalid SemVer tag → reject immediately before any build/push step
-- Credentials expired or near-expiry → warn or hard-fail with `margoctl login` hint
+- Credentials expired or near-expiry → warn or hard-fail with `margot login` hint
 - ECR auto-refresh failure → clear error, do not proceed
 - oras-py push/pull failure → surface exception message, exit 1
 - Validation errors → rich table, exit 1
@@ -404,7 +404,7 @@ treat any subdirectory with a `compose.yaml` as a variant. Same for quadlet
 If present in source dir, pass `--exclude-from=<path>` to rsync. Handles
 symlinks with `-L` flag (already in existing tasks).
 
-### Config file example (`margoctl.toml`)
+### Config file example (`margot.toml`)
 
 ```toml
 registry = "public.ecr.aws"
@@ -413,12 +413,12 @@ build_dir = ".dist"
 run_dir = ".run"
 ```
 
-### `margoctl login`
+### `margot login`
 
 Authenticate with an OCI registry and persist credentials.
 
 ```
-margoctl login [--registry REG] [--username USER] [--password-stdin]
+margot login [--registry REG] [--username USER] [--password-stdin]
                [--ecr] [--region REGION]
                [--save-expiry]
 ```
@@ -442,7 +442,7 @@ client.login(username="AWS", password=password.decode(), hostname=registry)
 ```
 
 **Credential expiry tracking (`--save-expiry`):**
-Persist the expiry timestamp to `~/.config/margoctl/credentials.toml`:
+Persist the expiry timestamp to `~/.config/margot/credentials.toml`:
 
 ```toml
 [registries."public.ecr.aws"]
@@ -454,19 +454,19 @@ print a warning and optionally auto-refresh if `--ecr` credentials are configure
 
 ---
 
-### `margoctl logout`
+### `margot logout`
 
 Remove stored credentials for a registry.
 
 ```
-margoctl logout [--registry REG]
+margot logout [--registry REG]
 ```
 
 ```python
 client.logout(hostname=registry)
 ```
 
-Also removes the expiry entry from `~/.config/margoctl/credentials.toml`.
+Also removes the expiry entry from `~/.config/margot/credentials.toml`.
 
 ---
 
@@ -479,12 +479,12 @@ expire (ECR: 12h TTL). The caller has no signal until a push/pull fails mid-oper
 
 ```python
 def check_credentials(registry: str) -> None:
-    expiry = load_expiry(registry)  # from ~/.config/margoctl/credentials.toml
+    expiry = load_expiry(registry)  # from ~/.config/margot/credentials.toml
     if expiry is None:
         return  # no expiry tracked, proceed
     remaining = expiry - datetime.now(UTC)
     if remaining <= timedelta(0):
-        raise CredentialsExpiredError(f"Credentials for {registry} expired. Run: margoctl login")
+        raise CredentialsExpiredError(f"Credentials for {registry} expired. Run: margot login")
     if remaining < timedelta(minutes=5):
         console.print(f"[yellow]Warning: credentials for {registry} expire in {remaining}[/yellow]")
 ```

@@ -1,4 +1,4 @@
-# margoctl — Testing Plan
+# margot — Testing Plan
 
 All features defined in [FEATURES.md](FEATURES.md) must have test coverage.
 
@@ -26,7 +26,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=margoctl --cov-report=term-missing"
+addopts = "--cov=margot --cov-report=term-missing"
 ```
 
 ---

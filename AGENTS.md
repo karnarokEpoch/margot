@@ -1,4 +1,4 @@
-# AGENTS.md — margoctl
+# AGENTS.md — margot
 
 Guidance for AI agents working in this repo.
 
@@ -34,4 +34,4 @@ See the layer table and project structure in `FEATURES.md`.
 uv run pytest
 ```
 
-Coverage report prints automatically (`--cov=margoctl --cov-report=term-missing`).
+Coverage report prints automatically (`--cov=margot --cov-report=term-missing`).
