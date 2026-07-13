@@ -71,6 +71,10 @@ ignore = [
 known-first-party = ["margot"]
 force-sort-within-sections = true
 
+[tool.ruff.lint.flake8-tidy-imports]
+# ban relative imports — all imports must be absolute
+ban-relative-imports = "all"
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [
     "S101",    # assert is fine in tests
