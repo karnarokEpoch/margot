@@ -1,7 +1,7 @@
-import typer
 from rich import print as rprint
+from typer import Exit, Option, Typer, echo
 
-app = typer.Typer(name="margot", help="Margo application package developer CLI.", no_args_is_help=True)
+app = Typer(name="margot", help="Margo application package developer CLI.", no_args_is_help=True)
 
 
 @app.command()
@@ -12,11 +12,11 @@ def hello() -> None:
 
 @app.callback(invoke_without_command=True)
 def _version(
-    version: bool = typer.Option(False, "--version", "-v", help="Print version and exit.", is_eager=True),
+    version: bool = Option(False, "--version", "-v", help="Print version and exit.", is_eager=True),
 ) -> None:
     if version:
-        typer.echo("margot 0.1.0")
-        raise typer.Exit
+        echo("margot 0.1.0")
+        raise Exit
 
 
 if __name__ == "__main__":

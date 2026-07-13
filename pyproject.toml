@@ -23,7 +23,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=margot --cov-report=term-missing"
+addopts = "--cov=margot --cov-report=term-missing --cov-fail-under=90"
 
 [tool.uv]
 managed = true
@@ -38,7 +38,46 @@ packages = ["src/margot"]
 [tool.ruff]
 target-version = "py312"
 line-length = 130
-lint.select = ["ALL"]
-lint.ignore = ["D", "TD003", "FIX002"]
-exclude = [".git", ".venv", "__pycache__"]
 fix = true
+exclude = [".git", ".venv", "__pycache__"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    # docs — not enforced at this stage
+    "D",
+    # todos — tracking only, no blocking
+    "TD003",
+    "FIX002",
+    # Typer uses bool positional args as a pattern
+    "FBT001",
+    "FBT002",
+    "FBT003",
+    # inline exception messages are fine for a small CLI
+    "EM101",
+    "EM102",
+    "TRY003",
+    # formatter handles these; enabling both causes conflicts
+    "COM812",
+    "ISC001",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["margot"]
+force-sort-within-sections = true
+
+[tool.ruff.lint.flake8-tidy-imports]
+# ban relative imports — all imports must be absolute
+ban-relative-imports = "all"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",    # assert is fine in tests
+    "ANN",     # no annotation requirements in tests
+    "PLR2004", # magic values are fine in test assertions
+]
