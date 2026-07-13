@@ -1,13 +1,14 @@
-import typer
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
+
 from rich import print as rprint
+from typer import Exit, Option, Typer, echo
 
 try:
     __version__ = version("margot")
 except PackageNotFoundError:
     __version__ = "unknown"
 
-app = typer.Typer(name="margot", help="Margo application package developer CLI.", no_args_is_help=True)
+app = Typer(name="margot", help="Margo application package developer CLI.", no_args_is_help=True)
 
 
 @app.command()
@@ -18,11 +19,11 @@ def hello() -> None:
 
 @app.callback(invoke_without_command=True)
 def _version(
-    version_flag: bool = typer.Option(False, "--version", "-v", help="Print version and exit.", is_eager=True),
+    version: bool = Option(False, "--version", "-v", help="Print version and exit.", is_eager=True),
 ) -> None:
-    if version_flag:
-        typer.echo(f"margot {__version__}")
-        raise typer.Exit
+    if version:
+        echo(f"margot {__version__}")
+        raise Exit
 
 
 if __name__ == "__main__":
