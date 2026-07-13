@@ -1,5 +1,5 @@
-import typer
 from rich import print as rprint
+import typer
 
 app = typer.Typer(name="margot", help="Margo application package developer CLI.", no_args_is_help=True)
 
