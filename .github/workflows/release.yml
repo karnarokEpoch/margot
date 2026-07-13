@@ -37,11 +37,14 @@ jobs:
       - name: Build
         run: uv build
 
+      - name: Generate changelog
+        run: uvx git-cliff --latest --strip header -o RELEASE_NOTES.md
+
       - name: Create release and upload artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ steps.version.outputs.version }} dist/* \
             --title "${{ steps.version.outputs.version }}" \
-            --generate-notes \
+            --notes-file RELEASE_NOTES.md \
             --target main
