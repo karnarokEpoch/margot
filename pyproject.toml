@@ -23,7 +23,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=margot --cov-report=term-missing"
+addopts = "--cov=margot --cov-report=term-missing --cov-fail-under=90"
 
 [tool.uv]
 managed = true
