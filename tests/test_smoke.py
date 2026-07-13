@@ -8,7 +8,7 @@ runner = CliRunner()
 def test_version() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "margot 0.1.0" in result.output
+    assert result.output.startswith("margot ")
 
 
 def test_hello() -> None:

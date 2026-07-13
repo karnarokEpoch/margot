@@ -1,6 +1,6 @@
 [project]
 name = "margot"
-version = "0.0.0"
+dynamic = ["version"]
 description = "Developer CLI for building and publishing Margo application packages"
 requires-python = ">=3.12"
 dependencies = [
@@ -29,8 +29,14 @@ addopts = "--cov=margot --cov-report=term-missing"
 managed = true
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+version_scheme = "no-guess-dev"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/margot"]
