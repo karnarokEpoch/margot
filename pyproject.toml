@@ -1,6 +1,6 @@
 [project]
 name = "margot"
-version = "0.1.0"
+version = "0.0.0"
 description = "Developer CLI for building and publishing Margo application packages"
 requires-python = ">=3.12"
 dependencies = [
