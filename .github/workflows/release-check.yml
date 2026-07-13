@@ -1,0 +1,29 @@
+name: Release Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  preview-changelog:
+    if: startsWith(github.head_ref, 'release/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from branch name
+        id: version
+        run: |
+          VERSION=${GITHUB_HEAD_REF#release/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Preview release notes
+        run: |
+          echo "## Release notes preview for ${{ steps.version.outputs.version }}"
+          echo ""
+          uvx git-cliff --unreleased --strip header
