@@ -1,5 +1,15 @@
+from importlib.metadata import PackageNotFoundError, version
+
 from rich import print as rprint
 from typer import Exit, Option, Typer, echo
+
+
+def get_version() -> str:
+    try:
+        return version("margot")
+    except PackageNotFoundError:
+        return "unknown"
+
 
 app = Typer(name="margot", help="Margo application package developer CLI.", no_args_is_help=True)
 
@@ -12,10 +22,10 @@ def hello() -> None:
 
 @app.callback(invoke_without_command=True)
 def _version(
-    version: bool = Option(False, "--version", "-v", help="Print version and exit.", is_eager=True),
+    version_flag: bool = Option(False, "--version", "-v", help="Print version and exit.", is_eager=True),
 ) -> None:
-    if version:
-        echo("margot 0.1.0")
+    if version_flag:
+        echo(f"margot {get_version()}")
         raise Exit
 
 
