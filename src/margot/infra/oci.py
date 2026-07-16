@@ -2,20 +2,22 @@
 
 from typing import Any
 
+from oras.client import OrasClient as OrasClientLib
+
 
 class OrasClient:
     """Wrapper around oras.client.OrasClient for anonymous OCI operations."""
 
     def __init__(self) -> None:
-        """Initialize OrasClient."""
-        # TODO(kiro): Initialize oras.client.OrasClient
+        """Initialize OrasClient for anonymous registry access."""
+        self._client = OrasClientLib()
 
     def get_manifest(self, uri: str) -> dict[str, Any]:
         """
         Fetch the manifest of an OCI artifact.
 
         Args:
-            uri: Full OCI reference (e.g. public.ecr.aws/org/repo:tag)
+            uri: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0)
 
         Returns:
             Manifest dict from the registry.
@@ -23,5 +25,4 @@ class OrasClient:
         Raises:
             Exception: If fetch fails.
         """
-        # TODO(kiro): Call oras.client.OrasClient.remote.get_manifest(uri)
-        raise NotImplementedError("OrasClient.get_manifest not yet implemented")
+        return self._client.get_manifest(uri)
