@@ -26,3 +26,22 @@ class OrasClient:
             Exception: If fetch fails.
         """
         return self._client.get_manifest(uri)
+
+    def pull(self, uri: str, outdir: str) -> list[str]:
+        """
+        Pull OCI artifact layers to outdir.
+
+        Args:
+            uri: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0)
+            outdir: Directory to write layer blobs to.
+
+        Returns:
+            List of paths to written files.
+
+        Raises:
+            Exception: If pull fails.
+        """
+        result = self._client.pull(target=uri, outdir=outdir)
+        if isinstance(result, list):
+            return result
+        return []

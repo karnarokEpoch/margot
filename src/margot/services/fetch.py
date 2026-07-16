@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from margot.domain import uri as uri_domain
 from margot.infra import oci
 
 
@@ -19,10 +20,6 @@ def fetch_manifest(uri: str) -> dict[str, Any]:
         ValueError: If URI is malformed.
         Exception: If fetch fails.
     """
-    if not uri:
-        raise ValueError("URI must not be empty")
-    tag_sep = uri.rfind(":")
-    if tag_sep == -1 or not uri[tag_sep + 1 :]:
-        raise ValueError("URI must contain a tag separated by ':' (e.g. registry/repo:tag)")
+    uri_domain.validate_uri(uri)
     client = oci.OrasClient()
     return client.get_manifest(uri)
