@@ -28,21 +28,57 @@ def select_payload_layer(
     return None
 
 
+def sanitize_filename(name: str) -> str | None:
+    """
+    Sanitize a candidate filename from an untrusted OCI annotation.
+
+    Returns the stripped name if safe, or None if the name is rejected.
+
+    Rejected if:
+    - Contains a '/' or '\\' (path traversal)
+    - Contains a null byte
+    - Is exactly '.' or '..'
+    - Is empty after stripping whitespace
+
+    Args:
+        name: Candidate filename string from an OCI annotation.
+
+    Returns:
+        Stripped filename string if safe, None otherwise.
+    """
+    stripped = name.strip()
+    if not stripped:
+        return None
+    if "/" in stripped or "\\" in stripped:
+        return None
+    if "\x00" in stripped:
+        return None
+    if stripped in (".", ".."):
+        return None
+    return stripped
+
+
 def resolve_filename(
     layer: dict[str, Any],
     manifest_annotations: dict[str, Any] | None,
+    *,
+    force: bool = False,
 ) -> str | None:
     """Resolve a filename for a layer using annotation-based naming rules.
 
     Resolution order:
     1. Use the layer's own 'org.opencontainers.image.title' annotation if present.
+       When force=False, the title is sanitized; an unsafe title falls through to step 2.
+       When force=True, the raw title is returned without sanitization.
     2. Else construct '<title>-<version>.tgz' from manifest-level annotations
        ('org.opencontainers.image.title' + 'org.opencontainers.image.version').
+       This fallback is always sanitized regardless of force.
     3. Return None if no naming info is available.
 
     Args:
         layer: OCI layer descriptor dict (may contain 'annotations').
         manifest_annotations: Manifest-level annotations dict, or None.
+        force: If True, skip sanitization on the layer title annotation.
 
     Returns:
         Resolved filename string, or None if no name can be determined.
@@ -50,7 +86,12 @@ def resolve_filename(
     layer_annotations = layer.get("annotations") or {}
     layer_title = layer_annotations.get(_OCI_TITLE)
     if layer_title:
-        return layer_title
+        if force:
+            return layer_title
+        safe = sanitize_filename(layer_title)
+        if safe is not None:
+            return safe
+        # Unsafe title — fall through to manifest-level annotations
 
     if manifest_annotations:
         title = manifest_annotations.get(_OCI_TITLE)

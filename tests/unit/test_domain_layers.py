@@ -1,6 +1,6 @@
 """Unit tests for domain/layers.py."""
 
-from margot.domain.layers import resolve_filename, select_payload_layer
+from margot.domain.layers import resolve_filename, sanitize_filename, select_payload_layer
 
 _COMPOSE_MEDIA_TYPE = "application/vnd.org.margo.component.compose.tar+gzip"
 _OTHER_MEDIA_TYPE = "application/vnd.margo.app.description.v1+yaml"
@@ -41,10 +41,6 @@ class TestSelectPayloadLayer:
 class TestResolveFilename:
     """Tests for resolve_filename()."""
 
-    # TODO(karnarokEpoch): Should also have a test for malicious title renames and we should succeed it.
-    # Traversal path, weird charaters in path...
-    # name of the title should pass a set of constraints, and if not fail.
-    # User should then be able to pull anyway with a force flag
     def test_uses_layer_title_annotation_when_present(self) -> None:
         """Should return the layer's own title annotation if available."""
         layer = {
@@ -78,3 +74,74 @@ class TestResolveFilename:
         }
         result = resolve_filename(layer, manifest_annotations)
         assert result is None
+
+
+class TestSanitizeFilename:
+    """Tests for sanitize_filename()."""
+
+    def test_clean_name_returns_unchanged(self) -> None:
+        """Should return clean filenames unchanged."""
+        assert sanitize_filename("myapp-1.0.0.tgz") == "myapp-1.0.0.tgz"
+
+    def test_strips_leading_trailing_whitespace(self) -> None:
+        """Should strip leading and trailing whitespace."""
+        assert sanitize_filename("  myapp.tgz  ") == "myapp.tgz"
+
+    def test_forward_slash_returns_none(self) -> None:
+        """Should return None when name contains a forward slash (path traversal)."""
+        assert sanitize_filename("../../etc/passwd") is None
+
+    def test_backslash_returns_none(self) -> None:
+        """Should return None when name contains a backslash."""
+        assert sanitize_filename("..\\secret") is None
+
+    def test_null_byte_returns_none(self) -> None:
+        """Should return None when name contains a null byte."""
+        assert sanitize_filename("evil\x00.tgz") is None
+
+    def test_dot_returns_none(self) -> None:
+        """Should return None when name is exactly '.'."""
+        assert sanitize_filename(".") is None
+
+    def test_double_dot_returns_none(self) -> None:
+        """Should return None when name is exactly '..'."""
+        assert sanitize_filename("..") is None
+
+    def test_whitespace_only_returns_none(self) -> None:
+        """Should return None when name is empty after stripping whitespace."""
+        assert sanitize_filename("   ") is None
+
+
+class TestResolveFilenameWithForce:
+    """Tests for resolve_filename() force parameter behaviour."""
+
+    def test_force_false_malicious_title_falls_back_to_manifest_annotations(self) -> None:
+        """force=False with malicious layer title should fall back to manifest annotations."""
+        layer = {
+            "mediaType": _COMPOSE_MEDIA_TYPE,
+            "annotations": {"org.opencontainers.image.title": "../../evil.tgz"},
+        }
+        manifest_annotations = {
+            "org.opencontainers.image.title": "myapp",
+            "org.opencontainers.image.version": "1.0.0",
+        }
+        result = resolve_filename(layer, manifest_annotations, force=False)
+        assert result == "myapp-1.0.0.tgz"
+
+    def test_force_false_malicious_title_no_manifest_annotations_returns_none(self) -> None:
+        """force=False with malicious layer title and no manifest annotations should return None."""
+        layer = {
+            "mediaType": _COMPOSE_MEDIA_TYPE,
+            "annotations": {"org.opencontainers.image.title": "../../evil.tgz"},
+        }
+        result = resolve_filename(layer, manifest_annotations=None, force=False)
+        assert result is None
+
+    def test_force_true_malicious_title_returns_raw(self) -> None:
+        """force=True with malicious layer title should return the raw name without sanitization."""
+        layer = {
+            "mediaType": _COMPOSE_MEDIA_TYPE,
+            "annotations": {"org.opencontainers.image.title": "../../evil.tgz"},
+        }
+        result = resolve_filename(layer, manifest_annotations=None, force=True)
+        assert result == "../../evil.tgz"
