@@ -9,55 +9,6 @@ sequencing; FEATURES.md is updated as items land (see backlog).
 
 ---
 
-## Sprint 1 — `fetch` a single OCI artifact (anonymous)
-
-### Goal / Definition of Done
-
-```
-margot fetch public.ecr.aws/g2n4p2m7/belden-margo:1.0.1-victorialogs-margo-manifest
-```
-
-Fetches the OCI manifest for the given URI from an **anonymous-enabled** registry and
-prints the **raw manifest JSON** to stdout. Green unit + E2E tests.
-
-### Design decisions (locked)
-
-- **Input:** a single positional OCI URI (`registry/repo:tag`). No flags for
-  registry / repository / version. `fetch` inspects one final artifact, not a repo.
-- **Output:** raw JSON (pretty-printed via rich). No table — tables are for listing
-  many URIs, out of scope here.
-- **Auth:** anonymous only. No login, no credentials, no ECR token.
-- **No config file / dynaconf.** Not needed without auth or defaults.
-- **No `publish_metadata.json`.** URI is fully caller-provided.
-- **No SemVer gate on fetch.** Fetch reads/inspects arbitrary existing artifacts
-  (incl. legacy `-margo-manifest` suffix tags). SemVer validation stays scoped to
-  build/push per AGENTS.md.
-- **No manifest validation.** Display whatever the registry returns. Recognizing /
-  validating margo manifests is deferred (see backlog).
-
-### Tasks (thin vertical slice)
-
-| # | Task | Layer | Notes |
-|---|------|-------|-------|
-| 1 | Anonymous `get_manifest(uri) -> dict` wrapper around `oras.client.OrasClient` | `infra/oci.py` | Only boundary that touches the network. Mocked in tests. |
-| 2 | Fetch orchestration: take URI → call infra → return manifest dict | `services/fetch.py` | No CLI, no rich. Pure orchestration. |
-| 3 | `fetch` Typer command: positional `uri` arg → call service → pretty-print JSON | `commands/fetch.py` | Uses `rich` JSON rendering. |
-| 4 | Register `fetch` command in Typer app | `src/margot/main.py` | Keep or drop `hello` smoke command. |
-| 5 | Tests: service (mocked `OrasClient`) + E2E via `CliRunner` | `tests/` | Per TESTING.md. Assert manifest is fetched and printed. |
-
-### Out of scope (explicit)
-
-Auth / ECR, config file, `publish_metadata.json`, SemVer gate, manifest validation,
-table output, other artifact types, `build` / `push` / `pull` / `verify`.
-
-### Open / optional
-
-- **URI parsing in `domain/`:** optional light reference validation (non-empty, has
-  `:tag`) for a clean error on malformed input. Lean minimal — `oras` accepts the full
-  target string. Add only if error UX needs it.
-
----
-
 ## Sprint 2 — `pull` an OCI artifact to disk (anonymous)
 
 ### Goal / Definition of Done
@@ -245,3 +196,11 @@ Unordered within groups; sequencing decided at sprint planning.
 - `domain/metadata.py` `publish_metadata.json` parsing. → **scheduled Sprint 3**
 - `config.py` full dynaconf layering (flag > env > `margot.toml` > user config). → **scheduled Sprint 3**
 - ~~**Update FEATURES.md** `fetch` section: positional URI + raw JSON~~ ✓ done
+
+---
+
+## Completed Sprints
+
+| Sprint | Capability | Release |
+|--------|-----------|---------|
+| Sprint 1 | `margot fetch` — anonymous OCI manifest retrieval, pretty-printed JSON output, URI validation, `margot --version` | [0.1.0](https://github.com/karnarokEpoch/margot/releases/tag/0.1.0) |
