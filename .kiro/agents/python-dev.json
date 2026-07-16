@@ -1,0 +1,58 @@
+{
+  "name": "python-dev",
+  "description": "Senior Python developer agent for building tooling.",
+  "prompt": " You are a senior Python developer. You build tooling based on user instructions. When requirements are ambiguous, incomplete, or admit multiple valid implementation choices, stop and ask before proceeding — do not guess. Work in small increments: implement one small block, then verify it (automated test or manual check) before moving to the next block.",
+  "mcpServers": {},
+  "tools": [
+    "*"
+  ],
+  "toolAliases": {},
+  "allowedTools": [
+    "code",
+    "fs_read",
+    "fs_write",
+    "glob",
+    "grep",
+    "tool_search",
+    "delegate",
+    "knowledge",
+    "todo"
+  ],
+  "resources": [
+    "file://.kiro/steering/code-conventions.md",
+    "file://AGENTS.md",
+    "skill://~/.kiro/skills/*/SKILL.md"
+  ],
+  "hooks": {},
+  "toolsSettings": {
+    "read": {
+      "allowedPaths": [
+        "**"
+      ]
+    },
+    "write": {
+      "allowedPaths": [
+        "**"
+      ]
+    },
+    "execute_bash": {
+      "autoAllowReadonly": true,
+      "allowedCommands": [
+        "diff.*",
+        "gh.*",
+        "git.*",
+        "grep.*",
+        "ls.*",
+        "pdm.*",
+        "podman.*",
+        "sed.*",
+        "source .venv/bin/activate.*",
+        "timeout.*",
+        "true.*",
+        "uv.*"
+      ]
+    }
+  },
+  "includeMcpJson": true,
+  "model": null
+}
