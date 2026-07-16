@@ -41,3 +41,18 @@ class TestFetchService:
 
         assert isinstance(result, dict)
         assert "schemaVersion" in result
+
+    def test_fetch_manifest_raises_on_empty_uri(self) -> None:
+        """Should raise ValueError when URI is empty."""
+        with raises(ValueError, match="URI must not be empty"):
+            fetch.fetch_manifest("")
+
+    def test_fetch_manifest_raises_on_missing_tag_separator(self) -> None:
+        """Should raise ValueError when URI has no colon (missing tag separator)."""
+        with raises(ValueError, match="URI must contain a tag"):
+            fetch.fetch_manifest("public.ecr.aws/g2n4p2m7/margo")
+
+    def test_fetch_manifest_raises_on_empty_tag(self) -> None:
+        """Should raise ValueError when tag after colon is empty."""
+        with raises(ValueError, match="URI must contain a tag"):
+            fetch.fetch_manifest("public.ecr.aws/g2n4p2m7/margo:")

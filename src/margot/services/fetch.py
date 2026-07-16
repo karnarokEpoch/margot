@@ -19,6 +19,10 @@ def fetch_manifest(uri: str) -> dict[str, Any]:
         ValueError: If URI is malformed.
         Exception: If fetch fails.
     """
-    # TODO(kiro): Light URI validation (non-empty, has :tag)
+    if not uri:
+        raise ValueError("URI must not be empty")
+    tag_sep = uri.rfind(":")
+    if tag_sep == -1 or not uri[tag_sep + 1 :]:
+        raise ValueError("URI must contain a tag separated by ':' (e.g. registry/repo:tag)")
     client = oci.OrasClient()
     return client.get_manifest(uri)
