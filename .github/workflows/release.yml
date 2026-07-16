@@ -23,10 +23,10 @@ jobs:
           VERSION=${GITHUB_HEAD_REF#release/}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - uses: astral-sh/setup-uv@v6
+
       - name: Validate SemVer
         run: uvx --from 'semver>=3.0,<4.0' pysemver check ${{ steps.version.outputs.version }}
-
-      - uses: astral-sh/setup-uv@v6
 
       - name: Tag the release commit
         env:
