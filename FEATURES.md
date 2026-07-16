@@ -254,19 +254,25 @@ Pulls each requested artifact type into the run directory.
 Fetch and inspect a remote artifact without full pull to disk.
 
 ```
-margot fetch [--type margo|compose|quadlet] [--version VERSION]
-               [--registry REG] [--repository REPO]
+margot fetch <uri>
 ```
+
+`<uri>` is the full OCI reference: `registry/repository:tag`
+(e.g. `public.ecr.aws/g2n4p2m7/belden-margo:1.0.1-victorialogs-margo-manifest`).
+
+No flags for registry / repository / version — the URI is fully caller-provided.
+No SemVer validation: `fetch` inspects arbitrary existing artifacts, including legacy
+tags. SemVer enforcement is scoped to `build` and `push`.
 
 **Logic:**
 
 ```python
-manifest = client.remote.get_manifest(f"{registry}/{repo}:{tag}")
+client = OrasClient(hostname=<parsed_registry>)
+manifest = client.remote.get_manifest(uri)
 ```
 
-Display: artifact type, layers (filename + media type + digest + size), annotations.
-
-**Output (rich table):** tag, artifact type, layers, annotations.
+**Output:** raw manifest JSON, pretty-printed to stdout via `rich`.
+No table, no filtering — display whatever the registry returns.
 
 ---
 
