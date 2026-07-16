@@ -71,6 +71,8 @@ ignore = [
     # formatter handles these; enabling both causes conflicts
     "COM812",
     "ISC001",
+    # use selective imports everywhere; PT013 conflicts with this convention
+    "PT013",
 ]
 
 [tool.ruff.lint.isort]
