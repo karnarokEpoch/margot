@@ -14,8 +14,12 @@ _VALID_FORCE_TYPES = ("margo", "compose", "quadlet")
 def pull(
     uri: str = Argument(..., help="Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0)"),
     output: str = Option(".", "--output", "-o", help="Output directory (default: current directory)."),
-    force: bool = Option(False, "--force", "-f", help="Bypass SemVer gate, malicious annotation checks, and allow non-standard artifact types."),
-    force_type: Annotated[str | None, Option("--force-type", help="Force artifact type interpretation (margo|compose|quadlet). Requires --force.")] = None,
+    force: bool = Option(
+        False, "--force", "-f", help="Bypass SemVer gate, malicious annotation checks, and allow non-standard artifact types."
+    ),
+    force_type: Annotated[
+        str | None, Option("--force-type", help="Force artifact type interpretation (margo|compose|quadlet). Requires --force.")
+    ] = None,
 ) -> None:
     """
     Pull OCI artifact layers to a local directory.

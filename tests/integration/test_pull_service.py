@@ -1,6 +1,5 @@
 """Integration tests for services/pull.py."""
 
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -218,9 +217,7 @@ class TestPullArtifactForce:
         assert result == [str(tmp_path / "myapp-1.0.0.tgz")]
         assert (tmp_path / "myapp-1.0.0.tgz").exists()
 
-    def test_malicious_layer_title_force_false_does_not_rename_to_traversal_path(
-        self, mocker: Any, tmp_path: Any
-    ) -> None:
+    def test_malicious_layer_title_force_false_does_not_rename_to_traversal_path(self, mocker: Any, tmp_path: Any) -> None:
         """Malicious layer title with force=False should NOT rename to a traversal path."""
         original_file = tmp_path / "sha256abc.tar.gz"
         original_file.write_bytes(b"fake archive content")
@@ -253,9 +250,7 @@ class TestPullArtifactForce:
         evil_path = tmp_path.parent.parent / "evil.tgz"
         assert not evil_path.exists()
 
-    def test_malicious_layer_title_force_true_uses_raw_name(
-        self, mocker: Any, tmp_path: Any
-    ) -> None:
+    def test_malicious_layer_title_force_true_uses_raw_name(self, mocker: Any, tmp_path: Any) -> None:
         """Malicious layer title with force=True should use the raw name (rename attempted)."""
         # Use a sub-directory so that "../../evil.tgz" resolves within tmp_path's parent
         subdir = tmp_path / "sub" / "dir"
