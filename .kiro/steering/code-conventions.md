@@ -26,6 +26,7 @@ import pytest
 ```
 
 Ruff PT013 (which would enforce `import pytest`) is disabled — selective imports apply to pytest too.
+But it's also the same for typer, or others pythonic modules.
 
 ## Testing
 
