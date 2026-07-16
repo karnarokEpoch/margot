@@ -31,28 +31,26 @@ class TestFetchCLI:
 
     def test_fetch_success(self, mocker: Any, mock_manifest: dict[str, Any]) -> None:
         """Should fetch manifest and print JSON output."""
-        # Mock OrasClient at infra boundary
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest
-        mocker.patch("margot.infra.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
 
-        # NOTE: Will fail until infra/oci.py is implemented
-        # Expected: exit_code == 0, JSON output in stdout
-        assert "schemaVersion" in result.stdout or result.exit_code == 1
+        assert result.exit_code == 0
+        assert "schemaVersion" in result.stdout
 
     def test_fetch_network_error(self, mocker: Any) -> None:
         """Should handle network errors gracefully."""
         mock_client = MagicMock()
         mock_client.get_manifest.side_effect = Exception("Connection refused")
-        mocker.patch("margot.infra.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
 
         assert result.exit_code == 1
         output = result.stdout + result.stderr
-        assert "Error fetching manifest" in output or "Connection refused" in output
+        assert "Error fetching manifest" in output
 
     def test_margot_version_flag(self) -> None:
         """Should print version with --version flag."""

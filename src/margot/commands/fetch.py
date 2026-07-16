@@ -18,10 +18,10 @@ def fetch(uri: str) -> None:
     """
     try:
         manifest: dict[str, Any] = fetch_service.fetch_manifest(uri)
-        rprint(JSON.from_dict(manifest, indent=2))
-    # TODO(@karnarokEpoch): Do not catch blind exception: `Exception`
+        rprint(JSON.from_data(manifest, indent=2))
+    except ValueError as e:
+        echo(f"Error fetching manifest: {e}", err=True)
+        raise SystemExit(1) from e
     except Exception as e:
         echo(f"Error fetching manifest: {e}", err=True)
-        # TODO(@karnarokEpoch): Within an `except` clause
-        # raise exceptions with `raise ... from err` or `raise ... from None`
-        raise SystemExit(1)
+        raise SystemExit(1) from e
