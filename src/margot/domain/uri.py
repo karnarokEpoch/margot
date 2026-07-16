@@ -2,12 +2,7 @@
 
 from re import compile
 
-_SEMVER_RE = compile(
-    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
-    r"(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
-    r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
-    r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
-)
+from semver import Version
 
 # Old artifact-type suffix patterns are rejected even though they are technically
 # valid SemVer, because artifact type must be encoded in artifactType, not the tag.
@@ -51,7 +46,7 @@ def validate_semver_tag(tag: str) -> bool:
     """
     Return True if tag is a valid SemVer string, False otherwise.
 
-    Uses the canonical semver.org regex (2.0.0). Accepts pre-release
+    Uses the python-semver package (semver.org 2.0.0 spec). Accepts pre-release
     and build metadata (e.g. '1.3.0-simple.1', '1.3.0+build.42').
 
     Old artifact-type suffix patterns (e.g. '1.0.0-margo-manifest',
@@ -65,7 +60,7 @@ def validate_semver_tag(tag: str) -> bool:
     Returns:
         True if valid SemVer, False otherwise.
     """
-    if not _SEMVER_RE.match(tag):
+    if not Version.is_valid(tag):
         return False
     if _ARTIFACT_SUFFIX_RE.match(tag):
         return False
