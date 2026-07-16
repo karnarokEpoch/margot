@@ -1,8 +1,8 @@
 """URI validation helpers: pure functions, no I/O."""
 
-import re
+from re import compile
 
-_SEMVER_RE = re.compile(
+_SEMVER_RE = compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
     r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
@@ -11,9 +11,7 @@ _SEMVER_RE = re.compile(
 
 # Old artifact-type suffix patterns are rejected even though they are technically
 # valid SemVer, because artifact type must be encoded in artifactType, not the tag.
-_ARTIFACT_SUFFIX_RE = re.compile(
-    r"^[0-9]+\.[0-9]+\.[0-9]+-(margo-manifest|compose|quadlet)$"
-)
+_ARTIFACT_SUFFIX_RE = compile(r"^[0-9]+\.[0-9]+\.[0-9]+-(margo-manifest|compose|quadlet)$")
 
 
 def validate_uri(uri: str) -> None:
