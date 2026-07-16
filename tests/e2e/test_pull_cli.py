@@ -108,3 +108,77 @@ class TestPullCLI:
 
         assert result.exit_code == 1
         assert "Error" in plain
+
+
+class TestPullCLIForce:
+    """E2E tests for --force and --force-type CLI flags."""
+
+    def test_non_semver_uri_without_force_exits_1(self) -> None:
+        """Non-SemVer URI without --force should exit 1 with 'not valid SemVer' in output."""
+        result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:latest"])
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 1
+        assert "not valid SemVer" in plain
+
+    def test_non_semver_uri_with_force_exits_0(self, mocker: Any, tmp_path: Any) -> None:
+        """Non-SemVer URI with --force should exit 0 and show the warning message."""
+        pulled_file = str(tmp_path / "margo.yaml")
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_margo_manifest()
+        mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:latest", "--force"])
+        plain = _strip_ansi(result.stdout)
+
+        assert result.exit_code == 0
+        assert "Warning: --force is active" in plain
+
+    def test_force_type_without_force_exits_1(self) -> None:
+        """--force-type without --force should exit 1 with 'requires --force' in output."""
+        result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "compose"])
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 1
+        assert "requires --force" in plain
+
+    def test_force_type_with_force_exits_0(self, mocker: Any, tmp_path: Any) -> None:
+        """--force-type compose with --force should exit 0."""
+        pulled_file = str(tmp_path / "myapp.tgz")
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_margo_manifest()
+        mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        result = runner.invoke(
+            app,
+            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "compose", "--force"],
+        )
+
+        assert result.exit_code == 0
+
+    def test_force_type_invalid_exits_1(self) -> None:
+        """Invalid --force-type value should exit 1 with an error about invalid type."""
+        result = runner.invoke(
+            app,
+            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "invalid", "--force"],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 1
+        assert "invalid" in plain.lower()
+
+    def test_force_shows_warning_in_output(self, mocker: Any, tmp_path: Any) -> None:
+        """--force should always print the warning line in output."""
+        pulled_file = str(tmp_path / "margo.yaml")
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_margo_manifest()
+        mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force"])
+        plain = _strip_ansi(result.stdout)
+
+        assert result.exit_code == 0
+        assert "Warning: --force is active. Safety checks bypassed." in plain
