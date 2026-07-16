@@ -147,6 +147,7 @@ class TestResolveFilenameWithForce:
         assert result == "../../evil.tgz"
 
 
+# TODO(karnarokEpoch): also add when title and version are empty and don't exist
 class TestResolveFilenameNonStringAnnotations:
     """Tests for resolve_filename() when annotation values are not strings."""
 

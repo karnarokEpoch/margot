@@ -1,8 +1,13 @@
 """URI validation helpers: pure functions, no I/O."""
 
-from re import compile
+# TODO(karnarokEpoch): Import `compile` is shadowing a Python builtin
+# and remove noqa
+from re import compile  # noqa: A004
 
 from semver import Version
+
+# TODO(karnarokEpoch): Old artefact-type suffix must not be rejected.
+# It should just not be the default go to for build-push cmd
 
 # Old artifact-type suffix patterns are rejected even though they are technically
 # valid SemVer, because artifact type must be encoded in artifactType, not the tag.
@@ -62,6 +67,8 @@ def validate_semver_tag(tag: str) -> bool:
     """
     if not Version.is_valid(tag):
         return False
-    if _ARTIFACT_SUFFIX_RE.match(tag):
+    # TODO(karnarokEpoch): Return the condition `not _ARTIFACT_SUFFIX_RE.match(tag)` directly
+    # and remove noqa
+    if _ARTIFACT_SUFFIX_RE.match(tag):  # noqa: SIM103
         return False
     return True
