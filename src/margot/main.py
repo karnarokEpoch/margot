@@ -1,31 +1,17 @@
-from importlib.metadata import PackageNotFoundError, version
+"""Margot CLI entry point."""
 
-from typer import Exit, Option, Typer, echo
+from typer import Typer
 
 from margot.commands.fetch import fetch
-
-
-def get_version() -> str:
-    try:
-        return version("margot")
-    except PackageNotFoundError:
-        return "unknown"
-
+from margot.commands.version import version_callback
 
 app = Typer(name="margot", help="Margo application package developer CLI.", no_args_is_help=True)
 
 # Register commands
 app.command()(fetch)
 
-
-# TODO(@karnarokEpoch): Move version cmd to cmd folder
-@app.callback(invoke_without_command=True)
-def _version(
-    version_flag: bool = Option(False, "--version", "-v", help="Print version and exit.", is_eager=True),
-) -> None:
-    if version_flag:
-        echo(f"margot {get_version()}")
-        raise Exit
+# Register global flags callback
+app.callback(invoke_without_command=True)(version_callback)
 
 
 if __name__ == "__main__":
