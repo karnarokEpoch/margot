@@ -85,7 +85,7 @@ def resolve_filename(
     """
     layer_annotations = layer.get("annotations") or {}
     layer_title = layer_annotations.get(_OCI_TITLE)
-    if layer_title:
+    if layer_title and isinstance(layer_title, str):
         if force:
             return layer_title
         safe = sanitize_filename(layer_title)
@@ -96,7 +96,7 @@ def resolve_filename(
     if manifest_annotations:
         title = manifest_annotations.get(_OCI_TITLE)
         version = manifest_annotations.get(_OCI_VERSION)
-        if title and version:
+        if title and version and isinstance(title, str) and isinstance(version, str):
             return f"{title}-{version}.tgz"
 
     return None

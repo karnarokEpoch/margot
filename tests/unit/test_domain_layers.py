@@ -145,3 +145,58 @@ class TestResolveFilenameWithForce:
         }
         result = resolve_filename(layer, manifest_annotations=None, force=True)
         assert result == "../../evil.tgz"
+
+
+class TestResolveFilenameNonStringAnnotations:
+    """Tests for resolve_filename() when annotation values are not strings."""
+
+    def test_layer_title_dict_returns_none(self) -> None:
+        """Layer annotation title is a dict (non-string) → returns None when no manifest annotations."""
+        layer = {
+            "mediaType": _COMPOSE_MEDIA_TYPE,
+            "annotations": {"org.opencontainers.image.title": {"key": "value"}},
+        }
+        result = resolve_filename(layer, manifest_annotations=None)
+        assert result is None
+
+    def test_layer_title_int_returns_none(self) -> None:
+        """Layer annotation title is an int (non-string) → returns None when no manifest annotations."""
+        layer = {
+            "mediaType": _COMPOSE_MEDIA_TYPE,
+            "annotations": {"org.opencontainers.image.title": 42},
+        }
+        result = resolve_filename(layer, manifest_annotations=None)
+        assert result is None
+
+    def test_layer_title_dict_falls_back_to_manifest_annotations(self) -> None:
+        """Layer annotation title is a dict → falls through to valid manifest-level annotations."""
+        layer = {
+            "mediaType": _COMPOSE_MEDIA_TYPE,
+            "annotations": {"org.opencontainers.image.title": {"key": "value"}},
+        }
+        manifest_annotations = {
+            "org.opencontainers.image.title": "myapp",
+            "org.opencontainers.image.version": "3.0.0",
+        }
+        result = resolve_filename(layer, manifest_annotations)
+        assert result == "myapp-3.0.0.tgz"
+
+    def test_manifest_title_dict_returns_none(self) -> None:
+        """Manifest annotation title is a dict (non-string) → returns None."""
+        layer = {"mediaType": _COMPOSE_MEDIA_TYPE}
+        manifest_annotations = {
+            "org.opencontainers.image.title": {"key": "value"},
+            "org.opencontainers.image.version": "1.0.0",
+        }
+        result = resolve_filename(layer, manifest_annotations)
+        assert result is None
+
+    def test_manifest_version_dict_returns_none(self) -> None:
+        """Manifest annotation version is a dict (non-string) → returns None."""
+        layer = {"mediaType": _COMPOSE_MEDIA_TYPE}
+        manifest_annotations = {
+            "org.opencontainers.image.title": "myapp",
+            "org.opencontainers.image.version": {"key": "value"},
+        }
+        result = resolve_filename(layer, manifest_annotations)
+        assert result is None
