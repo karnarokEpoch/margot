@@ -94,5 +94,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository | lower }}:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository | lower }}:latest
