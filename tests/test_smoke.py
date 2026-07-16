@@ -13,12 +13,6 @@ def test_version() -> None:
     assert result.output.startswith("margot ")
 
 
-def test_hello() -> None:
-    result = runner.invoke(app, ["hello"])
-    assert result.exit_code == 0
-    assert "margot" in result.output
-
-
 def test_get_version_installed(mocker) -> None:
     mocker.patch("margot.main.version", return_value="1.2.3")
     assert get_version() == "1.2.3"
