@@ -23,6 +23,9 @@ jobs:
           VERSION=${GITHUB_HEAD_REF#release/}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Validate SemVer
+        run: uvx --from 'semver>=3.0,<4.0' pysemver check ${{ steps.version.outputs.version }}
+
       - uses: astral-sh/setup-uv@v6
 
       - name: Tag the release commit
@@ -40,6 +43,13 @@ jobs:
       - name: Generate changelog
         run: uvx git-cliff --latest --strip header -o RELEASE_NOTES.md
 
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist/
+          retention-days: 1
+
       - name: Create release and upload artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -48,3 +58,41 @@ jobs:
             --title "${{ steps.version.outputs.version }}" \
             --notes-file RELEASE_NOTES.md \
             --target main
+
+  container:
+    needs: release
+    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/')
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from branch name
+        id: version
+        run: |
+          VERSION=${GITHUB_HEAD_REF#release/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist/
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository }}:latest
