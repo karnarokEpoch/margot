@@ -131,7 +131,7 @@ class TestPullCLIForce:
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:latest", "--force"])
-        plain = _strip_ansi(result.stdout)
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
         assert result.exit_code == 0
         assert "Warning: --force is active" in plain
@@ -172,7 +172,7 @@ class TestPullCLIForce:
             app,
             ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "compose", "--output", outdir],
         )
-        plain = _strip_ansi(result.stdout)
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
         assert result.exit_code == 0
         assert "--force-type implies --force" in plain
@@ -237,7 +237,7 @@ class TestPullCLIForce:
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force", "--output", outdir])
-        plain = _strip_ansi(result.stdout)
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
         assert result.exit_code == 0
         assert "Warning: --force is active. Safety checks bypassed." in plain
