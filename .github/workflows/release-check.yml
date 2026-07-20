@@ -5,6 +5,22 @@ on:
     branches: [main]
 
 jobs:
+  preview-release-version:
+    if: startsWith(github.head_ref, 'release/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Extract version from branch name
+        id: version
+        run: |
+          VERSION=${GITHUB_HEAD_REF#release/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Validate SemVer
+        run: uvx --from 'semver>=3.0,<4.0' pysemver check ${{ steps.version.outputs.version }}
+
   preview-changelog:
     if: startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-latest
