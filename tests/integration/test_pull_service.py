@@ -284,3 +284,49 @@ class TestPullArtifactForce:
         assert "../../evil.tgz" in result[0] or result[0].endswith("evil.tgz")
         # Original file was moved
         assert not original_file.exists()
+
+    def test_unknown_artifact_type_without_force_raises(self, mocker: Any, tmp_path: Any) -> None:
+        """Unknown artifact type without force should raise ValueError."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest(
+            artifact_type="application/vnd.docker.container.image.v1+json",
+        )
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        with raises(ValueError, match=r"Unknown artifact type.*--force"):
+            pull_service.pull_artifact(
+                "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+                outdir=str(tmp_path),
+                force=False,
+            )
+
+    def test_unknown_artifact_type_with_force_calls_pull(self, mocker: Any, tmp_path: Any) -> None:
+        """Unknown artifact type with force=True should call client.pull() and return result."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest(
+            artifact_type="application/vnd.docker.container.image.v1+json",
+        )
+        mock_client.pull.return_value = [str(tmp_path / "layer.tar.gz")]
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            force=True,
+        )
+
+        assert result == [str(tmp_path / "layer.tar.gz")]
+        mock_client.pull.assert_called_once()
+
+    def test_none_artifact_type_without_force_raises(self, mocker: Any, tmp_path: Any) -> None:
+        """None artifact type without force should raise ValueError containing '(none)'."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest(artifact_type=None)
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        with raises(ValueError, match=r"Unknown artifact type.*\(none\).*--force"):
+            pull_service.pull_artifact(
+                "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+                outdir=str(tmp_path),
+                force=False,
+            )
