@@ -1,5 +1,6 @@
 """Integration tests for services/pull.py."""
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -61,10 +62,7 @@ class TestPullArtifactService:
         assert result == expected_paths
 
     def test_compose_artifact_with_layer_title_renames_file(self, mocker: Any, tmp_path: Any) -> None:
-        """For a compose artifact with a layer title annotation, should rename the pulled file."""
-        original_file = tmp_path / "sha256abc.tar.gz"
-        original_file.write_bytes(b"fake archive content")
-
+        """For a compose artifact with a layer title annotation, should download blob with that title."""
         layers = [
             {
                 "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
@@ -77,20 +75,27 @@ class TestPullArtifactService:
             artifact_type="application/vnd.org.margo.component.compose+json",
             layers=layers,
         )
-        mock_client.pull.return_value = [str(original_file)]
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake archive content")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
 
         assert result == [str(tmp_path / "myapp-1.0.0.tgz")]
         assert (tmp_path / "myapp-1.0.0.tgz").exists()
-        assert not original_file.exists()
+        mock_client.download_blob.assert_called_once_with(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            "sha256:abc",
+            str(tmp_path / "myapp-1.0.0.tgz"),
+        )
 
     def test_compose_artifact_with_manifest_annotations_constructs_filename(self, mocker: Any, tmp_path: Any) -> None:
-        """For a compose artifact with manifest-level annotations, should construct filename."""
-        original_file = tmp_path / "sha256abc.tar.gz"
-        original_file.write_bytes(b"fake archive content")
-
+        """For a compose artifact with manifest-level annotations, should download to constructed filename."""
         layers = [
             {
                 "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
@@ -107,13 +112,24 @@ class TestPullArtifactService:
             layers=layers,
             annotations=manifest_annotations,
         )
-        mock_client.pull.return_value = [str(original_file)]
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake archive content")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
 
         assert result == [str(tmp_path / "myapp-2.3.1.tgz")]
         assert (tmp_path / "myapp-2.3.1.tgz").exists()
+        mock_client.download_blob.assert_called_once_with(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            "sha256:abc",
+            str(tmp_path / "myapp-2.3.1.tgz"),
+        )
 
     def test_raises_value_error_on_empty_uri(self, mocker: Any, tmp_path: Any) -> None:
         """Should raise ValueError before making any client call when URI is empty."""
@@ -175,26 +191,39 @@ class TestPullArtifactForce:
         mock_client.pull.assert_called_once()
 
     def test_force_type_without_force_is_accepted(self, mocker: Any, tmp_path: Any) -> None:
-        """force_type provided without force=True should now be accepted by the service."""
+        """force_type without force=True is accepted — no SemVer or unknown-type guard fires."""
+        layers = [
+            {
+                "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                "digest": "sha256:abc",
+                "annotations": {"org.opencontainers.image.title": "myapp-1.0.0.tgz"},
+            }
+        ]
         mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest()
-        mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
+        mock_client.get_manifest.return_value = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=layers,
+        )
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
-        # Must not raise — the service no longer enforces force=True when force_type is set
-        pull_service.pull_artifact(
+        # Must not raise — force_type without force is valid for a SemVer tag + known type
+        result = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
             outdir=str(tmp_path),
             force_type=PackageType.COMPOSE,
         )
 
-        mock_client.pull.assert_called_once()
+        assert result == [str(tmp_path / "myapp-1.0.0.tgz")]
 
     def test_force_type_with_force_overrides_detected_type(self, mocker: Any, tmp_path: Any) -> None:
         """force_type with force=True should override the detected artifact type."""
-        original_file = tmp_path / "sha256abc.tar.gz"
-        original_file.write_bytes(b"fake archive content")
-
         layers = [
             {
                 "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
@@ -208,7 +237,13 @@ class TestPullArtifactForce:
             artifact_type="application/vnd.unknown.type",
             layers=layers,
         )
-        mock_client.pull.return_value = [str(original_file)]
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake archive content")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact(
@@ -218,19 +253,21 @@ class TestPullArtifactForce:
             force_type=PackageType.COMPOSE,
         )
 
-        # Should have applied compose naming: renamed to layer title
+        # Should have applied compose naming: downloaded to layer title
         assert result == [str(tmp_path / "myapp-1.0.0.tgz")]
         assert (tmp_path / "myapp-1.0.0.tgz").exists()
+        mock_client.download_blob.assert_called_once_with(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            "sha256:abc",
+            str(tmp_path / "myapp-1.0.0.tgz"),
+        )
 
     def test_malicious_layer_title_force_false_does_not_rename_to_traversal_path(self, mocker: Any, tmp_path: Any) -> None:
-        """Malicious layer title with force=False should NOT rename to a traversal path."""
-        original_file = tmp_path / "sha256abc.tar.gz"
-        original_file.write_bytes(b"fake archive content")
-
+        """Malicious layer title with force=False should use digest-based fallback name, not traversal path."""
         layers = [
             {
                 "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
-                "digest": "sha256:abc",
+                "digest": "sha256:abcdef123456",
                 "annotations": {"org.opencontainers.image.title": "../../evil.tgz"},
             }
         ]
@@ -239,7 +276,13 @@ class TestPullArtifactForce:
             artifact_type="application/vnd.org.margo.component.compose+json",
             layers=layers,
         )
-        mock_client.pull.return_value = [str(original_file)]
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake archive content")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact(
@@ -248,47 +291,14 @@ class TestPullArtifactForce:
             force=False,
         )
 
-        # Unsafe title is rejected; no manifest annotations to fall back to — file kept as-is
-        assert result == [str(original_file)]
-        assert original_file.exists()
-        # Traversal path should NOT have been created
-        evil_path = tmp_path.parent.parent / "evil.tgz"
-        assert not evil_path.exists()
-
-    def test_malicious_layer_title_force_true_uses_raw_name(self, mocker: Any, tmp_path: Any) -> None:
-        """Malicious layer title with force=True should use the raw name (rename attempted)."""
-        # Use a sub-directory so that "../../evil.tgz" resolves within tmp_path's parent
-        subdir = tmp_path / "sub" / "dir"
-        subdir.mkdir(parents=True)
-        original_file = subdir / "sha256abc.tar.gz"
-        original_file.write_bytes(b"fake archive content")
-
-        layers = [
-            {
-                "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
-                "digest": "sha256:abc",
-                "annotations": {"org.opencontainers.image.title": "../../evil.tgz"},
-            }
-        ]
-        mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest(
-            artifact_type="application/vnd.org.margo.component.compose+json",
-            layers=layers,
-        )
-        mock_client.pull.return_value = [str(original_file)]
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
-
-        result = pull_service.pull_artifact(
-            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
-            outdir=str(subdir),
-            force=True,
-        )
-
-        # Raw name is used — returned path contains the traversal string
-        assert len(result) == 1
-        assert "../../evil.tgz" in result[0] or result[0].endswith("evil.tgz")
-        # Original file was moved
-        assert not original_file.exists()
+        # Unsafe title is rejected; no manifest annotations; use digest-based fallback
+        # digest_hex = "sha256:abcdef123456"[-12:] = "bcdef123456" (first 12 chars of hex after sha256:)
+        # Actually: sha256:abcdef123456.split(":", 1)[-1][:12] = abcdef123456[:12] = abcdef123456
+        expected_name = "abcdef123456"
+        assert result == [str(tmp_path / expected_name)]
+        assert (tmp_path / expected_name).exists()
+        # Ensure traversal path was not created
+        assert not (tmp_path.parent.parent / "evil.tgz").exists()
 
     def test_unknown_artifact_type_without_force_raises(self, mocker: Any, tmp_path: Any) -> None:
         """Unknown artifact type without force should raise ValueError."""
@@ -335,3 +345,142 @@ class TestPullArtifactForce:
                 outdir=str(tmp_path),
                 force=False,
             )
+
+
+class TestPullLayerLoop:
+    """Tests for the new layer loop implementation in pull_artifact."""
+
+    def test_pull_force_type_mismatch_raises(self, mocker: Any, tmp_path: Any) -> None:
+        """Manifest has quadlet layer, force_type=COMPOSE → raises ValueError with layer info."""
+        layers = [
+            {
+                "mediaType": "application/vnd.org.margo.component.quadlet.tar+gzip",
+                "digest": "sha256:quad123",
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.quadlet+json",
+            layers=layers,
+        )
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        with raises(ValueError, match="No layer with mediaType"):
+            pull_service.pull_artifact(
+                "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+                outdir=str(tmp_path),
+                force=True,
+                force_type=PackageType.COMPOSE,
+            )
+
+    def test_pull_downloads_only_matching_layer(self, mocker: Any, tmp_path: Any) -> None:
+        """Manifest has quadlet + description layers. Pull quadlet only."""
+        layers = [
+            {
+                "mediaType": "application/vnd.org.margo.component.quadlet.tar+gzip",
+                "digest": "sha256:quadlet",
+                "annotations": {"org.opencontainers.image.title": "app.quadlet"},
+            },
+            {
+                "mediaType": "application/vnd.margo.app.description.v1+yaml",
+                "digest": "sha256:desc",
+                "annotations": {"org.opencontainers.image.title": "margo.yaml"},
+            },
+        ]
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.quadlet+json",
+            layers=layers,
+        )
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake content")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            force=True,
+            force_type=PackageType.QUADLET,
+        )
+
+        # Only quadlet layer should be downloaded
+        assert len(result) == 1
+        assert result[0].endswith("app.quadlet")
+        mock_client.download_blob.assert_called_once()
+        call_args = mock_client.download_blob.call_args
+        assert call_args[0][1] == "sha256:quadlet"  # digest is second arg
+
+    def test_pull_malicious_title_rejected(self, mocker: Any, tmp_path: Any) -> None:
+        """Compose layer with malicious title, force=False → uses digest fallback."""
+        layers = [
+            {
+                "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                "digest": "sha256:abc1234567890",
+                "annotations": {"org.opencontainers.image.title": "../../evil.tgz"},
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=layers,
+        )
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            force=False,
+        )
+
+        # Should use digest-based name (first 12 chars of hex after sha256:)
+        assert len(result) == 1
+        assert "evil" not in result[0]
+        assert "/../../" not in result[0]
+
+    def test_pull_malicious_title_allowed_with_force(self, mocker: Any, tmp_path: Any) -> None:
+        """Compose layer with malicious title, force=True → downloads with raw title."""
+        subdir = tmp_path / "sub" / "dir"
+        subdir.mkdir(parents=True)
+
+        layers = [
+            {
+                "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                "digest": "sha256:compose",
+                "annotations": {"org.opencontainers.image.title": "../../evil.tgz"},
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=layers,
+        )
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(subdir),
+            force=True,
+        )
+
+        # Should include the raw title in the path
+        assert len(result) == 1
+        assert "../../evil.tgz" in result[0]

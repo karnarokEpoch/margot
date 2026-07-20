@@ -1,5 +1,6 @@
 """E2E tests for pull command via CLI."""
 
+from pathlib import Path
 import re
 from typing import Any
 from unittest.mock import MagicMock
@@ -137,15 +138,39 @@ class TestPullCLIForce:
 
     def test_force_type_without_force_auto_enables_force(self, mocker: Any, tmp_path: Any) -> None:
         """--force-type without --force should exit 0 and warn that force was auto-enabled."""
-        pulled_file = str(tmp_path / "myapp.tgz")
+        outdir = str(tmp_path / "out")
+        # Create a compose manifest with a compose layer
+        compose_manifest = {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "artifactType": "application/vnd.unknown.type",  # Unknown type, but force_type will override
+            "config": {
+                "mediaType": "application/vnd.oci.empty.v1+json",
+                "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "size": 2,
+            },
+            "layers": [
+                {
+                    "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                    "digest": "sha256:compose123",
+                    "annotations": {"org.opencontainers.image.title": "myapp.tgz"},
+                }
+            ],
+        }
         mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_margo_manifest()
-        mock_client.pull.return_value = [pulled_file]
+        mock_client.get_manifest.return_value = compose_manifest
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(
             app,
-            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "compose"],
+            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "compose", "--output", outdir],
         )
         plain = _strip_ansi(result.stdout)
 
@@ -154,15 +179,39 @@ class TestPullCLIForce:
 
     def test_force_type_with_force_exits_0(self, mocker: Any, tmp_path: Any) -> None:
         """--force-type compose with --force should exit 0."""
-        pulled_file = str(tmp_path / "myapp.tgz")
+        outdir = str(tmp_path / "out")
+        # Create a compose manifest with a compose layer
+        compose_manifest = {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "artifactType": "application/vnd.unknown.type",  # Unknown type, but force_type will override
+            "config": {
+                "mediaType": "application/vnd.oci.empty.v1+json",
+                "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "size": 2,
+            },
+            "layers": [
+                {
+                    "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                    "digest": "sha256:compose123",
+                    "annotations": {"org.opencontainers.image.title": "myapp.tgz"},
+                }
+            ],
+        }
         mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_margo_manifest()
-        mock_client.pull.return_value = [pulled_file]
+        mock_client.get_manifest.return_value = compose_manifest
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(
             app,
-            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "compose", "--force"],
+            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "compose", "--force", "--output", outdir],
         )
 
         assert result.exit_code == 0
@@ -180,13 +229,14 @@ class TestPullCLIForce:
 
     def test_force_shows_warning_in_output(self, mocker: Any, tmp_path: Any) -> None:
         """--force should always print the warning line in output."""
-        pulled_file = str(tmp_path / "margo.yaml")
+        outdir = str(tmp_path / "out")
+        pulled_file = str(tmp_path / "out" / "margo.yaml")
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.return_value = [pulled_file]
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
-        result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force"])
+        result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force", "--output", outdir])
         plain = _strip_ansi(result.stdout)
 
         assert result.exit_code == 0
