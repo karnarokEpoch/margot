@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any
 
+import margot.console as console
 from margot.domain import uri as uri_domain
 from margot.domain.layers import COMPOSE_LAYER_MEDIA_TYPE, QUADLET_LAYER_MEDIA_TYPE, resolve_filename
 from margot.domain.models import (
@@ -94,21 +95,27 @@ def pull_artifact(
         Exception: If pull or manifest fetch fails.
     """
     uri_domain.validate_uri(uri)
+    console.info(f"URI validated: {uri}")
 
     tag = extract_tag(uri)
     if not validate_semver_tag(tag) and not force:
         raise ValueError(f"Tag '{tag}' is not valid SemVer. Use --force to pull anyway.")
+    console.info(f"Tag '{tag}' is valid SemVer.")
 
     Path(outdir).mkdir(parents=True, exist_ok=True)
+    console.info(f"Output directory ready: {outdir}")
 
     client = oci.OrasClient()
     manifest: dict[str, Any] = client.get_manifest(uri)
+    console.info("Manifest fetched.")
 
     artifact_type: str | None = manifest.get("artifactType")
     package_type = artifact_type_to_package_type(artifact_type)
+    console.info(f"Detected artifact type: {package_type.value if package_type else 'unknown'}")
 
     if force_type is not None:
         package_type = force_type
+        console.info(f"Artifact type overridden to: {force_type.value}")
 
     # Step 7: Handle UNKNOWN type or known types
     if package_type == PackageType.UNKNOWN:
@@ -120,10 +127,12 @@ def pull_artifact(
             )
         # force=True: fall through to client.pull(), result may be empty
         pulled_paths: list[str] = client.pull(uri=uri, outdir=outdir)
+        console.info(f"Pulled {len(pulled_paths)} layer(s).")
         return pulled_paths or []
 
     if package_type == PackageType.MARGO:
         pulled_paths = client.pull(uri=uri, outdir=outdir)
+        console.info(f"Pulled {len(pulled_paths)} layer(s).")
         return pulled_paths or []
 
     # Step 8: Own the layer loop for compose/quadlet
@@ -146,9 +155,12 @@ def pull_artifact(
         if desired_name is None:
             digest_hex = layer["digest"].split(":", 1)[-1][:12]
             desired_name = digest_hex
+        else:
+            console.info(f"Layer filename resolved: {desired_name}.")
 
         outfile = str(Path(outdir) / desired_name)
         client.download_blob(uri, layer["digest"], outfile)
         result.append(outfile)
 
+    console.info(f"Pulled {len(result)} layer(s).")
     return result

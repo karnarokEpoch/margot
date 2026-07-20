@@ -484,3 +484,41 @@ class TestPullLayerLoop:
         # Should include the raw title in the path
         assert len(result) == 1
         assert "../../evil.tgz" in result[0]
+
+
+
+class TestPullArtifactVerbose:
+    """Tests for pull_artifact() with verbose output."""
+
+    def test_pull_emits_info_when_verbose(
+        self, mocker: Any, tmp_path: Any, capture_console: tuple[Any, Any], reset_console: None
+    ) -> None:
+        """pull_artifact() should emit info messages on stderr when verbose=True."""
+        import margot.console as console
+        from io import StringIO
+
+        console.set_verbose(True)
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest()
+        mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        out, err = capture_console
+        pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
+        err_text = err.getvalue()
+        assert "URI validated" in err_text
+        assert "Manifest fetched" in err_text
+        assert "Pulled" in err_text
+        assert out.getvalue() == ""
+
+    def test_pull_no_info_without_verbose(
+        self, mocker: Any, tmp_path: Any, capture_console: tuple[Any, Any], reset_console: None
+    ) -> None:
+        """pull_artifact() should emit no info messages when verbose=False."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest()
+        mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        out, err = capture_console
+        pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
+        assert err.getvalue() == ""
+        assert out.getvalue() == ""

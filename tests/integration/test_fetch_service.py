@@ -1,5 +1,6 @@
 """Integration tests for services/fetch.py."""
 
+from io import StringIO
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -56,3 +57,37 @@ class TestFetchService:
         """Should raise ValueError when tag after colon is empty."""
         with raises(ValueError, match="URI must contain a tag"):
             fetch.fetch_manifest("public.ecr.aws/g2n4p2m7/margo:")
+
+
+
+class TestFetchServiceVerbose:
+    """Tests for fetch_manifest() with verbose output."""
+
+    def test_fetch_emits_info_when_verbose(
+        self, mocker: Any, mock_manifest: dict[str, Any], capture_console: tuple[StringIO, StringIO], reset_console: None
+    ) -> None:
+        """fetch_manifest() should emit info messages on stderr when verbose=True."""
+        import margot.console as console
+
+        console.set_verbose(True)
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
+        out, err = capture_console
+        fetch.fetch_manifest("public.ecr.aws/g2n4p2m7/margo:1.0.0")
+        err_text = err.getvalue()
+        assert "Fetching manifest for:" in err_text
+        assert "Manifest retrieved." in err_text
+        assert out.getvalue() == ""
+
+    def test_fetch_no_info_without_verbose(
+        self, mocker: Any, mock_manifest: dict[str, Any], capture_console: tuple[StringIO, StringIO], reset_console: None
+    ) -> None:
+        """fetch_manifest() should emit no info messages when verbose=False."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
+        out, err = capture_console
+        fetch.fetch_manifest("public.ecr.aws/g2n4p2m7/margo:1.0.0")
+        assert err.getvalue() == ""
+        assert out.getvalue() == ""

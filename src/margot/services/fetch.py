@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import margot.console as console
 from margot.domain import uri as uri_domain
 from margot.infra import oci
 
@@ -21,5 +22,8 @@ def fetch_manifest(uri: str) -> dict[str, Any]:
         Exception: If fetch fails.
     """
     uri_domain.validate_uri(uri)
+    console.info(f"Fetching manifest for: {uri}")
     client = oci.OrasClient()
-    return client.get_manifest(uri)
+    result = client.get_manifest(uri)
+    console.info("Manifest retrieved.")
+    return result

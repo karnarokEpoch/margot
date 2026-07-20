@@ -12,7 +12,7 @@ def global_options(
     debug: bool = Option(False, "--debug", "-d", help="Enable debug output (infra-level detail, implies --verbose)."),
 ) -> None:
     """Register global CLI options.
-    
+
     Handles version output and sets verbosity flags for the application.
     Called once at startup via app.callback().
     """
