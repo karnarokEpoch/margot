@@ -174,16 +174,21 @@ class TestPullArtifactForce:
 
         mock_client.pull.assert_called_once()
 
-    def test_force_type_without_force_raises(self, mocker: Any, tmp_path: Any) -> None:
-        """force_type provided without force=True should raise ValueError."""
-        mocker.patch("margot.services.pull.oci.OrasClient")
+    def test_force_type_without_force_is_accepted(self, mocker: Any, tmp_path: Any) -> None:
+        """force_type provided without force=True should now be accepted by the service."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest()
+        mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
-        with raises(ValueError, match="--force-type requires --force"):
-            pull_service.pull_artifact(
-                "public.ecr.aws/g2n4p2m7/margo:1.0.0",
-                outdir=str(tmp_path),
-                force_type=PackageType.COMPOSE,
-            )
+        # Must not raise — the service no longer enforces force=True when force_type is set
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            force_type=PackageType.COMPOSE,
+        )
+
+        mock_client.pull.assert_called_once()
 
     def test_force_type_with_force_overrides_detected_type(self, mocker: Any, tmp_path: Any) -> None:
         """force_type with force=True should override the detected artifact type."""

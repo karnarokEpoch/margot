@@ -27,13 +27,12 @@ def pull_artifact(
 
     Steps:
     1. Validate URI (via domain/uri.py).
-    2. Guard: force_type requires force.
-    3. SemVer gate: reject non-SemVer tags unless force=True.
-    4. Fetch manifest.
-    5. Detect artifact type via the artifactType field; override with force_type if set.
-    6. Pull layers to outdir.
-    7. For compose/quadlet: rename the payload file if a better name can be resolved.
-    8. Return list of written file paths.
+    2. SemVer gate: reject non-SemVer tags unless force=True.
+    3. Fetch manifest.
+    4. Detect artifact type via the artifactType field; override with force_type if set.
+    5. Pull layers to outdir.
+    6. For compose/quadlet: rename the payload file if a better name can be resolved.
+    7. Return list of written file paths.
 
     Args:
         uri: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0).
@@ -46,14 +45,10 @@ def pull_artifact(
 
     Raises:
         ValueError: If URI is malformed.
-        ValueError: If force_type is provided without force=True.
         ValueError: If tag is not valid SemVer and force=False.
         Exception: If pull or manifest fetch fails.
     """
     uri_domain.validate_uri(uri)
-
-    if force_type is not None and not force:
-        raise ValueError("--force-type requires --force")
 
     tag = extract_tag(uri)
     if not validate_semver_tag(tag) and not force:
