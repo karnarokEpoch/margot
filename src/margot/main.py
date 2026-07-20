@@ -2,6 +2,7 @@
 
 from typer import Typer
 
+from margot.commands.build import build_cmd
 from margot.commands.fetch import fetch
 from margot.commands.global_options import global_options
 from margot.commands.pull import pull
@@ -10,6 +11,7 @@ app = Typer(name="margot", help="Margo application package developer CLI.", no_a
 
 # Register commands
 app.command()(fetch)
+app.command(name="build")(build_cmd)
 app.command()(pull)
 
 # Register global flags callback
