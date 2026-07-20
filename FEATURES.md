@@ -232,20 +232,36 @@ client.push(
 
 ### `margot pull`
 
-Pull artifacts from OCI registry via ORAS.
+Pull OCI artifact layers to a local directory without extraction.
 
 ```
-margot pull [--type margo|compose|quadlet] [--version VERSION]
-              [--registry REG] [--repository REPO] [--run-dir DIR]
+margot pull <uri> [--output DIR]
 ```
+
+`<uri>` is the full OCI reference (e.g. `public.ecr.aws/g2n4p2m7/margo:1.0.0`).
+`--output` / `-o` defaults to `.` (current directory).
+
+No `--type` / `--version` / `--registry` / `--repository` flags — the URI is fully
+caller-provided, same shape as `fetch`. No SemVer validation: `pull` retrieves
+arbitrary existing artifacts. Auth: anonymous only.
 
 **Logic:**
 
-```python
-client.pull(target=f"{registry}/{repo}:{tag}", outdir=f"{run_dir}/{app_version}")
-```
+1. Validate URI via `domain/uri.py` (`validate_uri`).
+2. Fetch manifest via `OrasClient.get_manifest(uri)`.
+3. Detect artifact type from the `artifactType` manifest field:
+   - `application/vnd.margo.app.v1+json` → margo
+   - `application/vnd.org.margo.component.compose+json` → compose
+   - `application/vnd.org.margo.component.quadlet+json` → quadlet
+   - anything else → unknown (oras default naming)
+4. Pull layers via `OrasClient.pull(uri=uri, outdir=outdir)`.
+5. For compose/quadlet: rename the payload file if a better name can be resolved
+   from the layer's `org.opencontainers.image.title` annotation, or from
+   manifest-level `org.opencontainers.image.title` + `org.opencontainers.image.version`
+   annotations (`<title>-<version>.tgz`).
+6. Report each written file path. If no layers are pulled, report that.
 
-Pulls each requested artifact type into the run directory.
+No extraction — `.tgz` blobs are written as-is.
 
 ---
 

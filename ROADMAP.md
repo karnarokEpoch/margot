@@ -9,72 +9,6 @@ sequencing; FEATURES.md is updated as items land (see backlog).
 
 ---
 
-## Sprint 2 — `pull` an OCI artifact to disk (anonymous)
-
-### Goal / Definition of Done
-
-```
-margot pull public.ecr.aws/g2n4p2m7/margo:1.0.0 --output ./out
-```
-
-Pulls the layer blob(s) of the given OCI artifact to the output directory, naming the
-written files correctly per artifact type. No extraction — the `.tgz` is written as-is.
-Green unit + integration + E2E tests.
-
-### Design decisions (locked)
-
-- **Input:** a single positional OCI URI (`registry/repo:tag`), same shape as `fetch`.
-  No `--type` / `--version` / `--registry` / `--repository` flags. This deliberately
-  **replaces** the flag-based `pull` signature in FEATURES.md (FEATURES.md is updated to match on land).
-- **Output:** `--output` / `-o DIR`, defaulting to the current directory (`.`).
-- **Auth:** anonymous only, consistent with `fetch`. Authenticated pull deferred to the Auth sprint.
-- **No SemVer gate.** `pull` retrieves arbitrary existing artifacts (incl. legacy tags),
-  same rationale as `fetch`. SemVer enforcement stays scoped to `build` / `push`.
-- **Artifact type detection via `artifactType`** (never the tag string):
-  - `application/vnd.margo.app.v1+json` → margo manifest
-  - `application/vnd.org.margo.component.compose+json` → compose
-  - `application/vnd.org.margo.component.quadlet+json` → quadlet
-  - anything else → generic fallback (oras default naming)
-- **Layer selection & naming** (per WG-PROPOSAL-01 / WG-PROPOSAL-02):
-  - **margo manifest:** every layer carries `org.opencontainers.image.title`
-    (`margo.yaml`, `README.md`, `resources/...`). Use oras default naming (title → path).
-  - **compose / quadlet:** the payload layer is selected by layer `mediaType`
-    (`...compose.tar+gzip` / `...quadlet.tar+gzip`) — **not** by annotation. If multiple
-    layers share that mediaType, use the **first** and ignore the rest (spec MUST).
-    - If the payload layer has an `org.opencontainers.image.title` annotation → use it as the filename.
-    - Else fall back to the **manifest-level** annotations:
-      `<org.opencontainers.image.title>-<org.opencontainers.image.version>.tgz`.
-- **No extraction.** margot writes the `.tgz` blob as-is; it does not unpack the archive.
-- **Reuse fetch's URI check.** Extract the inline URI validation in `services/fetch.py`
-  into a shared pure helper `domain/uri.py`; both `fetch` and `pull` use it.
-
-### Tasks (thin vertical slice)
-
-| # | Task | Layer | Notes |
-|---|------|-------|-------|
-| 1 | Extract URI validation into a pure `validate_uri(uri)` helper; refactor `fetch` to use it | `domain/uri.py`, `services/fetch.py` | Pure, no I/O. Unit-tested. |
-| 2 | `PackageType` detection from `artifactType` | `domain/models.py` | Pure mapping `artifactType` → type. |
-| 3 | Payload-layer selection + filename resolution (layer title → manifest-level fallback) | `domain/` (pure) | Pure functions over a manifest dict. Fully unit-tested, no mocks. |
-| 4 | `pull(uri, outdir) -> list[str]` wrapper around `OrasClient.pull`; post-pull rename of an untitled compose/quadlet payload layer | `infra/oci.py` | Only network boundary. Mocked in tests. |
-| 5 | Pull orchestration: validate URI → fetch manifest → detect type → pull → apply naming | `services/pull.py` | No CLI, no rich. |
-| 6 | `pull` Typer command: positional `uri`, `--output` / `-o` (default `.`) → call service → report written paths | `commands/pull.py` | rich output of pulled files. |
-| 7 | Register `pull` in the Typer app | `main.py` | |
-| 8 | Tests: domain unit (naming / type), service (mocked `OrasClient`), E2E via `CliRunner` | `tests/` | Per TESTING.md. |
-| 9 | Update FEATURES.md `pull` section: positional URI + `--output` | `FEATURES.md` | Closes backlog item on land. |
-
-### Out of scope (explicit)
-
-Auth / ECR, private registries, SemVer gate, config file / dynaconf, `publish_metadata.json`,
-manifest validation (LinkML), OCI digest verification, archive **extraction** (we write the
-`.tgz` blob as-is, we do not unpack it), `build` / `push` / `verify`.
-
-### Open / optional
-
-- **OCI digest verification after pull** (spec MUST for *devices*) — margot is a dev/publish
-  tool, not a device runtime; deferred unless a need surfaces.
-
----
-
 ## Sprint 3 — `build` package types locally
 
 ### Goal / Definition of Done
@@ -204,3 +138,4 @@ Unordered within groups; sequencing decided at sprint planning.
 | Sprint | Capability | Release |
 |--------|-----------|---------|
 | Sprint 1 | `margot fetch` — anonymous OCI manifest retrieval, pretty-printed JSON output, URI validation, `margot --version` | [0.1.0](https://github.com/karnarokEpoch/margot/releases/tag/0.1.0) |
+| Sprint 2 | `margot pull` — anonymous OCI artifact pull to disk, artifact type detection via `artifactType`, layer naming (title annotation → manifest-level fallback), `--force` override for unknown types, shared `domain/uri.py` | — |
