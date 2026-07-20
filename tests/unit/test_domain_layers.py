@@ -147,7 +147,86 @@ class TestResolveFilenameWithForce:
         assert result == "../../evil.tgz"
 
 
-# TODO(karnarokEpoch): also add when title and version are empty and don't exist
+class TestResolveFilenameEmptyAndAbsentAnnotations:
+    """Tests for resolve_filename() when title/version annotations are empty or absent."""
+
+    def test_layer_title_empty_string_falls_back_to_manifest(self) -> None:
+        """Layer title is an empty string → falls through to manifest annotations."""
+        layer = {
+            "mediaType": _COMPOSE_MEDIA_TYPE,
+            "annotations": {"org.opencontainers.image.title": ""},
+        }
+        manifest_annotations = {
+            "org.opencontainers.image.title": "myapp",
+            "org.opencontainers.image.version": "1.0.0",
+        }
+        result = resolve_filename(layer, manifest_annotations)
+        assert result == "myapp-1.0.0.tgz"
+
+    def test_layer_title_empty_string_no_manifest_returns_none(self) -> None:
+        """Layer title is an empty string and no manifest annotations → returns None."""
+        layer = {
+            "mediaType": _COMPOSE_MEDIA_TYPE,
+            "annotations": {"org.opencontainers.image.title": ""},
+        }
+        result = resolve_filename(layer, manifest_annotations=None)
+        assert result is None
+
+    def test_layer_title_absent_falls_back_to_manifest(self) -> None:
+        """Layer title key is absent → falls through to manifest annotations."""
+        layer = {"mediaType": _COMPOSE_MEDIA_TYPE, "annotations": {}}
+        manifest_annotations = {
+            "org.opencontainers.image.title": "myapp",
+            "org.opencontainers.image.version": "2.0.0",
+        }
+        result = resolve_filename(layer, manifest_annotations)
+        assert result == "myapp-2.0.0.tgz"
+
+    def test_layer_title_absent_no_manifest_returns_none(self) -> None:
+        """Layer title key is absent and no manifest annotations → returns None."""
+        layer = {"mediaType": _COMPOSE_MEDIA_TYPE, "annotations": {}}
+        result = resolve_filename(layer, manifest_annotations=None)
+        assert result is None
+
+    def test_manifest_title_empty_string_returns_none(self) -> None:
+        """Manifest title is an empty string → returns None."""
+        layer = {"mediaType": _COMPOSE_MEDIA_TYPE}
+        manifest_annotations = {
+            "org.opencontainers.image.title": "",
+            "org.opencontainers.image.version": "1.0.0",
+        }
+        result = resolve_filename(layer, manifest_annotations)
+        assert result is None
+
+    def test_manifest_version_empty_string_returns_none(self) -> None:
+        """Manifest version is an empty string → returns None."""
+        layer = {"mediaType": _COMPOSE_MEDIA_TYPE}
+        manifest_annotations = {
+            "org.opencontainers.image.title": "myapp",
+            "org.opencontainers.image.version": "",
+        }
+        result = resolve_filename(layer, manifest_annotations)
+        assert result is None
+
+    def test_manifest_title_absent_returns_none(self) -> None:
+        """Manifest title key is absent → returns None."""
+        layer = {"mediaType": _COMPOSE_MEDIA_TYPE}
+        manifest_annotations = {
+            "org.opencontainers.image.version": "1.0.0",
+        }
+        result = resolve_filename(layer, manifest_annotations)
+        assert result is None
+
+    def test_manifest_version_absent_returns_none(self) -> None:
+        """Manifest version key is absent → returns None."""
+        layer = {"mediaType": _COMPOSE_MEDIA_TYPE}
+        manifest_annotations = {
+            "org.opencontainers.image.title": "myapp",
+        }
+        result = resolve_filename(layer, manifest_annotations)
+        assert result is None
+
+
 class TestResolveFilenameNonStringAnnotations:
     """Tests for resolve_filename() when annotation values are not strings."""
 
