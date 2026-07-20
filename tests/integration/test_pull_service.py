@@ -191,20 +191,36 @@ class TestPullArtifactForce:
         mock_client.pull.assert_called_once()
 
     def test_force_type_without_force_is_accepted(self, mocker: Any, tmp_path: Any) -> None:
-        """force_type provided without force=True should now be accepted by the service."""
+        """force_type without force=True is accepted — no SemVer or unknown-type guard fires."""
+        layers = [
+            {
+                "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                "digest": "sha256:abc",
+                "annotations": {"org.opencontainers.image.title": "myapp-1.0.0.tgz"},
+            }
+        ]
         mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest()
-        mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
+        mock_client.get_manifest.return_value = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=layers,
+        )
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
-        # Must not raise — the service no longer enforces force=True when force_type is set
-        pull_service.pull_artifact(
+        # Must not raise — force_type without force is valid for a SemVer tag + known type
+        result = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
             outdir=str(tmp_path),
             force_type=PackageType.COMPOSE,
         )
 
-        mock_client.pull.assert_called_once()
+        assert result == [str(tmp_path / "myapp-1.0.0.tgz")]
 
     def test_force_type_with_force_overrides_detected_type(self, mocker: Any, tmp_path: Any) -> None:
         """force_type with force=True should override the detected artifact type."""
@@ -284,46 +300,51 @@ class TestPullArtifactForce:
         # Ensure traversal path was not created
         assert not (tmp_path.parent.parent / "evil.tgz").exists()
 
-    def test_malicious_layer_title_force_true_uses_raw_name(self, mocker: Any, tmp_path: Any) -> None:
-        """Malicious layer title with force=True should download with raw title in path."""
-        # Use a sub-directory so that "../../evil.tgz" resolves within tmp_path's parent
-        subdir = tmp_path / "sub" / "dir"
-        subdir.mkdir(parents=True)
-
-        layers = [
-            {
-                "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
-                "digest": "sha256:abc",
-                "annotations": {"org.opencontainers.image.title": "../../evil.tgz"},
-            }
-        ]
+    def test_unknown_artifact_type_without_force_raises(self, mocker: Any, tmp_path: Any) -> None:
+        """Unknown artifact type without force should raise ValueError."""
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_manifest(
-            artifact_type="application/vnd.org.margo.component.compose+json",
-            layers=layers,
+            artifact_type="application/vnd.docker.container.image.v1+json",
         )
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
-        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
-            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
-            Path(outfile).write_bytes(b"fake archive content")
-            return outfile
+        with raises(ValueError, match=r"Unknown artifact type.*--force"):
+            pull_service.pull_artifact(
+                "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+                outdir=str(tmp_path),
+                force=False,
+            )
 
-        mock_client.download_blob.side_effect = _fake_download
+    def test_unknown_artifact_type_with_force_calls_pull(self, mocker: Any, tmp_path: Any) -> None:
+        """Unknown artifact type with force=True should call client.pull() and return result."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest(
+            artifact_type="application/vnd.docker.container.image.v1+json",
+        )
+        mock_client.pull.return_value = [str(tmp_path / "layer.tar.gz")]
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
-            outdir=str(subdir),
+            outdir=str(tmp_path),
             force=True,
         )
 
-        # Raw title is used — returned path contains the traversal string
-        assert len(result) == 1
-        assert "../../evil.tgz" in result[0]
-        # Verify download_blob was called with the raw path
-        call_args = mock_client.download_blob.call_args
-        assert "../../evil.tgz" in call_args[0][2]  # outfile is third positional arg
+        assert result == [str(tmp_path / "layer.tar.gz")]
+        mock_client.pull.assert_called_once()
 
+    def test_none_artifact_type_without_force_raises(self, mocker: Any, tmp_path: Any) -> None:
+        """None artifact type without force should raise ValueError containing '(none)'."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest(artifact_type=None)
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        with raises(ValueError, match=r"Unknown artifact type.*\(none\).*--force"):
+            pull_service.pull_artifact(
+                "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+                outdir=str(tmp_path),
+                force=False,
+            )
 
 
 class TestPullLayerLoop:
