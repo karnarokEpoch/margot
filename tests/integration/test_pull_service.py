@@ -182,7 +182,7 @@ class TestPullArtifactForce:
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         # Must not raise — the service no longer enforces force=True when force_type is set
-        result = pull_service.pull_artifact(
+        pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
             outdir=str(tmp_path),
             force_type=PackageType.COMPOSE,
