@@ -326,7 +326,6 @@ class TestPullCLIVerbosity:
         mock_client.get_manifest.return_value = compose_manifest
 
         def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
-            from pathlib import Path
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake")
             return outfile
@@ -365,7 +364,6 @@ class TestPullCLIVerbosity:
         mock_client.get_manifest.return_value = compose_manifest
 
         def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
-            from pathlib import Path
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake")
             return outfile
@@ -408,7 +406,7 @@ class TestPullCLIVerbosity:
         stderr_text = _strip_ansi(result.stderr or "")
         assert "URI validated" in stderr_text
 
-    def test_version_short_flag_is_uppercase_V(self, mocker: Any) -> None:
+    def test_version_short_flag_uppercase_v_shows_version(self) -> None:
         """app -V should show version and exit 0."""
         result = runner.invoke(app, ["-V"])
 

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from pytest import raises
 
+from margot import console
 from margot.services import fetch
 
 
@@ -67,8 +68,6 @@ class TestFetchServiceVerbose:
         self, mocker: Any, mock_manifest: dict[str, Any], capture_console: tuple[StringIO, StringIO], reset_console: None
     ) -> None:
         """fetch_manifest() should emit info messages on stderr when verbose=True."""
-        from margot import console
-
         console.set_verbose(True)
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest

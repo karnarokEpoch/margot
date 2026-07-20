@@ -3,6 +3,7 @@
 from typing import Any
 from unittest.mock import MagicMock
 
+from margot import console
 from margot.infra.oci import OrasClient
 
 
@@ -34,8 +35,6 @@ class TestOciAdapterDebugLogging:
         self, mocker: Any, capture_console: tuple[Any, Any], reset_console: None
     ) -> None:
         """get_manifest() should emit debug message when debug=True."""
-        from margot import console
-
         console.set_debug(True)
         mock_lib = MagicMock()
         mock_lib.get_manifest.return_value = {}
@@ -53,7 +52,7 @@ class TestOciAdapterDebugLogging:
         mock_lib = MagicMock()
         mock_lib.get_manifest.return_value = {}
         mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
-        out, err = capture_console
+        _out, err = capture_console
         client = OrasClient()
         client.get_manifest("public.ecr.aws/g2n4p2m7/margo:1.0.0")
         assert err.getvalue() == ""
