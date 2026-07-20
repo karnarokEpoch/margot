@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-import margot.console as console
+from margot import console
 from margot.domain import uri as uri_domain
 from margot.domain.layers import COMPOSE_LAYER_MEDIA_TYPE, QUADLET_LAYER_MEDIA_TYPE, resolve_filename
 from margot.domain.models import (

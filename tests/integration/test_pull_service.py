@@ -486,7 +486,6 @@ class TestPullLayerLoop:
         assert "../../evil.tgz" in result[0]
 
 
-
 class TestPullArtifactVerbose:
     """Tests for pull_artifact() with verbose output."""
 
@@ -494,8 +493,8 @@ class TestPullArtifactVerbose:
         self, mocker: Any, tmp_path: Any, capture_console: tuple[Any, Any], reset_console: None
     ) -> None:
         """pull_artifact() should emit info messages on stderr when verbose=True."""
-        import margot.console as console
-        from io import StringIO
+
+        from margot import console
 
         console.set_verbose(True)
         mock_client = MagicMock()

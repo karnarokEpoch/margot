@@ -2,7 +2,7 @@
 
 from typing import Any
 
-import margot.console as console
+from margot import console
 from margot.domain import uri as uri_domain
 from margot.infra import oci
 

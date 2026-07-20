@@ -34,7 +34,7 @@ class TestOciAdapterDebugLogging:
         self, mocker: Any, capture_console: tuple[Any, Any], reset_console: None
     ) -> None:
         """get_manifest() should emit debug message when debug=True."""
-        import margot.console as console
+        from margot import console
 
         console.set_debug(True)
         mock_lib = MagicMock()

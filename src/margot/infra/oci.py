@@ -2,8 +2,9 @@
 
 from typing import Any
 
-import margot.console as console
 from oras.client import OrasClient as OrasClientLib
+
+from margot import console
 
 
 class OrasClient:

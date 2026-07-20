@@ -40,13 +40,13 @@ def mock_manifest() -> dict[str, Any]:
     }
 
 
-@fixture()
+@fixture
 def capture_console():
     """Replace _get_stdout/_get_stderr with mocks for assertion."""
     out = StringIO()
     err = StringIO()
-    original_get_stdout = _console._get_stdout
-    original_get_stderr = _console._get_stderr
+    original_get_stdout = _console._get_stdout  # noqa: SLF001
+    original_get_stderr = _console._get_stderr  # noqa: SLF001
 
     def mock_get_stdout():
         return Console(file=out)
@@ -54,13 +54,13 @@ def capture_console():
     def mock_get_stderr():
         return Console(file=err)
 
-    _console._get_stdout = mock_get_stdout
-    _console._get_stderr = mock_get_stderr
+    _console._get_stdout = mock_get_stdout  # noqa: SLF001
+    _console._get_stderr = mock_get_stderr  # noqa: SLF001
 
     yield out, err
 
-    _console._get_stdout = original_get_stdout
-    _console._get_stderr = original_get_stderr
+    _console._get_stdout = original_get_stdout  # noqa: SLF001
+    _console._get_stderr = original_get_stderr  # noqa: SLF001
 
 
 @fixture(autouse=False)

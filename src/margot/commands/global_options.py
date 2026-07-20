@@ -23,4 +23,4 @@ def global_options(
 
     if version_flag:
         echo(f"margot {get_version()}")
-        raise Exit()
+        raise Exit()  # noqa: RSE102 - Exit class must be instantiated

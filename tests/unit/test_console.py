@@ -9,7 +9,7 @@ from typer import Exit
 import margot.console as _console
 
 
-@fixture()
+@fixture
 def capture_console():
     """Replace _stdout and _stderr module references with StringIO-backed consoles for assertion."""
     out = StringIO()
@@ -17,18 +17,18 @@ def capture_console():
     # Replace the getter functions to return StringIO-backed consoles
     original_get_stdout = _console._get_stdout
     original_get_stderr = _console._get_stderr
-    
+
     def mock_get_stdout():
         return Console(file=out)
-    
+
     def mock_get_stderr():
         return Console(file=err)
-    
+
     _console._get_stdout = mock_get_stdout
     _console._get_stderr = mock_get_stderr
-    
+
     yield out, err
-    
+
     _console._get_stdout = original_get_stdout
     _console._get_stderr = original_get_stderr
 
