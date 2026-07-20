@@ -139,8 +139,26 @@ class TestPullCLIForce:
     def test_force_type_without_force_auto_enables_force(self, mocker: Any, tmp_path: Any) -> None:
         """--force-type without --force should exit 0 and warn that force was auto-enabled."""
         pulled_file = str(tmp_path / "myapp.tgz")
+        # Create a compose manifest with a compose layer
+        compose_manifest = {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "artifactType": "application/vnd.unknown.type",  # Unknown type, but force_type will override
+            "config": {
+                "mediaType": "application/vnd.oci.empty.v1+json",
+                "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "size": 2,
+            },
+            "layers": [
+                {
+                    "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                    "digest": "sha256:compose123",
+                    "annotations": {"org.opencontainers.image.title": "myapp.tgz"},
+                }
+            ],
+        }
         mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_margo_manifest()
+        mock_client.get_manifest.return_value = compose_manifest
         mock_client.pull.return_value = [pulled_file]
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
