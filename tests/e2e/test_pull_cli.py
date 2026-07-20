@@ -1,6 +1,7 @@
 """E2E tests for pull command via CLI."""
 
 import re
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -154,10 +155,33 @@ class TestPullCLIForce:
 
     def test_force_type_with_force_exits_0(self, mocker: Any, tmp_path: Any) -> None:
         """--force-type compose with --force should exit 0."""
-        pulled_file = str(tmp_path / "myapp.tgz")
+        # Create a compose manifest with a compose layer
+        compose_manifest = {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "artifactType": "application/vnd.unknown.type",  # Unknown type, but force_type will override
+            "config": {
+                "mediaType": "application/vnd.oci.empty.v1+json",
+                "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "size": 2,
+            },
+            "layers": [
+                {
+                    "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                    "digest": "sha256:compose123",
+                    "annotations": {"org.opencontainers.image.title": "myapp.tgz"},
+                }
+            ],
+        }
         mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_margo_manifest()
-        mock_client.pull.return_value = [pulled_file]
+        mock_client.get_manifest.return_value = compose_manifest
+
+        def _fake_download(uri: str, digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(
