@@ -5,7 +5,11 @@ from typing import Any
 
 from margot.domain import uri as uri_domain
 from margot.domain.layers import COMPOSE_LAYER_MEDIA_TYPE, QUADLET_LAYER_MEDIA_TYPE, resolve_filename, select_payload_layer
-from margot.domain.models import PackageType, artifact_type_to_package_type
+from margot.domain.models import (
+    _ARTIFACT_TYPE_MAP,
+    PackageType,
+    artifact_type_to_package_type,
+)
 from margot.domain.uri import extract_tag, validate_semver_tag
 from margot.infra import oci
 
@@ -46,6 +50,7 @@ def pull_artifact(
     Raises:
         ValueError: If URI is malformed.
         ValueError: If tag is not valid SemVer and force=False.
+        ValueError: If artifact type is unknown and force=False.
         Exception: If pull or manifest fetch fails.
     """
     uri_domain.validate_uri(uri)
@@ -64,6 +69,24 @@ def pull_artifact(
 
     if force_type is not None:
         package_type = force_type
+
+    # Step 7: Handle UNKNOWN type or known types
+    if package_type == PackageType.UNKNOWN:
+        if not force:
+            artifact_type_str = manifest.get("artifactType") or "(none)"
+            supported = ", ".join(sorted(_ARTIFACT_TYPE_MAP.keys()))
+            raise ValueError(
+                f"Unknown artifact type: '{artifact_type_str}'. "
+                f"Supported types: {supported}. "
+                "Use --force to attempt pull anyway."
+            )
+        # force=True: fall through to client.pull(), result may be empty
+        pulled_paths: list[str] = client.pull(uri=uri, outdir=outdir)
+        return pulled_paths or []
+
+    if package_type == PackageType.MARGO:
+        pulled_paths = client.pull(uri=uri, outdir=outdir)
+        return pulled_paths or []
 
     pulled_paths: list[str] = client.pull(uri=uri, outdir=outdir)
 
