@@ -1,17 +1,6 @@
 """URI validation helpers: pure functions, no I/O."""
 
-# TODO(karnarokEpoch): Import `compile` is shadowing a Python builtin
-# and remove noqa
-from re import compile  # noqa: A004
-
 from semver import Version
-
-# TODO(karnarokEpoch): Old artefact-type suffix must not be rejected.
-# It should just not be the default go to for build-push cmd
-
-# Old artifact-type suffix patterns are rejected even though they are technically
-# valid SemVer, because artifact type must be encoded in artifactType, not the tag.
-_ARTIFACT_SUFFIX_RE = compile(r"^[0-9]+\.[0-9]+\.[0-9]+-(margo-manifest|compose|quadlet)$")
 
 
 def validate_uri(uri: str) -> None:
@@ -52,12 +41,9 @@ def validate_semver_tag(tag: str) -> bool:
     Return True if tag is a valid SemVer string, False otherwise.
 
     Uses the python-semver package (semver.org 2.0.0 spec). Accepts pre-release
-    and build metadata (e.g. '1.3.0-simple.1', '1.3.0+build.42').
-
-    Old artifact-type suffix patterns (e.g. '1.0.0-margo-manifest',
-    '1.0.0-compose', '1.0.0-quadlet') are explicitly rejected even though
-    they are technically valid SemVer. Artifact type must be encoded in
-    the OCI artifactType field, not in the tag.
+    and build metadata (e.g. '1.3.0-simple.1', '1.3.0+build.42'), including
+    legacy suffixes such as '1.0.0-margo-manifest', '1.0.0-compose', and
+    '1.0.0-quadlet'.
 
     Args:
         tag: The tag string to validate.
@@ -65,10 +51,4 @@ def validate_semver_tag(tag: str) -> bool:
     Returns:
         True if valid SemVer, False otherwise.
     """
-    if not Version.is_valid(tag):
-        return False
-    # TODO(karnarokEpoch): Return the condition `not _ARTIFACT_SUFFIX_RE.match(tag)` directly
-    # and remove noqa
-    if _ARTIFACT_SUFFIX_RE.match(tag):  # noqa: SIM103
-        return False
-    return True
+    return Version.is_valid(tag)
