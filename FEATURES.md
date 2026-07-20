@@ -73,12 +73,114 @@ build_dir = ".dist"                 # local build output
 run_dir = ".run"                    # local pull output
 ```
 
-### Project metadata file: `publish_metadata.json`
+### Project descriptor file: `margo.yaml`
 
-Existing format, read from working directory. Contains per-component versions:
+Single source of truth for a Margo application project, located at the project root.
+Replaces the old `publish_metadata.json`. Read by `margot build` and `margot push`.
 
-- `app`, `daemon`, `compose`, `helm-chart`, `margo`, `quadlet`
-- `metadata.name`, `metadata.description`, `metadata.source`
+**Format:**
+
+```yaml
+apiVersion: v1                     # margot config schema version (not Margo spec version)
+name: myapp                        # application name (used in tarball filenames, OCI annotations)
+description: "Human-readable description of the application"
+annotations:                       # arbitrary key/value pairs, optional
+  opentelemetry.io/instrumented: "true"
+maintainers:                       # optional list
+  - name: Alice Example
+    email: alice@example.com
+
+margo:
+  directory: margo                 # path to the margo artifact source dir (contains app.yaml + resources/)
+  version: 1.0.0                   # OCI tag for the margo artifact (must be valid OCI tag; SemVer recommended)
+  repository: public.ecr.aws/g2n4p2m7/margo   # OCI repository for this component (overrides global)
+
+compose:
+  directory: compose               # path to the compose source dir (flat or variant subdirs)
+  version: 1.0.0                   # OCI tag for the compose artifact(s) — used only when no variants
+  repository: public.ecr.aws/g2n4p2m7/margo   # optional override; falls back to global repository
+  variants:
+    - name: default                # reserved name — maps to compose/default/ subdir
+      version: 1.0.0
+    - name: simple                 # maps to compose/simple/
+      version: 1.0.0_simple        # OCI tag for this variant ('_' encodes '+' per Margo OCI spec)
+    - name: addon-mosquitto        # maps to compose/addon-mosquitto/
+      version: 1.0.0_addon-mosquitto
+
+quadlet:
+  directory: quadlet               # path to the quadlet source dir
+  version: 1.0.0
+  repository: public.ecr.aws/g2n4p2m7/margo
+  variants:
+    - name: default                # reserved name — maps to quadlet/default/ subdir
+      version: 1.0.0
+    - name: simple                 # maps to quadlet/simple/
+      version: 1.0.0_simple
+```
+
+**Field rules:**
+
+- `apiVersion` — required. Currently `v1`.
+- `name` — required. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation.
+- `description` — required. Used in OCI description annotation.
+- `margo.directory` — required. Default: `margo`.
+- `margo.version`, `compose.version`, `quadlet.version` — required per component if that component is built. Used as the tag when no variants are declared.
+- `repository` at component level — optional; overrides global `repository` from `margot.yaml` tool config (or CLI flag / env var).
+- `variants` — list of `{name, version}` objects. Required if variants exist; `--variant all` expands to this list. `--variant NAME` selects one entry by name.
+  - `name: default` is a **reserved name** but maps to `<component.directory>/default/` — a real subdir, not the component root.
+  - All variant names (including `default`) map to `<component.directory>/<name>/`.
+  - When `variants` is present, `compose.version` / `quadlet.version` is ignored — each variant carries its own `version`.
+- Version strings with `_` are stored as-is in the OCI tag. The `_` encodes `+` (SemVer build metadata separator) per the Margo OCI distribution spec, since `+` is not a valid OCI tag character.
+
+**Missing `margo.yaml`** → clear error: `"margo.yaml not found in current directory. Run margot init or create it manually."` (exit 1).
+
+---
+
+## Application Project Layout
+
+A Margo application project that margot operates on has this structure:
+
+```
+<project-root>/
+├── margo.yaml                     # project descriptor (required)
+├── margo/                         # margo artifact source (path set by margo.directory)
+│   ├── app.yaml                   # Margo app descriptor with placeholders (required)
+│   └── resources/                 # optional supporting files
+│       ├── icon.png
+│       ├── license.txt
+│       ├── release-notes.md
+│       └── description.md
+├── compose/                       # compose source (path set by compose.directory)
+│   ├── compose.yaml               # flat layout — used when no variants declared
+│   ├── .rsyncignore               # optional ignore patterns (flat layout only)
+│   ├── default/                   # 'default' variant subdir (when variants declared)
+│   │   ├── compose.yaml
+│   │   └── .rsyncignore           # optional ignore patterns (per-variant)
+│   ├── simple/                    # named variant subdir
+│   │   ├── compose.yaml
+│   │   └── .rsyncignore
+│   └── addon-mosquitto/
+│       └── compose.yaml
+└── quadlet/                       # quadlet source (path set by quadlet.directory)
+    ├── myapp.container            # flat layout — used when no variants declared
+    ├── default/                   # 'default' variant subdir (when variants declared)
+    │   └── myapp.container
+    ├── simple/
+    │   └── myapp.container
+    └── addon-mosquitto/
+        └── myapp.container
+```
+
+**No variants declared (flat layout):** if `variants` is absent from the component in
+`margo.yaml`, the component directory is built as a single artifact using
+`compose.version` / `quadlet.version`. No subdirectory logic applies.
+
+**Variants declared:** the `variants` list in `margo.yaml` is authoritative — only declared
+variants are built. All variant names (including `default`) map to `<component.directory>/<name>/`.
+There is no implicit root mapping — when variants are declared, every variant lives in its own subdir.
+
+**`.rsyncignore`:** if present in the source dir (or variant subdir), its patterns are applied
+during the tree copy step. One file per source dir; applies to that dir only.
 
 ---
 
@@ -86,43 +188,44 @@ Existing format, read from working directory. Contains per-component versions:
 
 ### `margo`
 
-- Source: `margo/` directory
-- Output: OCI artifact tagged `<version>-margo-manifest`
+- Source: `margo/` directory (path set by `margo.directory` in `margo.yaml`)
+- Output: OCI artifact tagged with `margo.version`
 - Artifact type: `application/vnd.margo.app.v1+json`
-- Layers: `margo.yaml`, `README.md`, `resources/` (icon, license, release-notes, description)
+- Layers: `app.yaml`, `resources/` (icon, license, release-notes, description)
 - Media types per file:
-  - `margo.yaml` → `application/vnd.margo.app.description.v1+yaml`
-  - `README.md` → `application/vnd.margo.app.descriptionFile.v1+markdown`
+  - `app.yaml` → `application/vnd.margo.app.description.v1+yaml`
   - `resources/icon.png` → `application/vnd.margo.app.icon.v1+png`
   - `resources/license.txt` → `application/vnd.margo.app.license.v1+plain`
   - `resources/release-notes.md` → `application/vnd.margo.app.releaseNotes.v1+markdown`
   - `resources/description.md` → `application/vnd.margo.app.descriptionFile.v1+markdown`
-- Build step: rsync source → temp dir, then `sed` substitutions for version placeholders
-  (`<app_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`, `<margo_tag>`, `<margo_version>`)
+- Build step: copy source → temp dir, then substitute placeholders in `app.yaml`:
+  - `<app_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`, `<margo_tag>`, `<margo_version>`
+  - Values sourced from the corresponding component versions in `margo.yaml`
 
 ### `compose`
 
-- Source: `compose/` directory (or subdirs for variants)
-- Output: `.tgz` tarball, OCI artifact tagged `<version>-compose`
+- Source: `compose/` directory (path set by `compose.directory` in `margo.yaml`)
+- Output: `.tgz` tarball, OCI artifact tagged with the variant's `version`
 - Artifact type: `application/vnd.org.margo.component.compose+json`
-- Layer: `<name>-<tag>.tgz` → `application/vnd.org.margo.component.compose.tar+gzip`
+- Layer: `<name>-<version>.tgz` → `application/vnd.org.margo.component.compose.tar+gzip`
 - Annotations: `org.margo.component.type=compose`, `org.margo.component.version`, OCI image annotations
-- Build step: rsync → temp dir, `sed` image tag substitution, `tar -czf`
-- Variants supported: any subdirectory with a `compose.yaml` is a valid variant source
-- Variant tag: caller provides a valid SemVer tag; margot validates it, tool does not impose naming
-- `.rsyncignore` respected if present
+- Build step: copy source dir → temp dir (respecting `.rsyncignore`), substitute placeholders in all text files, `tar -czf` (pure Python, no host binaries)
+- Variant source resolution:
+  - No `variants` in `margo.yaml` → use component directory root, tag from `compose.version`
+  - `name: default` → use `<compose.directory>/default/`
+  - Any other name → use `<compose.directory>/<name>/`
+- `.rsyncignore` respected if present in source dir
 
 ### `quadlet`
 
-- Source: `quadlet/` directory (or subdirs for variants)
-- Output: `.tgz` tarball, OCI artifact tagged `<version>-quadlet`
+- Source: `quadlet/` directory (path set by `quadlet.directory` in `margo.yaml`)
+- Output: `.tgz` tarball, OCI artifact tagged with the variant's `version`
 - Artifact type: `application/vnd.org.margo.component.quadlet+json`
-- Layer: `<name>-<tag>.tgz` → `application/vnd.org.margo.component.quadlet.tar+gzip`
+- Layer: `<name>-<version>.tgz` → `application/vnd.org.margo.component.quadlet.tar+gzip`
 - Annotations: same pattern as compose with `type=quadlet`
 - Build step: identical to compose
-- Variants: any subdirectory with `.container` files is a valid variant source
-- Variant tag: caller provides a valid SemVer tag; margot validates it
-- `.rsyncignore` respected if present
+- Variant source resolution: same rules as compose (default → root, named → subdir)
+- `.rsyncignore` respected if present in source dir
 
 ---
 
@@ -142,39 +245,37 @@ margot build [--type margo|compose|quadlet|all] [--version VERSION]
 
 **margo:**
 
-1. Read `publish_metadata.json` for default versions
-2. `rsync -La` source margo dir → `<build_dir>/<app_version>/margo/`
-3. `find ... sed -i` to substitute placeholders (registry, repo, version tags)
+1. Read `margo.yaml` from CWD for versions, directories, and repository
+2. Copy source `margo.directory` → `<build_dir>/<margo.version>/margo/` (pure Python, no rsync)
+3. Substitute placeholders in `app.yaml` (pure Python string replace, no sed):
+   - `<app_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`, `<margo_tag>`, `<margo_version>`
+   - Values sourced from the corresponding component versions in `margo.yaml`
 
 **compose / quadlet:**
 
-1. Read `publish_metadata.json`
-2. `rsync -La` source dir → temp dir (respecting `.rsyncignore`)
-3. `find ... sed -i` substitutions (registry/repo URL, image tags)
-4. `tar -czf <build_dir>/<app_version>/<name>-<tag>.tgz`
-5. Variant handling: if `--variant all`, run once per variant subdir
+1. Read `margo.yaml`
+2. Copy source dir → temp dir (respecting `.rsyncignore` if present)
+3. Substitute placeholders in all text files (registry/repo URL, image tags)
+4. `tar -czf <build_dir>/<version>/<name>-<version>.tgz` (pure Python tarfile, no tar binary)
+5. Variant handling: if `--variant all`, build every variant declared in `margo.yaml`; if `--variant NAME`, build the named variant only
 
 **all:** run margo + compose (all variants) + quadlet (all variants) in sequence
 
 **Tag naming convention (MANDATORY):**
-All tags pushed by margot MUST be valid SemVer. This is a hard requirement — no
-freeform strings, no dev suffixes, no deployment-type suffixes baked into the tag.
+All tags pushed by margot MUST be valid OCI tags. Version strings with `_` are accepted
+and stored as-is — `_` encodes `+` (SemVer build metadata separator) per the Margo OCI
+distribution spec, since `+` is not a valid OCI tag character.
 
 ```
-<semver>           e.g. 1.3.0           ← margo manifest
-<semver>           e.g. 1.3.0           ← compose artifact
-<semver>           e.g. 1.3.0           ← quadlet artifact
+<version>            e.g. 1.3.0           ← margo artifact
+<version>            e.g. 1.3.0           ← compose artifact (no variant)
+<version>_<variant>  e.g. 1.3.0_simple    ← compose artifact (variant)
+<version>_<variant>  e.g. 1.3.0_simple    ← quadlet artifact (variant)
 ```
 
-The artifact type (`margo`, `compose`, `quadlet`) is encoded in the OCI
-`artifactType` field, NOT in the tag. Multiple artifacts at different tags can
-coexist in the same repository — the consumer selects by tag + artifact type.
-
-**Variant tags:** a variant (e.g. `simple`, `addon-mosquitto`) is represented as a
-SemVer pre-release or build metadata label, or as a separate tag that is itself
-valid SemVer. The tool must validate the tag with a semver regex before pushing.
-Examples: `1.3.0`, `1.3.0-simple.1`, `1.3.0+addon-mosquitto`. Exact format TBD
-by project convention, but the tool REJECTS any non-semver tag at input.
+The artifact type (`margo`, `compose`, `quadlet`) is encoded in the OCI `artifactType`
+field, NOT in the tag. Multiple artifacts at different tags can coexist in the same
+repository — the consumer selects by tag + artifact type.
 
 The `-compose` / `-quadlet` / `-margo-manifest` suffix pattern from the old invoke
 tasks is **removed**. Artifact type disambiguation happens via `artifactType` field.
@@ -341,7 +442,7 @@ margot/
         │
         ├── domain/                  # pure logic — zero I/O, zero framework imports
         │   ├── tags.py              # semver validation
-        │   ├── metadata.py          # publish_metadata.json dataclasses + parser
+        │   ├── metadata.py          # margo.yaml dataclasses + parser
         │   └── models.py            # PackageType enum, BuildTarget, etc.
         │
         ├── services/                # business logic — orchestrates domain + infra
@@ -389,9 +490,10 @@ margot/
 
 ### Version handling
 
-- All versions default to values in `publish_metadata.json` (read from CWD)
-- CLI `--version` sets `app` version; individual component versions can be overridden
-- Tag format functions are pure: `f"{version}-compose"`, `f"{version}-quadlet"`, etc.
+- All versions default to values in `margo.yaml` (read from CWD)
+- CLI `--version` overrides the version for the selected component type
+- Individual component versions are declared per-component in `margo.yaml`; variants have their own `version` entry in the `variants` list
+- Tag format: `<version>` for non-variant artifacts, `<version>_<variant>` for variant artifacts (stored with `_` encoding `+` per Margo OCI spec)
 
 ### OCI operations (oras-py)
 
@@ -401,15 +503,16 @@ operation (push, pull, fetch). Rich `Progress` for long operations.
 
 ### Semver validation
 
-Every tag value provided by the user (via flag, config, or `publish_metadata.json`) is
-validated against the SemVer regex before any operation proceeds. Reject immediately
-with a clear error. The tool does not construct tags with suffixes — the caller owns
+Every tag value provided by the user (via flag, config, or `margo.yaml`) is
+validated against the OCI tag rules before any operation proceeds. Tags are
+normalized (`_`→`+`) for SemVer semantic validation but stored as-is. Reject
+immediately with a clear error. The tool does not construct tags with suffixes — the caller owns
 the tag string entirely.
 
 ### Error handling
 
-- Missing `publish_metadata.json` → clear error with instructions
-- Invalid SemVer tag → reject immediately before any build/push step
+- Missing `margo.yaml` → clear error: `"margo.yaml not found in current directory. Run margot init or create it manually."` (exit 1)
+- Invalid OCI tag → reject immediately before any build/push step
 - Credentials expired or near-expiry → warn or hard-fail with `margot login` hint
 - ECR auto-refresh failure → clear error, do not proceed
 - oras-py push/pull failure → surface exception message, exit 1
@@ -417,14 +520,21 @@ the tag string entirely.
 
 ### Variant discovery
 
-For `build --type compose --variant all`: scan `compose/` directory,
-treat any subdirectory with a `compose.yaml` as a variant. Same for quadlet
-(subdirs with `.container` files). Or explicit `--variant` list.
+Variants are declared in `margo.yaml` — on-disk discovery is not used. For
+`build --type compose --variant all`: build every variant in the `variants` list.
+For `--variant NAME`: build the single entry matching that name.
+
+Source directory resolution:
+- No `variants` key → component directory root (e.g. `compose/`)
+- `name: default` → `<component.directory>/default/`
+- Any other name → `<component.directory>/<name>/` (e.g. `compose/simple/`)
 
 ### `.rsyncignore`
 
-If present in source dir, pass `--exclude-from=<path>` to rsync. Handles
-symlinks with `-L` flag (already in existing tasks).
+If present in source dir (or variant subdir), its patterns are applied during the tree
+copy step via the `shutil.copytree` ignore callable. One file per source dir; applies to
+that dir only. Filename kept for continuity with the old invoke tasks even though `rsync`
+is no longer used.
 
 ### Config file example (`margot.toml`)
 
