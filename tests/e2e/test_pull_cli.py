@@ -135,13 +135,22 @@ class TestPullCLIForce:
         assert result.exit_code == 0
         assert "Warning: --force is active" in plain
 
-    def test_force_type_without_force_exits_1(self) -> None:
-        """--force-type without --force should exit 1 with 'requires --force' in output."""
-        result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "compose"])
-        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+    def test_force_type_without_force_auto_enables_force(self, mocker: Any, tmp_path: Any) -> None:
+        """--force-type without --force should exit 0 and warn that force was auto-enabled."""
+        pulled_file = str(tmp_path / "myapp.tgz")
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_margo_manifest()
+        mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
-        assert result.exit_code == 1
-        assert "requires --force" in plain
+        result = runner.invoke(
+            app,
+            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "compose"],
+        )
+        plain = _strip_ansi(result.stdout)
+
+        assert result.exit_code == 0
+        assert "--force-type implies --force" in plain
 
     def test_force_type_with_force_exits_0(self, mocker: Any, tmp_path: Any) -> None:
         """--force-type compose with --force should exit 0."""

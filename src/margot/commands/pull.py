@@ -18,7 +18,7 @@ def pull(
         False, "--force", "-f", help="Bypass SemVer gate, malicious annotation checks, and allow non-standard artifact types."
     ),
     force_type: Annotated[
-        str | None, Option("--force-type", help="Force artifact type interpretation (margo|compose|quadlet). Requires --force.")
+        str | None, Option("--force-type", help="Force artifact type interpretation (margo|compose|quadlet).")
     ] = None,
 ) -> None:
     """
@@ -34,7 +34,10 @@ def pull(
             raise Exit(1)
         resolved_force_type = PackageType(force_type)
 
-    if force:
+    if resolved_force_type is not None and not force:
+        force = True
+        rprint("[yellow]Warning: --force-type implies --force. Safety checks bypassed.[/yellow]")
+    elif force and resolved_force_type is None:
         rprint("[yellow]Warning: --force is active. Safety checks bypassed.[/yellow]")
 
     try:
