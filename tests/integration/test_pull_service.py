@@ -76,7 +76,7 @@ class TestPullArtifactService:
             layers=layers,
         )
 
-        def _fake_download(uri: str, digest: str, outfile: str) -> str:
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake archive content")
             return outfile
@@ -113,7 +113,7 @@ class TestPullArtifactService:
             annotations=manifest_annotations,
         )
 
-        def _fake_download(uri: str, digest: str, outfile: str) -> str:
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake archive content")
             return outfile
@@ -222,7 +222,7 @@ class TestPullArtifactForce:
             layers=layers,
         )
 
-        def _fake_download(uri: str, digest: str, outfile: str) -> str:
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake archive content")
             return outfile
@@ -261,7 +261,7 @@ class TestPullArtifactForce:
             layers=layers,
         )
 
-        def _fake_download(uri: str, digest: str, outfile: str) -> str:
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake archive content")
             return outfile
@@ -303,7 +303,7 @@ class TestPullArtifactForce:
             layers=layers,
         )
 
-        def _fake_download(uri: str, digest: str, outfile: str) -> str:
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake archive content")
             return outfile
@@ -372,7 +372,7 @@ class TestPullLayerLoop:
             layers=layers,
         )
 
-        def _fake_download(uri: str, digest: str, outfile: str) -> str:
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake content")
             return outfile
@@ -409,7 +409,7 @@ class TestPullLayerLoop:
             layers=layers,
         )
 
-        def _fake_download(uri: str, digest: str, outfile: str) -> str:
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake")
             return outfile
@@ -446,7 +446,7 @@ class TestPullLayerLoop:
             layers=layers,
         )
 
-        def _fake_download(uri: str, digest: str, outfile: str) -> str:
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake")
             return outfile

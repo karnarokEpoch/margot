@@ -113,7 +113,7 @@ def pull_artifact(
     # Step 8: Own the layer loop for compose/quadlet
     target_media_type = _PAYLOAD_MEDIA_TYPES[package_type]
     layers: list[dict[str, Any]] = manifest.get("layers") or []
-    matching_layers = [l for l in layers if l.get("mediaType") == target_media_type]
+    matching_layers = [layer for layer in layers if layer.get("mediaType") == target_media_type]
 
     if not matching_layers:
         available = _available_layer_types(layers)

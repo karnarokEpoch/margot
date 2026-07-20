@@ -1,7 +1,7 @@
 """E2E tests for pull command via CLI."""
 
-import re
 from pathlib import Path
+import re
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -153,7 +153,7 @@ class TestPullCLIForce:
         assert result.exit_code == 0
         assert "--force-type implies --force" in plain
 
-    def test_force_type_with_force_exits_0(self, mocker: Any, tmp_path: Any) -> None:
+    def test_force_type_with_force_exits_0(self, mocker: Any) -> None:
         """--force-type compose with --force should exit 0."""
         # Create a compose manifest with a compose layer
         compose_manifest = {
@@ -176,7 +176,7 @@ class TestPullCLIForce:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = compose_manifest
 
-        def _fake_download(uri: str, digest: str, outfile: str) -> str:
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
             Path(outfile).parent.mkdir(parents=True, exist_ok=True)
             Path(outfile).write_bytes(b"fake")
             return outfile
