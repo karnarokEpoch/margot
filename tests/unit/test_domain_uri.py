@@ -71,9 +71,17 @@ class TestValidateSemverTag:
         """Should reject 'latest' as not a semver string."""
         assert validate_semver_tag("latest") is False
 
-    def test_old_margo_manifest_suffix_is_invalid(self) -> None:
-        """Should reject old margo-manifest suffix pattern even though it is technically valid SemVer."""
-        assert validate_semver_tag("1.0.0-margo-manifest") is False
+    def test_legacy_margo_manifest_suffix_is_valid(self) -> None:
+        """Should accept legacy margo-manifest suffix — it is valid SemVer pre-release."""
+        assert validate_semver_tag("1.0.0-margo-manifest") is True
+
+    def test_legacy_compose_suffix_is_valid(self) -> None:
+        """Should accept legacy compose suffix — it is valid SemVer pre-release."""
+        assert validate_semver_tag("1.0.0-compose") is True
+
+    def test_legacy_quadlet_suffix_is_valid(self) -> None:
+        """Should accept legacy quadlet suffix — it is valid SemVer pre-release."""
+        assert validate_semver_tag("1.0.0-quadlet") is True
 
     def test_empty_string_is_invalid(self) -> None:
         """Should reject empty string."""
