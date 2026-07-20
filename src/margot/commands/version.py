@@ -14,7 +14,7 @@ def get_version() -> str:
 
 
 def version_callback(
-    version_flag: bool = Option(False, "--version", "-v", help="Print version and exit.", is_eager=True),
+    version_flag: bool = Option(False, "--version", "-V", help="Print version and exit.", is_eager=True),
 ) -> None:
     """Print margot version and exit."""
     if version_flag:
