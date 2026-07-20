@@ -15,8 +15,8 @@ def capture_console():
     out = StringIO()
     err = StringIO()
     # Replace the getter functions to return StringIO-backed consoles
-    original_get_stdout = _console._get_stdout
-    original_get_stderr = _console._get_stderr
+    original_get_stdout = _console._get_stdout  # noqa: SLF001
+    original_get_stderr = _console._get_stderr  # noqa: SLF001
 
     def mock_get_stdout():
         return Console(file=out)
@@ -24,13 +24,13 @@ def capture_console():
     def mock_get_stderr():
         return Console(file=err)
 
-    _console._get_stdout = mock_get_stdout
-    _console._get_stderr = mock_get_stderr
+    _console._get_stdout = mock_get_stdout  # noqa: SLF001
+    _console._get_stderr = mock_get_stderr  # noqa: SLF001
 
     yield out, err
 
-    _console._get_stdout = original_get_stdout
-    _console._get_stderr = original_get_stderr
+    _console._get_stdout = original_get_stdout  # noqa: SLF001
+    _console._get_stderr = original_get_stderr  # noqa: SLF001
 
 
 @fixture(autouse=False)
@@ -115,7 +115,7 @@ class TestSuccess:
 
     def test_success_always_shown(self, capture_console, reset_console):
         """success() should be shown regardless of verbose/debug flags."""
-        out, err = capture_console
+        out, _err = capture_console
         _console.success("Success with no flags")
         assert "Success with no flags" in out.getvalue()
 
@@ -141,7 +141,7 @@ class TestWarning:
 
     def test_warning_includes_prefix(self, capture_console, reset_console):
         """warning() output should include 'Warning:' prefix."""
-        out, err = capture_console
+        _out, err = capture_console
         _console.warning("Test warning")
         err_text = err.getvalue()
 
@@ -150,7 +150,7 @@ class TestWarning:
 
     def test_warning_always_shown(self, capture_console, reset_console):
         """warning() should be shown regardless of verbose/debug flags."""
-        out, err = capture_console
+        _out, err = capture_console
         _console.warning("Warning with no flags")
         assert "Warning:" in err.getvalue()
 
@@ -160,7 +160,7 @@ class TestInfo:
 
     def test_info_not_shown_without_verbose(self, capture_console, reset_console):
         """info() should produce no output when verbose=False."""
-        out, err = capture_console
+        _out, err = capture_console
         _console.info("Test info")
         err_text = err.getvalue()
 
@@ -194,7 +194,7 @@ class TestDebug:
 
     def test_debug_not_shown_without_debug(self, capture_console, reset_console):
         """debug() should produce no output when debug=False."""
-        out, err = capture_console
+        _out, err = capture_console
         _console.debug("Test debug")
         err_text = err.getvalue()
 
@@ -202,7 +202,7 @@ class TestDebug:
 
     def test_debug_not_shown_with_verbose_only(self, capture_console, reset_console):
         """debug() should produce no output when verbose=True but debug=False."""
-        out, err = capture_console
+        _out, err = capture_console
         _console.set_verbose(True)
         _console.debug("Test debug")
         err_text = err.getvalue()
@@ -223,7 +223,7 @@ class TestDebug:
 
     def test_debug_shown_with_debug_prefix(self, capture_console, reset_console):
         """debug() output should include 'debug:' prefix."""
-        out, err = capture_console
+        _out, err = capture_console
         _console.set_debug(True)
         _console.debug("Test debug message")
         err_text = err.getvalue()
@@ -249,7 +249,7 @@ class TestFatal:
 
     def test_fatal_includes_error_prefix(self, capture_console, reset_console):
         """fatal() output should include 'Error:' prefix."""
-        out, err = capture_console
+        _out, err = capture_console
         with raises(Exit):
             _console.fatal("Test error")
         err_text = err.getvalue()

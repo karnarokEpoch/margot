@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from pytest import raises
 
+from margot import console
 from margot.domain.models import PackageType
 from margot.services import pull as pull_service
 
@@ -493,8 +494,6 @@ class TestPullArtifactVerbose:
         self, mocker: Any, tmp_path: Any, capture_console: tuple[Any, Any], reset_console: None
     ) -> None:
         """pull_artifact() should emit info messages on stderr when verbose=True."""
-
-        from margot import console
 
         console.set_verbose(True)
         mock_client = MagicMock()
