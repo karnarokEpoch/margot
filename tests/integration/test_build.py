@@ -8,6 +8,7 @@ import tarfile
 from pytest import fixture, raises
 
 from margot import console
+from margot.domain.metadata import MargoYaml
 from margot.domain.models import PackageType
 from margot.services import build
 
@@ -122,7 +123,7 @@ class TestBuildMargo:
         assert (Path(targets[0].output_dir) / "app.yaml").exists()
 
     def test_build_margo_substitutes_placeholders(self, fake_project: Path) -> None:
-        """Should substitute <compose_tag> placeholder in app.yaml."""
+        """Should substitute <compose_tag> and <app_tag> placeholders in app.yaml."""
         build_dir = fake_project / ".dist"
         targets = build.build(
             PackageType.MARGO,
@@ -136,6 +137,8 @@ class TestBuildMargo:
         # In our fixture, compose has no version (only variants), so compose_version = variants[0].version
         assert "<compose_tag>" not in content  # Placeholder should be replaced
         assert "compose_tag: 1.0.0" in content
+        # <app_tag> should be substituted — fixture has no appVersion so value is ""
+        assert "<app_tag>" not in content
 
     def test_build_margo_raises_when_margo_undefined(self, tmp_path: Path) -> None:
         """Should raise ValueError when margo component not defined."""
@@ -171,6 +174,53 @@ class TestBuildMargo:
                 build_dir=str(build_dir),
                 version_override="invalid@version",
             )
+
+    def test_build_margo_substitutes_app_tag_with_app_version(self, tmp_path: Path) -> None:
+        """Should substitute <app_tag> with appVersion from margo.yaml."""
+        margo_yaml_content = """\
+apiVersion: v1
+name: testapp
+description: Test application
+appVersion: "2.5.0"
+margo:
+  directory: margo
+  version: 1.0.0
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text("app: <app_tag>\n")
+
+        build_dir = tmp_path / ".dist"
+        targets = build.build(
+            PackageType.MARGO,
+            project_dir=str(tmp_path),
+            build_dir=str(build_dir),
+        )
+
+        app_yaml = Path(targets[0].output_dir) / "app.yaml"
+        content = app_yaml.read_text()
+        assert content == "app: 2.5.0\n"
+
+    def test_build_placeholder_map_excludes_margo_version(self) -> None:
+        """_build_placeholder_map should not contain <margo_version> key; <app_tag> equals app_version."""
+        meta = MargoYaml(
+            api_version="v1",
+            name="test-app",
+            description="Test",
+            app_version="3.1.0",
+            annotations={},
+            margo=None,
+            compose=None,
+            quadlet=None,
+        )
+
+        result = build._build_placeholder_map(meta, None)  # noqa: SLF001
+
+        assert "<margo_version>" not in result
+        assert "<app_tag>" in result
+        assert result["<app_tag>"] == "3.1.0"
 
 
 class TestBuildCompose:
