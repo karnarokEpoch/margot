@@ -395,3 +395,110 @@ class TestBuildVerbose:
         assert "built:" in err_text
         assert "Build complete" in err_text
         assert out.getvalue() == ""
+
+
+class TestBuildAllSkipsMissing:
+    """Tests for --type all skipping undefined optional components."""
+
+    def test_build_all_skips_missing_compose(self, tmp_path: Path) -> None:
+        """Should skip compose when not defined; return 1 MARGO + 1 QUADLET."""
+        margo_yaml_content = """\
+apiVersion: v1
+name: testapp
+description: Test application
+margo:
+  directory: margo
+  version: 1.0.0
+quadlet:
+  directory: quadlet
+  variants:
+    - name: default
+      version: 1.0.0
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text("name: testapp\n")
+
+        quadlet_dir = tmp_path / "quadlet" / "default"
+        quadlet_dir.mkdir(parents=True)
+        (quadlet_dir / "app.container").write_text("[Container]\nImage=test:1.0.0\n")
+
+        build_dir = tmp_path / ".dist"
+        targets = build.build(
+            PackageType.ALL,
+            project_dir=str(tmp_path),
+            build_dir=str(build_dir),
+        )
+
+        package_types = [t.package_type for t in targets]
+        assert package_types.count(PackageType.MARGO) == 1
+        assert package_types.count(PackageType.QUADLET) == 1
+        assert PackageType.COMPOSE not in package_types
+
+    def test_build_all_skips_missing_quadlet(self, tmp_path: Path) -> None:
+        """Should skip quadlet when not defined; return 1 MARGO + 2 COMPOSE."""
+        margo_yaml_content = """\
+apiVersion: v1
+name: testapp
+description: Test application
+margo:
+  directory: margo
+  version: 1.0.0
+compose:
+  directory: compose
+  variants:
+    - name: default
+      version: 1.0.0
+    - name: simple
+      version: 1.0.0_simple
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text("name: testapp\n")
+
+        for variant in ("default", "simple"):
+            compose_dir = tmp_path / "compose" / variant
+            compose_dir.mkdir(parents=True)
+            (compose_dir / "compose.yaml").write_text("version: '3'\n")
+
+        build_dir = tmp_path / ".dist"
+        targets = build.build(
+            PackageType.ALL,
+            project_dir=str(tmp_path),
+            build_dir=str(build_dir),
+        )
+
+        package_types = [t.package_type for t in targets]
+        assert package_types.count(PackageType.MARGO) == 1
+        assert package_types.count(PackageType.COMPOSE) == 2
+        assert PackageType.QUADLET not in package_types
+
+    def test_build_all_skips_all_optional_components(self, tmp_path: Path) -> None:
+        """Should return only 1 MARGO when compose and quadlet are not defined."""
+        margo_yaml_content = """\
+apiVersion: v1
+name: testapp
+description: Test application
+margo:
+  directory: margo
+  version: 1.0.0
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text("name: testapp\n")
+
+        build_dir = tmp_path / ".dist"
+        targets = build.build(
+            PackageType.ALL,
+            project_dir=str(tmp_path),
+            build_dir=str(build_dir),
+        )
+
+        assert len(targets) == 1
+        assert targets[0].package_type == PackageType.MARGO

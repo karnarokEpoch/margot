@@ -231,3 +231,45 @@ class TestBuildCLI:
         # Both variant names should appear in the output
         assert "default" in plain
         assert "simple" in plain
+
+
+@fixture
+def cli_project_partial(tmp_path: Path, monkeypatch: Any) -> Path:
+    """Create a test project with margo.yaml that has margo + quadlet but no compose."""
+    (tmp_path / "margo").mkdir()
+    (tmp_path / "quadlet" / "default").mkdir(parents=True)
+
+    margo_yaml = tmp_path / "margo.yaml"
+    margo_yaml.write_text("""apiVersion: v1
+name: testapp
+description: Test application
+margo:
+  directory: margo
+  version: 1.0.0
+quadlet:
+  directory: quadlet
+  variants:
+    - name: default
+      version: 1.0.0
+""")
+
+    (tmp_path / "margo" / "app.yaml").write_text("name: margo-app\n")
+    (tmp_path / "quadlet" / "default" / "app.container").write_text("[Unit]\nDescription=Test\n")
+
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+class TestBuildAllSkipsMissingE2E:
+    """E2E tests for --type all skipping undefined optional components."""
+
+    def test_build_type_all_skips_missing_compose(self, cli_project_partial: Path) -> None:
+        """Should exit 0 and build margo + quadlet even when compose is not defined."""
+        result = runner.invoke(
+            app,
+            ["build", "--type", "all", "--build-dir", str(cli_project_partial / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 0
+        assert "Built" in plain

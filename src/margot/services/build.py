@@ -53,22 +53,42 @@ def build(
     targets: list[BuildTarget] = []
 
     if package_type == PackageType.ALL:
-        # Build all components
-        targets.append(
-            _build_margo(meta, project_dir, build_dir, version_override, placeholders)
-        )
-        targets.extend(
-            _build_compose_or_quadlet(
-                meta, project_dir, build_dir, version_override, None,
-                PackageType.COMPOSE, placeholders
+        # Build all components — skip any that are not defined in margo.yaml
+        try:
+            targets.append(
+                _build_margo(meta, project_dir, build_dir, version_override, placeholders)
             )
-        )
-        targets.extend(
-            _build_compose_or_quadlet(
-                meta, project_dir, build_dir, version_override, None,
-                PackageType.QUADLET, placeholders
+        except ValueError as e:
+            if "not defined in margo.yaml" in str(e):
+                console.info("Skipping margo: not defined in margo.yaml")
+            else:
+                raise
+
+        try:
+            targets.extend(
+                _build_compose_or_quadlet(
+                    meta, project_dir, build_dir, version_override, None,
+                    PackageType.COMPOSE, placeholders
+                )
             )
-        )
+        except ValueError as e:
+            if "not defined in margo.yaml" in str(e):
+                console.info("Skipping compose: not defined in margo.yaml")
+            else:
+                raise
+
+        try:
+            targets.extend(
+                _build_compose_or_quadlet(
+                    meta, project_dir, build_dir, version_override, None,
+                    PackageType.QUADLET, placeholders
+                )
+            )
+        except ValueError as e:
+            if "not defined in margo.yaml" in str(e):
+                console.info("Skipping quadlet: not defined in margo.yaml")
+            else:
+                raise
     elif package_type == PackageType.MARGO:
         targets.append(_build_margo(meta, project_dir, build_dir, version_override, placeholders))
     elif package_type == PackageType.COMPOSE:
