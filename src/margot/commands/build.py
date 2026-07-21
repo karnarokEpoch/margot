@@ -1,17 +1,64 @@
 """Build command: compile Margo application components locally."""
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 from typer import Option
 
 from margot import console
-from margot.domain.models import PackageType
+from margot.domain.models import BuildTarget, PackageType
 from margot.services import build as build_service
+
+
+def _resolve_types(types: list[str] | None) -> tuple[list[str], bool]:
+    """Validate and expand --type values. Returns (resolved_types, expanded_from_all)."""
+    if not types:
+        return ["margo", "compose", "quadlet"], True
+
+    valid_types = ("margo", "compose", "quadlet", "all")
+    for t in types:
+        if t not in valid_types:
+            console.fatal(f"invalid --type '{t}'. Must be one of: margo, compose, quadlet, all")
+
+    if "all" in types:
+        return ["margo", "compose", "quadlet"], True
+
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    resolved: list[str] = []
+    for t in types:
+        if t not in seen:
+            resolved.append(t)
+            seen.add(t)
+    return resolved, False
+
+
+def _invoke_build(
+    t: str,
+    expanded_from_all: bool,
+    build_dir: str,
+    version: str | None,
+    variant: str | None,
+) -> list[BuildTarget]:
+    """Call build service for one type. Returns targets or [] if component is missing and expanded_from_all."""
+    package_type = PackageType(t)
+    try:
+        return build_service.build(
+            package_type,
+            project_dir=".",
+            build_dir=build_dir,
+            version_override=version,
+            variant=variant,
+        )
+    except ValueError as e:
+        if expanded_from_all and "not defined in margo.yaml" in str(e):
+            console.info(f"Skipping {t}: not defined in margo.yaml")
+            return []
+        raise
 
 
 def build_cmd(
     types: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         Option("--type", "-t", help="Package type(s) to build (margo|compose|quadlet|all). Repeatable."),
     ] = None,
     version: str | None = Option(None, "--version", "-v", help="Override version for all components."),
@@ -19,51 +66,13 @@ def build_cmd(
     variant: str | None = Option(None, "--variant", help="Build a specific variant (compose/quadlet only)."),
 ) -> None:
     """Build Margo application package types locally."""
-    # Default to ["all"] when no -t flags supplied
-    if not types:
-        types = ["all"]
+    resolved, expanded_from_all = _resolve_types(types)
 
-    # Validate each type value
-    valid_types = ("margo", "compose", "quadlet", "all")
-    for t in types:
-        if t not in valid_types:
-            console.fatal(f"invalid --type '{t}'. Must be one of: margo, compose, quadlet, all")
-
-    # Expand "all" → all three types; otherwise deduplicate preserving order.
-    # Track whether the expansion came from "all" so we can skip missing components.
-    expanded_from_all = "all" in types
-    if expanded_from_all:
-        resolved: list[str] = ["margo", "compose", "quadlet"]
-    else:
-        seen: set[str] = set()
-        resolved = []
-        for t in types:
-            if t not in seen:
-                resolved.append(t)
-                seen.add(t)
-
-    all_targets = []
+    all_targets: list[BuildTarget] = []
     try:
         for t in resolved:
-            package_type = PackageType(t)
-            try:
-                targets = build_service.build(
-                    package_type,
-                    project_dir=".",
-                    build_dir=build_dir,
-                    version_override=version,
-                    variant=variant,
-                )
-            except ValueError as e:
-                # When expanding "all", skip components that aren't defined.
-                # Any other ValueError (bad version, invalid tag, etc.) must propagate.
-                if expanded_from_all and "not defined in margo.yaml" in str(e):
-                    console.info(f"Skipping {t}: not defined in margo.yaml")
-                    continue
-                raise
-            all_targets.extend(targets)
+            all_targets.extend(_invoke_build(t, expanded_from_all, build_dir, version, variant))
 
-        # Output results
         if all_targets:
             for target in all_targets:
                 if target.variant_name:

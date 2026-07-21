@@ -5,7 +5,7 @@ import tarfile
 from typing import Any
 from unittest.mock import MagicMock
 
-from pytest import fixture, raises
+from pytest import fixture
 
 from margot.infra.filesystem import copy_tree, make_tarball, substitute_placeholders
 
