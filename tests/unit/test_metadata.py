@@ -79,6 +79,7 @@ class TestMargoYaml:
             api_version="v1",
             name="test-app",
             description="Test application",
+            app_version=None,
             annotations={},
             margo=None,
             compose=None,
@@ -96,6 +97,7 @@ class TestMargoYaml:
             api_version="v1",
             name="test-app",
             description="Test application",
+            app_version=None,
             annotations={},
             margo=None,
             compose=None,
@@ -457,3 +459,32 @@ compose:
 
         assert result.compose is not None
         assert result.compose.variants[0].version == "1.0.0_addon-mosquitto"
+
+    def test_load_margo_yaml_with_app_version(self, tmp_path: Path) -> None:
+        """Should parse appVersion field into app_version when present."""
+        yaml_content = """
+apiVersion: v1
+name: test-app
+description: Test application
+appVersion: "1.2.3"
+"""
+        yaml_file = tmp_path / "margo.yaml"
+        yaml_file.write_text(yaml_content)
+
+        meta = load_margo_yaml(str(yaml_file))
+
+        assert meta.app_version == "1.2.3"
+
+    def test_load_margo_yaml_app_version_absent_defaults_to_none(self, tmp_path: Path) -> None:
+        """Should set app_version to None when appVersion is absent from margo.yaml."""
+        yaml_content = """
+apiVersion: v1
+name: test-app
+description: Test application
+"""
+        yaml_file = tmp_path / "margo.yaml"
+        yaml_file.write_text(yaml_content)
+
+        meta = load_margo_yaml(str(yaml_file))
+
+        assert meta.app_version is None

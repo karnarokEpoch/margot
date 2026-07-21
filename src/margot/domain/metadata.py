@@ -31,6 +31,7 @@ class MargoYaml:
     api_version: str  # apiVersion field
     name: str
     description: str
+    app_version: str | None  # appVersion field (optional, not validated)
     annotations: dict[str, str]  # optional, default empty dict
     margo: ComponentConfig | None
     compose: ComponentConfig | None
@@ -76,6 +77,9 @@ def load_margo_yaml(path: str) -> MargoYaml:
     name = raw["name"]
     description = raw["description"]
 
+    # Extract optional appVersion (not validated)
+    app_version: str | None = raw.get("appVersion")
+
     # Extract optional annotations (default empty dict)
     annotations: dict[str, str] = raw.get("annotations", {}) or {}
 
@@ -88,6 +92,7 @@ def load_margo_yaml(path: str) -> MargoYaml:
         api_version=api_version,
         name=name,
         description=description,
+        app_version=app_version,
         annotations=annotations,
         margo=margo,
         compose=compose,
