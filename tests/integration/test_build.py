@@ -502,3 +502,30 @@ margo:
 
         assert len(targets) == 1
         assert targets[0].package_type == PackageType.MARGO
+
+
+class TestBuildIdempotent:
+    """Tests for idempotent rebuild behaviour."""
+
+    def test_build_margo_twice_is_idempotent(self, fake_project: Path) -> None:
+        """Second build(MARGO) should succeed and output dir contain expected files."""
+        build_dir = fake_project / ".dist"
+
+        targets_1 = build.build(
+            PackageType.MARGO,
+            project_dir=str(fake_project),
+            build_dir=str(build_dir),
+        )
+        assert len(targets_1) == 1
+
+        # Second call: must not raise and must still produce the output dir
+        targets_2 = build.build(
+            PackageType.MARGO,
+            project_dir=str(fake_project),
+            build_dir=str(build_dir),
+        )
+        assert len(targets_2) == 1
+
+        output_dir = Path(targets_2[0].output_dir)
+        assert output_dir.exists()
+        assert (output_dir / "app.yaml").exists()
