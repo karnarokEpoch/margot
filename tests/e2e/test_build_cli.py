@@ -62,6 +62,18 @@ quadlet:
     return tmp_path
 
 
+class TestRootHelp:
+    """E2E tests for root-level -h flag."""
+
+    def test_root_help_short_flag(self) -> None:
+        """Should display root help with -h and contain 'margot'."""
+        result = runner.invoke(app, ["-h"])
+        plain = _strip_ansi(result.stdout)
+
+        assert result.exit_code == 0
+        assert "margot" in plain
+
+
 class TestBuildCLI:
     """E2E tests for margot build command."""
 
@@ -74,6 +86,14 @@ class TestBuildCLI:
         assert "Build Margo" in plain
         assert "--type" in plain
         assert "--version" in plain
+
+    def test_build_help_short_flag(self) -> None:
+        """Should display build help with -h shortcut."""
+        result = runner.invoke(app, ["build", "-h"])
+        plain = _strip_ansi(result.stdout)
+
+        assert result.exit_code == 0
+        assert "Build Margo" in plain
 
     def test_build_type_all_exit_0(self, cli_project: Path) -> None:
         """Should build all components and exit 0."""
@@ -211,3 +231,101 @@ class TestBuildCLI:
         # Both variant names should appear in the output
         assert "default" in plain
         assert "simple" in plain
+
+
+@fixture
+def cli_project_partial(tmp_path: Path, monkeypatch: Any) -> Path:
+    """Create a test project with margo.yaml that has margo + quadlet but no compose."""
+    (tmp_path / "margo").mkdir()
+    (tmp_path / "quadlet" / "default").mkdir(parents=True)
+
+    margo_yaml = tmp_path / "margo.yaml"
+    margo_yaml.write_text("""apiVersion: v1
+name: testapp
+description: Test application
+margo:
+  directory: margo
+  version: 1.0.0
+quadlet:
+  directory: quadlet
+  variants:
+    - name: default
+      version: 1.0.0
+""")
+
+    (tmp_path / "margo" / "app.yaml").write_text("name: margo-app\n")
+    (tmp_path / "quadlet" / "default" / "app.container").write_text("[Unit]\nDescription=Test\n")
+
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+class TestBuildAllSkipsMissingE2E:
+    """E2E tests for --type all skipping undefined optional components."""
+
+    def test_build_type_all_skips_missing_compose(self, cli_project_partial: Path) -> None:
+        """Should exit 0 and build margo + quadlet even when compose is not defined."""
+        result = runner.invoke(
+            app,
+            ["build", "--type", "all", "--build-dir", str(cli_project_partial / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 0
+        assert "Built" in plain
+
+
+class TestBuildMultiType:
+    """E2E tests for multiple -t flags."""
+
+    def test_build_multi_type_margo_and_quadlet(self, cli_project: Path) -> None:
+        """Should build margo + quadlet when -t margo -t quadlet given; no compose tarballs."""
+        result = runner.invoke(
+            app,
+            ["build", "-t", "margo", "-t", "quadlet", "--build-dir", str(cli_project / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 0
+        built_lines = [line for line in plain.splitlines() if "Built" in line]
+        assert len(built_lines) == 2, f"Expected 2 'Built' lines, got {len(built_lines)}: {built_lines}"
+        # No compose tarballs should be produced
+        dist = cli_project / ".dist"
+        tarballs = list(dist.rglob("*.tgz"))
+        assert not any("1.0.0_simple" in str(t) for t in tarballs), "No compose-only tarball should exist"
+
+    def test_build_single_type_still_works(self, cli_project: Path) -> None:
+        """Should build exactly 1 target with a single -t margo flag."""
+        result = runner.invoke(
+            app,
+            ["build", "-t", "margo", "--build-dir", str(cli_project / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 0
+        built_lines = [line for line in plain.splitlines() if "Built" in line]
+        assert len(built_lines) == 1, f"Expected 1 'Built' line, got {len(built_lines)}"
+
+    def test_build_multi_type_with_all_expands(self, cli_project: Path) -> None:
+        """Should produce 4 Built lines when -t all is given (same as --type all)."""
+        result = runner.invoke(
+            app,
+            ["build", "-t", "all", "--build-dir", str(cli_project / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 0
+        built_lines = [line for line in plain.splitlines() if "Built" in line]
+        assert len(built_lines) == 4, f"Expected 4 'Built' lines, got {len(built_lines)}"
+
+    def test_build_multi_type_deduplicates(self, cli_project: Path) -> None:
+        """Should build margo only once even when -t margo -t margo given."""
+        result = runner.invoke(
+            app,
+            ["build", "-t", "margo", "-t", "margo", "--build-dir", str(cli_project / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 0
+        built_lines = [line for line in plain.splitlines() if "Built" in line]
+        assert len(built_lines) == 1, f"Expected 1 'Built' line after dedup, got {len(built_lines)}"

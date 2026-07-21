@@ -10,14 +10,13 @@ from margot import console
 def copy_tree(src: str, dst: str, *, ignore_file: str = ".rsyncignore") -> None:
     """Copy directory tree from src to dst using shutil.copytree.
 
+    If dst already exists it is removed first, so the operation is idempotent.
+
     Args:
         src: Source directory path.
-        dst: Destination directory path. Must not exist (FileExistsError if it does).
+        dst: Destination directory path. Removed and recreated if it already exists.
         ignore_file: Name of ignore file in src (e.g. ".rsyncignore").
                      If it exists, patterns are read and exclusions applied.
-
-    Raises:
-        FileExistsError: If dst already exists.
     """
     src_path = Path(src)
     dst_path = Path(dst)
@@ -40,6 +39,11 @@ def copy_tree(src: str, dst: str, *, ignore_file: str = ".rsyncignore") -> None:
 
     # Create parent directories of dst if needed
     dst_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Remove existing destination if it already exists (idempotent rebuild)
+    if dst_path.exists():
+        shutil.rmtree(dst_path)
+        console.debug(f"Removed existing output dir: {dst}")
 
     # Prepare ignore callable
     ignore_func = shutil.ignore_patterns(*ignore_patterns) if ignore_patterns else None

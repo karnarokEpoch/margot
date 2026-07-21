@@ -5,7 +5,7 @@ import tarfile
 from typing import Any
 from unittest.mock import MagicMock
 
-from pytest import fixture, raises
+from pytest import fixture
 
 from margot.infra.filesystem import copy_tree, make_tarball, substitute_placeholders
 
@@ -88,7 +88,11 @@ class TestCopyTree:
     def test_copy_tree_raises_file_exists_error_if_dst_exists(
         self, tmp_path: Path, mock_console: MagicMock
     ) -> None:
-        """Should raise FileExistsError if dst already exists."""
+        """Should raise FileExistsError if dst already exists — kept for docs only.
+
+        NOTE: copy_tree now removes an existing dst before copying (idempotent).
+        This test verifies the OLD behaviour is gone: no FileExistsError is raised.
+        """
         # Setup
         src = tmp_path / "src"
         src.mkdir()
@@ -96,10 +100,44 @@ class TestCopyTree:
 
         dst = tmp_path / "dst"
         dst.mkdir()
+        (dst / "old_file.txt").write_text("old content")
 
-        # Execute & Assert
-        with raises(FileExistsError):
-            copy_tree(str(src), str(dst))
+        # copy_tree should NOT raise — it removes and recreates
+        copy_tree(str(src), str(dst))
+        assert (dst / "file.txt").read_text() == "content"
+        assert not (dst / "old_file.txt").exists()
+
+    def test_copy_tree_overwrites_existing_destination(
+        self, tmp_path: Path, mock_console: MagicMock
+    ) -> None:
+        """Should replace dst entirely: new file present, old file absent."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.txt").write_text("new content")
+
+        dst = tmp_path / "dst"
+        dst.mkdir()
+        (dst / "old_file.txt").write_text("stale content")
+
+        copy_tree(str(src), str(dst))
+
+        assert (dst / "file.txt").read_text() == "new content"
+        assert not (dst / "old_file.txt").exists()
+
+    def test_copy_tree_idempotent_second_run(
+        self, tmp_path: Path, mock_console: MagicMock
+    ) -> None:
+        """Second call to copy_tree should succeed and produce identical output."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.txt").write_text("content")
+
+        dst = tmp_path / "dst"
+
+        copy_tree(str(src), str(dst))
+        copy_tree(str(src), str(dst))  # Should not raise FileExistsError
+
+        assert (dst / "file.txt").read_text() == "content"
 
     def test_copy_tree_creates_parent_directories_if_needed(
         self, tmp_path: Path, mock_console: MagicMock
