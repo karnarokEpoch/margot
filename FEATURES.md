@@ -83,6 +83,7 @@ Replaces the old `publish_metadata.json`. Read by `margot build` and `margot pus
 ```yaml
 apiVersion: v1                     # margot config schema version (not Margo spec version)
 name: myapp                        # application name (used in tarball filenames, OCI annotations)
+appVersion: "1.0.0"                # application version — used for <app_tag> placeholder substitution (optional)
 description: "Human-readable description of the application"
 annotations:                       # arbitrary key/value pairs, optional
   opentelemetry.io/instrumented: "true"
@@ -122,6 +123,7 @@ quadlet:
 
 - `apiVersion` — required. Currently `v1`.
 - `name` — required. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation.
+- `appVersion` — optional. Human-facing application version string. Not validated as SemVer. Used as the value for `<app_tag>` placeholder substitution. If absent, `<app_tag>` resolves to an empty string.
 - `description` — required. Used in OCI description annotation.
 - `margo.directory` — required. Default: `margo`.
 - `margo.version`, `compose.version`, `quadlet.version` — required per component if that component is built. Used as the tag when no variants are declared.
@@ -199,8 +201,11 @@ during the tree copy step. One file per source dir; applies to that dir only.
   - `resources/release-notes.md` → `application/vnd.margo.app.releaseNotes.v1+markdown`
   - `resources/description.md` → `application/vnd.margo.app.descriptionFile.v1+markdown`
 - Build step: copy source → temp dir, then substitute placeholders in `app.yaml`:
-  - `<app_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`, `<margo_tag>`, `<margo_version>`
-  - Values sourced from the corresponding component versions in `margo.yaml`
+  - `<app_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`, `<margo_tag>`
+  - `<app_tag>` → `appVersion` top-level field (empty string if absent)
+  - `<margo_tag>` → `margo.version`
+  - `<compose_tag>` → `compose.version` (or first variant's version if variants declared)
+  - `<quadlet_tag>` → `quadlet.version` (or first variant's version if variants declared)
 
 ### `compose`
 
@@ -248,8 +253,11 @@ margot build [--type margo|compose|quadlet|all] [--version VERSION]
 1. Read `margo.yaml` from CWD for versions, directories, and repository
 2. Copy source `margo.directory` → `<build_dir>/<margo.version>/margo/` (pure Python, no rsync)
 3. Substitute placeholders in `app.yaml` (pure Python string replace, no sed):
-   - `<app_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`, `<margo_tag>`, `<margo_version>`
-   - Values sourced from the corresponding component versions in `margo.yaml`
+   - `<app_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`, `<margo_tag>`
+   - `<app_tag>` → `appVersion` top-level field (empty string if absent)
+   - `<margo_tag>` → `margo.version`
+   - `<compose_tag>` → `compose.version` (or first variant's version if variants declared)
+   - `<quadlet_tag>` → `quadlet.version` (or first variant's version if variants declared)
 
 **compose / quadlet:**
 
