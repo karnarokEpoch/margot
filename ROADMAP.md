@@ -7,17 +7,90 @@ See [FEATURES.md](FEATURES.md) for the full spec and [TESTING.md](TESTING.md) fo
 test plan. Where this roadmap diverges from FEATURES.md, this roadmap wins for
 sequencing; FEATURES.md is updated as items land (see backlog).
 
-## Backlog / Stack (Sprint 4+)
+---
+
+## Sprint 4 — `margot login` / `logout` + `margot push`
+
+### Goal / Definition of Done
+
+```
+margot login --ecr --region us-east-1
+margot push --type all
+margot push --type margo
+margot push --type compose --variant simple
+margot logout
+```
+
+Authenticate with an OCI registry, then push built artifacts from `build_dir` to the
+registry using oras-py. **Requires a prior `margot build` run** — push reads artifacts
+from `build_dir`, it does not re-build. SemVer-gated: push rejects invalid tags before
+any network call. Green unit + integration + E2E tests.
+
+### Design decisions (locked)
+
+- **Auth first, push second.** `login` / `logout` must work before push can be tested
+  end-to-end. Both ship in this sprint.
+- **`margot login` signature:**
+  `margot login [--registry REG] [--username USER] [--password-stdin] [--save-expiry]`
+  Delegates entirely to `OrasClient.login(username, password, hostname)`. oras-py handles
+  the full OCI auth challenge-response including ECR — no registry-specific code needed
+  in margot. For ECR: caller passes `--username AWS` and the token from
+  `aws ecr get-login-password` as the password; oras-py's `EcrAuth` backend takes it
+  from there. No boto3 dependency in margot.
+- **`margot logout` signature:**
+  `margot logout [--registry REG]`
+  Calls `OrasClient.logout(...)` and removes the expiry entry from credentials file.
+- **Credential expiry check before every registry operation.** Implemented in
+  `infra/credentials.py` as `check_credentials(registry)`. If `expires_at` is tracked and
+  `now >= expires_at - 5min`, warn (or hard-fail if already expired) with a
+  `margot login` hint. This runs before every push/pull/fetch call. See FEATURES.md for
+  the full design.
+- **`margot push` signature:**
+  `margot push [--type margo|compose|quadlet|all] [--registry REG] [--repository REPO] [--build-dir DIR] [--variant VARIANT]`
+  Mirrors `build` flags. No `--version` flag: version is read from the built artifact
+  directory structure in `build_dir` (derived from `margo.yaml`).
+- **SemVer gate on push.** Validate the tag before any network call. Same
+  `validate_oci_tag` + `validate_semver` from `domain/tags.py`. Fail fast.
+- **oras-py only.** No subprocess calls to ORAS CLI binary. All push via
+  `OrasClient.push(...)`. See FEATURES.md for exact `files`, `manifest_config`, and
+  `manifest_annotations` per type.
+- **`artifactType` in manifest config, never in the tag.** margo → `application/vnd.margo.app.v1+json`,
+  compose → `application/vnd.org.margo.component.compose+json`,
+  quadlet → `application/vnd.org.margo.component.quadlet+json`.
+- **Media types per layer.** See FEATURES.md push section for the exact per-file media
+  type table (margo: `app.yaml`, `icon.png`, `license.txt`, etc.; compose/quadlet: `.tgz`).
+- **OCI annotations.** Push includes `org.opencontainers.image.title`, `.description`,
+  `org.margo.component.type`, `org.margo.component.version` as defined in FEATURES.md.
+- **Multi-type push mirrors build.** `-t margo -t quadlet` pushes both; `--type all`
+  pushes all defined components; missing components are skipped (same pattern as build).
+- **`infra/credentials.py`** owns credentials file R/W. **`infra/ecr.py`** owns boto3
+  token fetch. **`services/auth.py`** orchestrates login/logout flow. **`services/push.py`**
+  orchestrates the push flow (credential check → tag validation → oras push).
+
+### Tasks (thin vertical slice)
+
+| # | Task | Layer | Notes |
+|---|------|-------|-------|
+| 1 | Credentials file R/W + expiry check | `infra/credentials.py` | `~/.config/margot/credentials.toml`. `check_credentials(registry)` warns/fails near/past expiry. |
+| 2 | oras-py login/logout wrappers | `infra/oci.py` | Extend existing OCI infra with `login(...)` and `logout(...)`. |
+| 3 | Auth service (login/logout orchestration) | `services/auth.py` | Call oras-py login/logout + optional expiry persistence. No registry-specific logic. |
+| 4 | `login` + `logout` Typer commands | `commands/login.py`, `commands/logout.py` | Parse flags, call auth service, report result. Register in `main.py`. |
+| 5 | oras-py push wrappers | `infra/oci.py` | `push_margo(...)`, `push_compose(...)`, `push_quadlet(...)` with correct media types and annotations. |
+| 6 | Push service | `services/push.py` | credential check → tag validation → locate built artifact in `build_dir` → oras push. Mirrors build's type/variant loop. |
+| 7 | `push` Typer command | `commands/push.py` | Flags mirror build. Calls push service. Register in `main.py`. |
+| 8 | Tests: unit (credentials expiry logic), integration (mock OrasClient, assert push params + media types), E2E via CliRunner | `tests/` | Mock `OrasClient` at `infra/oci.py` boundary — never hit a live registry. |
+| 9 | Update FEATURES.md `push`, `login`, `logout` sections as behaviour lands | `FEATURES.md` | |
+
+### Out of scope (explicit → Sprint 5+)
+
+`verify` (LinkML), display UX improvements, authenticated `fetch`/`pull` (anonymous
+still works), manifest recognition & validation.
+
+---
+
+## Backlog / Stack (Sprint 5+)
 
 Unordered within groups; sequencing decided at sprint planning.
-
-### Auth (candidate Sprint 4)
-
-- `margot login` / `logout` — `services/auth.py`
-- Credentials file R/W — `infra/credentials.py`
-- ECR token fetch (boto3) — `infra/ecr.py`
-- Credential expiry check before every registry op
-- Authenticated `fetch` against private ECR
 
 ### Display UX
 
@@ -37,15 +110,13 @@ Unordered within groups; sequencing decided at sprint planning.
 
 ### Remaining commands
 
-- `push` (SemVer gate, media types, annotations)
 - `verify` (LinkML: local + `--remote`)
 
 ### Cross-cutting
 
-- `domain/tags.py` OCI tag + SemVer validation. → **scheduled Sprint 3**
-- `domain/metadata.py` `margo.yaml` project descriptor parsing. → **scheduled Sprint 3**
-- `config.py` full dynaconf layering (flag > env > `margot.yaml` > user config). → **scheduled Sprint 3**
-- ~~**Update FEATURES.md** `fetch` section: positional URI + raw JSON~~ ✓ done
+- Authenticated `fetch` / `pull` against private ECR (after auth lands in Sprint 4)
+
+---
 
 ## Completed Sprints
 

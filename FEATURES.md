@@ -459,13 +459,12 @@ margot/
         │   ├── pull.py
         │   ├── fetch.py
         │   ├── verify.py            # linkml validation + optional remote check
-        │   └── auth.py              # login/logout + ECR token refresh
+        │   └── auth.py              # login/logout orchestration
         │
         ├── infra/                   # I/O adapters — no business logic
         │   ├── oci.py               # oras-py wrapper (push/pull/fetch/login/logout)
         │   ├── credentials.py       # ~/.config/margot/credentials.toml R/W
-        │   ├── filesystem.py        # rsync, tar, sed helpers
-        │   └── ecr.py               # boto3 ECR token fetch
+        │   └── filesystem.py        # tree copy, placeholder substitution, tar helpers
         │
         ├── commands/                # CLI layer — parse args, call service, render output
         │   ├── build.py
@@ -522,7 +521,6 @@ the tag string entirely.
 - Missing `margo.yaml` → clear error: `"margo.yaml not found in current directory. Run margot init or create it manually."` (exit 1)
 - Invalid OCI tag → reject immediately before any build/push step
 - Credentials expired or near-expiry → warn or hard-fail with `margot login` hint
-- ECR auto-refresh failure → clear error, do not proceed
 - oras-py push/pull failure → surface exception message, exit 1
 - Validation errors → rich table, exit 1
 
@@ -559,11 +557,15 @@ Authenticate with an OCI registry and persist credentials.
 
 ```
 margot login [--registry REG] [--username USER] [--password-stdin]
-               [--ecr] [--region REGION]
                [--save-expiry]
 ```
 
-**Standard login (any registry):**
+**How it works:**
+
+oras-py handles the full OCI auth challenge-response flow. For any registry (including
+AWS ECR), passing username + password is sufficient — oras-py negotiates the correct
+token exchange automatically in response to `Www-Authenticate` headers. No registry-
+specific code is needed in margot.
 
 ```python
 client.login(username=user, password=password, hostname=registry)
@@ -571,15 +573,9 @@ client.login(username=user, password=password, hostname=registry)
 
 oras-py stores credentials via the configured credential store (same as Docker/Podman).
 
-**ECR shortcut (`--ecr`):**
-ECR tokens expire every **12 hours**. The `--ecr` flag automates token retrieval:
-
-```python
-import boto3
-token = boto3.client("ecr-public", region_name=region).get_authorization_token()
-password = base64.b64decode(token["authorizationData"]["authorizationToken"]).split(b":")[1]
-client.login(username="AWS", password=password.decode(), hostname=registry)
-```
+**ECR:** pass `--username AWS` and the token from `aws ecr get-login-password` (or
+`aws ecr-public get-login-password`) as the password. oras-py's `EcrAuth` backend
+handles ECR's challenge-response automatically. No boto3 dependency in margot.
 
 **Credential expiry tracking (`--save-expiry`):**
 Persist the expiry timestamp to `~/.config/margot/credentials.toml`:
@@ -590,7 +586,7 @@ expires_at = "2026-06-26T23:00:00Z"
 ```
 
 Every command that calls the registry checks this file first. If `now >= expires_at - 5min`,
-print a warning and optionally auto-refresh if `--ecr` credentials are configured.
+print a warning and optionally prompt to re-login.
 
 ---
 
@@ -612,8 +608,8 @@ Also removes the expiry entry from `~/.config/margot/credentials.toml`.
 
 ### Credential Expiry — Design
 
-**Problem:** ORAS (and oras-py) silently fail or give opaque errors when credentials
-expire (ECR: 12h TTL). The caller has no signal until a push/pull fails mid-operation.
+**Problem:** ECR tokens expire every 12 hours. oras-py gives no proactive signal — the
+caller only finds out when a push/pull fails mid-operation.
 
 **Solution — proactive expiry check before any registry operation:**
 
@@ -629,13 +625,7 @@ def check_credentials(registry: str) -> None:
         console.print(f"[yellow]Warning: credentials for {registry} expire in {remaining}[/yellow]")
 ```
 
-**Auto-refresh (opt-in):** if `auto_refresh = true` in config and registry is ECR,
-re-run the ECR token flow automatically before the operation. Requires boto3 available
-and AWS credentials configured.
-
----
-
-## Out of Scope (v1)
+This runs before every push call. `check_credentials` is in `infra/credentials.py`.
 
 - Helm packaging (handled by helm CLI directly)
 - Container image build / push
