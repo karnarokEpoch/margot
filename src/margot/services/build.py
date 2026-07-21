@@ -141,9 +141,8 @@ def _build_placeholder_map(meta: MargoYaml, version_override: str | None) -> dic
     )
 
     return {
-        "<app_tag>": margo_version,
+        "<app_tag>": meta.app_version or "",
         "<margo_tag>": margo_version,
-        "<margo_version>": margo_version,
         "<compose_tag>": compose_version,
         "<quadlet_tag>": quadlet_version,
         "<helm_chart_tag>": "",
