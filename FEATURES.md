@@ -472,8 +472,7 @@ margot/
         │   ├── pull.py
         │   ├── fetch.py
         │   ├── verify.py
-        │   ├── login.py
-        │   └── logout.py
+        │   └── auth.py              # margot auth {login,logout,status}
         │
         └── validation/              # linkml-specific, called by services/verify.py
             ├── linkml_runner.py
