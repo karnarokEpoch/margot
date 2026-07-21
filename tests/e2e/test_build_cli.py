@@ -62,6 +62,18 @@ quadlet:
     return tmp_path
 
 
+class TestRootHelp:
+    """E2E tests for root-level -h flag."""
+
+    def test_root_help_short_flag(self) -> None:
+        """Should display root help with -h and contain 'margot'."""
+        result = runner.invoke(app, ["-h"])
+        plain = _strip_ansi(result.stdout)
+
+        assert result.exit_code == 0
+        assert "margot" in plain
+
+
 class TestBuildCLI:
     """E2E tests for margot build command."""
 
@@ -74,6 +86,14 @@ class TestBuildCLI:
         assert "Build Margo" in plain
         assert "--type" in plain
         assert "--version" in plain
+
+    def test_build_help_short_flag(self) -> None:
+        """Should display build help with -h shortcut."""
+        result = runner.invoke(app, ["build", "-h"])
+        plain = _strip_ansi(result.stdout)
+
+        assert result.exit_code == 0
+        assert "Build Margo" in plain
 
     def test_build_type_all_exit_0(self, cli_project: Path) -> None:
         """Should build all components and exit 0."""

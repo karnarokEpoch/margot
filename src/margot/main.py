@@ -7,7 +7,12 @@ from margot.commands.fetch import fetch
 from margot.commands.global_options import global_options
 from margot.commands.pull import pull
 
-app = Typer(name="margot", help="Margo application package developer CLI.", no_args_is_help=True)
+app = Typer(
+    name="margot",
+    help="Margo application package developer CLI.",
+    no_args_is_help=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 # Register commands
 app.command()(fetch)
