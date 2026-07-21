@@ -1,5 +1,6 @@
 """Domain models: enums and pure mapping functions."""
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 _ARTIFACT_TYPE_MAP: dict[str, "PackageType"] = {}
@@ -12,6 +13,7 @@ class PackageType(StrEnum):
     COMPOSE = "compose"
     QUADLET = "quadlet"
     UNKNOWN = "unknown"
+    ALL = "all"
 
 
 _ARTIFACT_TYPE_MAP = {
@@ -33,3 +35,14 @@ def artifact_type_to_package_type(artifact_type: str | None) -> PackageType:
     if artifact_type is None:
         return PackageType.UNKNOWN
     return _ARTIFACT_TYPE_MAP.get(artifact_type, PackageType.UNKNOWN)
+
+
+@dataclass(frozen=True)
+class BuildTarget:
+    """Identifies a single build unit: type + optional variant name."""
+
+    package_type: PackageType  # MARGO, COMPOSE, or QUADLET (not ALL, not UNKNOWN)
+    variant_name: str | None  # None = no variant / flat layout
+    version: str  # OCI tag as stored (may contain '_')
+    source_dir: str  # resolved source directory (absolute or relative)
+    output_dir: str  # resolved output directory

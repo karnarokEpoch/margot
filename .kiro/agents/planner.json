@@ -52,8 +52,9 @@
       "autoAllowReadonly": true,
       "denyByDefault": true,
       "allowedCommands": [
+        "find.*",
         "grep.*",
-        "find.*"
+        "make.*"
       ]
     },
     "subagent": {
