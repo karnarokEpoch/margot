@@ -273,3 +273,59 @@ class TestBuildAllSkipsMissingE2E:
 
         assert result.exit_code == 0
         assert "Built" in plain
+
+
+class TestBuildMultiType:
+    """E2E tests for multiple -t flags."""
+
+    def test_build_multi_type_margo_and_quadlet(self, cli_project: Path) -> None:
+        """Should build margo + quadlet when -t margo -t quadlet given; no compose tarballs."""
+        result = runner.invoke(
+            app,
+            ["build", "-t", "margo", "-t", "quadlet", "--build-dir", str(cli_project / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 0
+        built_lines = [line for line in plain.splitlines() if "Built" in line]
+        assert len(built_lines) == 2, f"Expected 2 'Built' lines, got {len(built_lines)}: {built_lines}"
+        # No compose tarballs should be produced
+        dist = cli_project / ".dist"
+        tarballs = list(dist.rglob("*.tgz"))
+        assert not any("1.0.0_simple" in str(t) for t in tarballs), "No compose-only tarball should exist"
+
+    def test_build_single_type_still_works(self, cli_project: Path) -> None:
+        """Should build exactly 1 target with a single -t margo flag."""
+        result = runner.invoke(
+            app,
+            ["build", "-t", "margo", "--build-dir", str(cli_project / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 0
+        built_lines = [line for line in plain.splitlines() if "Built" in line]
+        assert len(built_lines) == 1, f"Expected 1 'Built' line, got {len(built_lines)}"
+
+    def test_build_multi_type_with_all_expands(self, cli_project: Path) -> None:
+        """Should produce 4 Built lines when -t all is given (same as --type all)."""
+        result = runner.invoke(
+            app,
+            ["build", "-t", "all", "--build-dir", str(cli_project / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 0
+        built_lines = [line for line in plain.splitlines() if "Built" in line]
+        assert len(built_lines) == 4, f"Expected 4 'Built' lines, got {len(built_lines)}"
+
+    def test_build_multi_type_deduplicates(self, cli_project: Path) -> None:
+        """Should build margo only once even when -t margo -t margo given."""
+        result = runner.invoke(
+            app,
+            ["build", "-t", "margo", "-t", "margo", "--build-dir", str(cli_project / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 0
+        built_lines = [line for line in plain.splitlines() if "Built" in line]
+        assert len(built_lines) == 1, f"Expected 1 'Built' line after dedup, got {len(built_lines)}"
