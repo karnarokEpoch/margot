@@ -1,6 +1,9 @@
 """Integration tests for services/auth.py."""
 
+import base64
+from datetime import UTC, datetime
 from io import StringIO
+import json
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -73,6 +76,49 @@ class TestLoginService:
 
         with raises(Exception, match="401 Unauthorized"):
             auth.login(registry="public.ecr.aws", username="AWS", password="badtoken")
+
+    def test_login_auto_detects_expiry_from_ecr_token(self, mocker: Any) -> None:
+        """Should auto-detect expiry from ECR token when expiry_hours is None."""
+        expiration_ts = 1785291060
+        token = base64.b64encode(json.dumps({"expiration": expiration_ts}).encode()).decode()
+
+        mock_client = MagicMock()
+        mocker.patch("margot.services.auth.oci.OrasClient", return_value=mock_client)
+        mock_save = mocker.patch("margot.services.auth.creds_infra.save_expiry")
+
+        auth.login(registry="public.ecr.aws", username="AWS", password=token)
+
+        mock_save.assert_called_once()
+        saved_registry, saved_expiry = mock_save.call_args[0]
+        assert saved_registry == "public.ecr.aws"
+        assert saved_expiry == datetime.fromtimestamp(expiration_ts, tz=UTC)
+
+    def test_login_explicit_expiry_hours_wins_over_auto_detected(self, mocker: Any) -> None:
+        """--expiry-hours should take precedence over auto-detected expiry from token."""
+        expiration_ts = 1785291060
+        token = base64.b64encode(json.dumps({"expiration": expiration_ts}).encode()).decode()
+
+        mock_client = MagicMock()
+        mocker.patch("margot.services.auth.oci.OrasClient", return_value=mock_client)
+        mock_save = mocker.patch("margot.services.auth.creds_infra.save_expiry")
+
+        auth.login(registry="public.ecr.aws", username="AWS", password=token, expiry_hours=6)
+
+        mock_save.assert_called_once()
+        saved_registry, saved_expiry = mock_save.call_args[0]
+        assert saved_registry == "public.ecr.aws"
+        # Should NOT be the token expiry — should be ~6h from now
+        assert saved_expiry != datetime.fromtimestamp(expiration_ts, tz=UTC)
+
+    def test_login_no_expiry_saved_when_token_not_parseable(self, mocker: Any) -> None:
+        """Should not save expiry when password is not a parseable ECR token."""
+        mock_client = MagicMock()
+        mocker.patch("margot.services.auth.oci.OrasClient", return_value=mock_client)
+        mock_save = mocker.patch("margot.services.auth.creds_infra.save_expiry")
+
+        auth.login(registry="public.ecr.aws", username="AWS", password="plainpassword")
+
+        mock_save.assert_not_called()
 
 
 class TestLogoutService:
