@@ -23,6 +23,7 @@ theme:
 
 nav:
   - Home: index.md
+  - margo.yaml: margo-yaml.md
 
 markdown_extensions:
   - admonition
