@@ -1,5 +1,6 @@
 """E2E tests for auth command via CLI."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 from typer.testing import CliRunner
@@ -33,7 +34,7 @@ class TestAuthCLI:
 
     def test_auth_login_success(self, mocker: Any) -> None:
         """Should call service.login with correct args and exit 0."""
-        mock_login = mocker.patch("margot.commands.auth.auth_service.login")
+        mock_login = mocker.patch("margot.commands.auth.auth_service.login", return_value=None)
 
         result = runner.invoke(
             app,
@@ -129,3 +130,18 @@ class TestAuthCLI:
         assert result.exit_code == 1
         output = result.stdout + (result.stderr or "")
         assert "Login failed" in output
+
+    def test_auth_login_displays_expiry_when_detected(self, mocker: Any) -> None:
+        """Should display time-until-expiry line when service returns an expiry datetime."""
+        expires_at = datetime(2099, 1, 1, 12, 0, 0, tzinfo=UTC)
+        mocker.patch("margot.commands.auth.auth_service.login", return_value=expires_at)
+
+        result = runner.invoke(
+            app,
+            ["auth", "login", "public.ecr.aws", "--username", "AWS", "--password-stdin"],
+            input="mytoken\n",
+        )
+
+        assert result.exit_code == 0
+        assert "Logged in to public.ecr.aws" in result.stdout
+        assert "expires" in result.stdout.lower()

@@ -32,13 +32,14 @@ class TestLoginService:
         mocker.patch("margot.services.auth.oci.OrasClient", return_value=mock_client)
         mock_save = mocker.patch("margot.services.auth.creds_infra.save_expiry")
 
-        auth.login(
+        result = auth.login(
             registry="public.ecr.aws",
             username="AWS",
             password="token123",
             expiry_hours=12,
         )
 
+        assert result is not None
         mock_save.assert_called_once()
         call_args = mock_save.call_args
         assert call_args[0][0] == "public.ecr.aws"
@@ -51,8 +52,9 @@ class TestLoginService:
         mocker.patch("margot.services.auth.oci.OrasClient", return_value=mock_client)
         mock_save = mocker.patch("margot.services.auth.creds_infra.save_expiry")
 
-        auth.login(registry="public.ecr.aws", username="AWS", password="token123")
+        result = auth.login(registry="public.ecr.aws", username="AWS", password="token123")
 
+        assert result is None
         mock_save.assert_not_called()
 
     def test_login_emits_info_message(self, mocker: Any, capture_console: tuple[StringIO, StringIO], reset_console: None) -> None:
@@ -86,8 +88,9 @@ class TestLoginService:
         mocker.patch("margot.services.auth.oci.OrasClient", return_value=mock_client)
         mock_save = mocker.patch("margot.services.auth.creds_infra.save_expiry")
 
-        auth.login(registry="public.ecr.aws", username="AWS", password=token)
+        result = auth.login(registry="public.ecr.aws", username="AWS", password=token)
 
+        assert result == datetime.fromtimestamp(expiration_ts, tz=UTC)
         mock_save.assert_called_once()
         saved_registry, saved_expiry = mock_save.call_args[0]
         assert saved_registry == "public.ecr.aws"
@@ -116,8 +119,9 @@ class TestLoginService:
         mocker.patch("margot.services.auth.oci.OrasClient", return_value=mock_client)
         mock_save = mocker.patch("margot.services.auth.creds_infra.save_expiry")
 
-        auth.login(registry="public.ecr.aws", username="AWS", password="plainpassword")
+        result = auth.login(registry="public.ecr.aws", username="AWS", password="plainpassword")
 
+        assert result is None
         mock_save.assert_not_called()
 
 

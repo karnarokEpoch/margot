@@ -1,5 +1,6 @@
 """Auth commands: manage OCI registry credentials."""
 
+from datetime import UTC, datetime
 import sys
 from typing import Annotated
 
@@ -9,6 +10,17 @@ from margot import console
 from margot.services import auth as auth_service
 
 app = Typer(name="auth", help="Manage OCI registry credentials.", no_args_is_help=True)
+
+
+def _format_expiry(expires_at: datetime) -> str:
+    """Format time remaining until expiry as a human-readable string."""
+    remaining = expires_at - datetime.now(tz=UTC)
+    total_seconds = int(remaining.total_seconds())
+    if total_seconds <= 0:
+        return f"already expired ({expires_at.strftime('%Y-%m-%dT%H:%M:%SZ')})"
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes = remainder // 60
+    return f"{hours}h {minutes:02d}m (expires {expires_at.strftime('%Y-%m-%dT%H:%M:%SZ')})"
 
 
 @app.command()
@@ -36,13 +48,15 @@ def login(
         console.fatal("Empty password received from stdin.")
 
     try:
-        auth_service.login(
+        expires_at = auth_service.login(
             registry=registry,
             username=username,
             password=password,
             expiry_hours=expiry_hours,
         )
         console.success(f"Logged in to {registry}.")
+        if expires_at is not None:
+            console.success(f"Token expires in {_format_expiry(expires_at)}")
     except Exception as e:  # noqa: BLE001
         console.fatal(f"Login failed: {e}")
 

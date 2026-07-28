@@ -14,7 +14,7 @@ def login(
     password: str,
     *,
     expiry_hours: int | None = None,
-) -> None:
+) -> datetime | None:
     """Login to an OCI registry.
 
     Steps:
@@ -43,6 +43,7 @@ def login(
         console.info(f"Expiry saved: {resolved_expiry.strftime('%Y-%m-%dT%H:%M:%SZ')}.")
 
     console.info("Login complete.")
+    return resolved_expiry
 
 
 def logout(registry: str) -> None:
