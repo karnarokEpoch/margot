@@ -20,7 +20,7 @@ margot build --type compose --variant all --version 1.3.0
 
 Builds one or all package types into `build_dir` from local sources, performing
 placeholder substitution. **Local only** — no registry, no network, no push, no auth.
-Output: a populated `<build_dir>/<app_version>/` tree (rsynced margo dir + compose/quadlet
+Output: a populated `<build_dir>/<version>/` tree (copied margo dir + compose/quadlet
 `.tgz` tarballs). Green unit + integration + E2E tests.
 
 ### Scope note
@@ -32,52 +32,61 @@ by design; if it proves too big it can be split (domain + config foundation firs
 
 ### Design decisions (locked)
 
+- **Project descriptor: `margo.yaml` at project root.** Single source of truth for all
+  component versions, directories, repositories, app metadata (name, description,
+  annotations, maintainers). Replaces `publish_metadata.json`. Read by `margot build`
+  and `margot push`. Missing → clear error (exit 1).
+- **`app.yaml` inside the margo source directory.** The Margo app descriptor (previously
+  named `margo.yaml` inside the `margo/` dir) is now `app.yaml`. Contains placeholders
+  (`<compose_tag>`, `<quadlet_tag>`, etc.) that `margot build` substitutes with values
+  from the root `margo.yaml`.
 - **Signature (flag-based, per FEATURES.md):**
   `margot build [--type margo|compose|quadlet|all] [--version VERSION]
   [--registry REG] [--repository REPO] [--build-dir DIR] [--variant VARIANT]`.
   Unlike `fetch`/`pull` (URI-based), `build` is local and config-driven — it reads
-  `publish_metadata.json` + config for defaults, with flag overrides.
-- **SemVer gate (MANDATORY, per AGENTS.md).** Validate the version/tag with the SemVer
-  regex **before any build step**. Reject non-SemVer immediately. Lives in `domain/tags.py`.
+  `margo.yaml` + config for defaults, with flag overrides.
+- **OCI tag validation gate (MANDATORY, per AGENTS.md).** Validate every tag before any
+  build step. Valid OCI tags: `[a-zA-Z0-9_.-]+`. `_` encodes `+` (SemVer build metadata
+  separator) per the Margo OCI distribution spec. Tags are normalized (`_`→`+`) for
+  SemVer semantic validation but stored as-is with `_`. Lives in `domain/tags.py`.
+- **Variant tag format (RESOLVED).** `<version>_<variant>` — e.g. `1.3.0_simple`,
+  `1.3.0_addon-mosquitto`. The `_` encodes `+` (build metadata) per the Margo OCI spec.
+  Variants are declared explicitly in `margo.yaml` under each component's `variants` list
+  with their own `name` and `version` fields. `--variant all` expands the full variants
+  list; `--variant NAME` selects one entry by name. Discovery of variants on disk is not
+  used — the `margo.yaml` declaration is authoritative. All variant names (including
+  `default`) map to `<component.directory>/<name>/` — there is no implicit root mapping.
 - **Config layering** (`config.py`, dynaconf): flag > `MARGOT_` env > `margot.yaml` >
   `~/.config/margot/config.yaml`. Keys: `registry`, `repository`, `build_dir`, `run_dir`.
-  YAML (not TOML) for consistency with the rest of the margo ecosystem.
-- **New dependency:** a YAML parser (PyYAML) is added to `pyproject.toml` for reading
-  `publish_metadata.yaml` and the YAML config sources.
-- **`publish_metadata.yaml`** is required for default versions; missing → clear, actionable
-  error. YAML, consistent with `margo.yaml` / `compose.yaml` (replaces the old
-  `publish_metadata.json`).
+  YAML for consistency with the rest of the margo ecosystem.
+- **New dependency:** PyYAML added to `pyproject.toml` for reading `margo.yaml`.
 - **Local only.** No OCI manifest creation, no `artifactType`/annotations, no push, no auth,
   no network. Those are push concerns (Sprint 4+). `build` only produces the `build_dir` output.
 - **Filesystem in pure Python — no host tooling.** Do **not** shell out to `rsync` / `sed` /
-  `tar`. Reimplement the equivalent behavior with the standard library in `infra/filesystem.py`:
-  - tree copy → `shutil.copytree` with an `ignore` callable + `symlinks`/`copy_function`
-    handling (replaces `rsync -La`)
-  - placeholder substitution → read → `str.replace` → write per text file (replaces `sed -i`)
-  - archive → `tarfile` in `w:gz` mode (replaces `tar -czf`)
-  Removes the host-binary dependency, is cross-platform, and is far easier to unit-test.
-- **Variants:** `--variant NAME` explicit, or `--variant all` to scan source subdirs.
-  compose variant = subdir containing `compose.yaml`; quadlet variant = subdir containing
-  `.container` files.
-- **`.rsyncignore`** (if present) parsed into ignore patterns and applied via the
-  `shutil.copytree` `ignore` callable; symlinks handled by the copy's `symlinks` flag.
-  (Filename kept for continuity with the old invoke tasks even though `rsync` is no longer used.)
-- **Placeholder substitution** via in-Python text replacement (no `sed`): `<app_tag>`,
-  `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`, `<margo_tag>`, `<margo_version>`,
-  plus registry/repository URLs.
-- **Artifact-type suffixes removed.** No `-margo-manifest` / `-compose` / `-quadlet` in tags;
-  type is a push-time `artifactType` concern.
+  `tar`. Use stdlib in `infra/filesystem.py`:
+  - tree copy → `shutil.copytree` with ignore callable (`.rsyncignore` patterns)
+  - placeholder substitution → read → `str.replace` → write per text file
+  - archive → `tarfile` in `w:gz` mode
+- **Tarball contents.** For compose/quadlet, the tarball contains the flat contents of the
+  source dir (or variant subdir) — not the dir itself as root. Output filename:
+  `<name>-<version>.tgz` where `name` is from `margo.yaml` root and `version` is the
+  component (or variant) version.
+- **Placeholder substitution** is applied only to `app.yaml` for the margo type. For
+  compose/quadlet, substitution is applied to all text files in the source tree.
+  Placeholders: `<app_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`,
+  `<margo_tag>`, `<margo_version>`. Values sourced from component versions in `margo.yaml`.
+- **Artifact-type suffixes removed.** No `-margo-manifest` / `-compose` / `-quadlet` in tags.
 
 ### Tasks (thin vertical slice)
 
 | # | Task | Layer | Notes |
 |---|------|-------|-------|
-| 1 | SemVer validation (`validate_tag` / `validate_version`) | `domain/tags.py` | Pure regex. MANDATORY gate. No mocks. |
-| 2 | `publish_metadata.yaml` dataclasses + parser | `domain/metadata.py` | Pure. Unit-tested. |
-| 3 | Extend `PackageType` (margo/compose/quadlet/all) + `BuildTarget` dataclass | `domain/models.py` | Reuse/extend the enum introduced in Sprint 2. Pure. |
-| 4 | Dynaconf `Settings` with full layering | `config.py` | flag > env > `margot.toml` > user config. |
-| 5 | Pure-Python file ops: tree copy with ignore (`.rsyncignore`), text placeholder substitution, gzip tar — `shutil` / `tarfile`, stdlib only | `infra/filesystem.py` | No host binaries. Unit-tested directly against temp dirs. |
-| 6 | Build orchestration per type + variant loop for `all`/`--variant all` | `services/build.py` | read metadata → validate SemVer → rsync → sed → (tar for compose/quadlet). |
+| 1 | OCI tag + SemVer validation (`validate_oci_tag`, `validate_semver`) | `domain/tags.py` | Pure. `_`→`+` normalization before SemVer parse. MANDATORY gate. No mocks. |
+| 2 | `margo.yaml` dataclasses + parser | `domain/metadata.py` | `MargoYaml`, `ComponentConfig`, `VariantConfig` dataclasses. Pure. Unit-tested. |
+| 3 | Extend `PackageType` with `ALL` + `BuildTarget` dataclass | `domain/models.py` | Reuse/extend enum from Sprint 2. Pure. |
+| 4 | Dynaconf `Settings` with full layering | `config.py` | flag > env > `margot.yaml` > user config. |
+| 5 | Pure-Python file ops: tree copy with ignore, placeholder substitution, gzip tar | `infra/filesystem.py` | No host binaries. Unit-tested against temp dirs. |
+| 6 | Build orchestration per type + variant loop | `services/build.py` | read `margo.yaml` → validate tag → copy → substitute → (tar for compose/quadlet). |
 | 7 | `build` Typer command with flags → call service → report outputs | `commands/build.py` | rich output of produced paths. |
 | 8 | Register `build` in the Typer app | `main.py` | |
 | 9 | Tests: domain unit (tags/metadata/models, no mocks), service integration (mock filesystem), E2E via `CliRunner` | `tests/` | Per TESTING.md. |
@@ -90,10 +99,8 @@ by design; if it proves too big it can be split (domain + config foundation firs
 
 ### Open / needs a decision
 
-- **Variant tag format.** FEATURES.md marks this TBD ("`1.3.0`, `1.3.0-simple.1`,
-  `1.3.0+addon-mosquitto` — exact format TBD by project convention"). The tool will validate
-  *any* SemVer tag; the **convention** for encoding a variant into that tag needs a decision
-  before variant builds are meaningful. Flag for sprint planning.
+~~**Variant tag format.**~~ ✓ Resolved: `<version>_<variant>` (e.g. `1.3.0_simple`).
+`_` encodes `+` per Margo OCI spec. Declared in `margo.yaml` variants list.
 
 ---
 
@@ -126,9 +133,9 @@ Unordered within groups; sequencing decided at sprint planning.
 - `verify` (LinkML: local + `--remote`)
 
 ### Cross-cutting
-- `domain/tags.py` SemVer validation (required by build/push). → **scheduled Sprint 3**
-- `domain/metadata.py` `publish_metadata.json` parsing. → **scheduled Sprint 3**
-- `config.py` full dynaconf layering (flag > env > `margot.toml` > user config). → **scheduled Sprint 3**
+- `domain/tags.py` OCI tag + SemVer validation. → **scheduled Sprint 3**
+- `domain/metadata.py` `margo.yaml` project descriptor parsing. → **scheduled Sprint 3**
+- `config.py` full dynaconf layering (flag > env > `margot.yaml` > user config). → **scheduled Sprint 3**
 - ~~**Update FEATURES.md** `fetch` section: positional URI + raw JSON~~ ✓ done
 
 ---

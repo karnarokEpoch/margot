@@ -2,9 +2,9 @@
 
 from typing import Annotated
 
-from rich import print as rprint
-from typer import Argument, Exit, Option, echo
+from typer import Argument, Option
 
+from margot import console
 from margot.domain.models import PackageType
 from margot.services import pull as pull_service
 
@@ -30,15 +30,14 @@ def pull(
 
     if force_type is not None:
         if force_type not in _VALID_FORCE_TYPES:
-            echo(f"Error: invalid --force-type '{force_type}'. Must be one of: {', '.join(_VALID_FORCE_TYPES)}", err=True)
-            raise Exit(1)
+            console.fatal(f"invalid --force-type '{force_type}'. Must be one of: {', '.join(_VALID_FORCE_TYPES)}")
         resolved_force_type = PackageType(force_type)
 
     if resolved_force_type is not None and not force:
         force = True
-        rprint("[yellow]Warning: --force-type implies --force. Safety checks bypassed.[/yellow]")
+        console.warning("--force-type implies --force. Safety checks bypassed.")
     elif force and resolved_force_type is None:
-        rprint("[yellow]Warning: --force is active. Safety checks bypassed.[/yellow]")
+        console.warning("--force is active. Safety checks bypassed.")
 
     try:
         paths = pull_service.pull_artifact(
@@ -48,12 +47,10 @@ def pull(
             force_type=resolved_force_type,
         )
         for path in paths:
-            rprint(f"[green]Pulled:[/green] {path}")
+            console.success(f"Pulled: {path}")
         if not paths:
-            rprint("[yellow]No layers pulled.[/yellow]")
+            console.warning("No layers pulled.")
     except ValueError as e:
-        echo(f"Error: {e}", err=True)
-        raise Exit(1) from e
-    except Exception as e:
-        echo(f"Error pulling artifact: {e}", err=True)
-        raise Exit(1) from e
+        console.fatal(str(e))
+    except Exception as e:  # noqa: BLE001
+        console.fatal(f"Error pulling artifact: {e}")

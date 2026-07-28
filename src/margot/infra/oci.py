@@ -4,6 +4,8 @@ from typing import Any
 
 from oras.client import OrasClient as OrasClientLib
 
+from margot import console
+
 
 class OrasClient:
     """Wrapper around oras.client.OrasClient for anonymous OCI operations.
@@ -28,6 +30,7 @@ class OrasClient:
         Raises:
             Exception: If fetch fails.
         """
+        console.debug(f"GET manifest: {uri}")
         return self._client.get_manifest(uri)
 
     def pull(self, uri: str, outdir: str) -> list[str]:
@@ -49,6 +52,7 @@ class OrasClient:
         Raises:
             Exception: If pull fails.
         """
+        console.debug(f"Pull layers: {uri} → {outdir}")
         result = self._client.pull(target=uri, outdir=outdir)
         if isinstance(result, list):
             return result
@@ -70,5 +74,6 @@ class OrasClient:
         Raises:
             Exception: If download fails.
         """
+        console.debug(f"Download blob: {digest} → {outfile}")
         self._client.download_blob(uri, digest, outfile)
         return outfile
