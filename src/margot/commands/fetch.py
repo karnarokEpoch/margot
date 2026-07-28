@@ -4,8 +4,8 @@ from typing import Any
 
 from rich import print as rprint
 from rich.json import JSON
-from typer import echo
 
+from margot import console
 from margot.services import fetch as fetch_service
 
 
@@ -20,8 +20,6 @@ def fetch(uri: str) -> None:
         manifest: dict[str, Any] = fetch_service.fetch_manifest(uri)
         rprint(JSON.from_data(manifest, indent=2))
     except ValueError as e:
-        echo(f"Error fetching manifest: {e}", err=True)
-        raise SystemExit(1) from e
-    except Exception as e:
-        echo(f"Error fetching manifest: {e}", err=True)
-        raise SystemExit(1) from e
+        console.fatal(f"Error fetching manifest: {e}")
+    except Exception as e:  # noqa: BLE001
+        console.fatal(f"Error fetching manifest: {e}")

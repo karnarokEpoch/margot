@@ -38,7 +38,7 @@ tests/
 ├── conftest.py                  # shared fixtures: tmp dirs, fake metadata, mock OrasClient
 ├── unit/
 │   ├── test_tags.py             # semver accept/reject matrix — this IS the spec for tags
-│   ├── test_metadata.py         # parse valid + malformed publish_metadata.json
+│   ├── test_metadata.py         # parse valid + malformed margo.yaml
 │   ├── test_credentials.py      # expiry logic (expired, near-expiry, no entry)
 │   ├── test_config.py           # priority layering (flag > env > file)
 │   └── validation/

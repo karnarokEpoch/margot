@@ -21,6 +21,7 @@ See the layer table and project structure in `FEATURES.md`.
 - OCI operations go through `oras-py` only — no subprocess calls to the ORAS CLI.
 - Credential expiry check runs before every registry operation.
 - Artifact type is encoded in `artifactType`, never in the tag string.
+- All terminal output goes through `margot.console` — no `rprint`, `echo`, or `print` in commands/services/infra. See `code-conventions.md` for the full rules.
 
 ## Testing
 

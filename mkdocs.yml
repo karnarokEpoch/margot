@@ -1,0 +1,29 @@
+site_name: margot
+site_description: Developer CLI for building and publishing Margo application packages
+repo_url: https://github.com/karnarokEpoch/margot
+repo_name: karnarokEpoch/margot
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - content.code.copy
+
+nav:
+  - Home: index.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
