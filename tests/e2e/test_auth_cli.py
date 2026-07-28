@@ -26,7 +26,7 @@ class TestAuthCLI:
 
         assert result.exit_code == 0
         assert "Login to an OCI registry" in result.stdout
-        assert "registry" in result.stdout
+        assert "registry" in result.stdout.lower()
         assert "username" in result.stdout
         assert "password" in result.stdout
         assert "save" in result.stdout
@@ -37,7 +37,7 @@ class TestAuthCLI:
 
         result = runner.invoke(
             app,
-            ["auth", "login", "--registry", "public.ecr.aws", "--username", "AWS", "--password-stdin"],
+            ["auth", "login", "public.ecr.aws", "--username", "AWS", "--password-stdin"],
             input="mytoken\n",
         )
 
@@ -54,7 +54,7 @@ class TestAuthCLI:
         """Should exit 1 with error about password required."""
         result = runner.invoke(
             app,
-            ["auth", "login", "--registry", "public.ecr.aws", "--username", "AWS"],
+            ["auth", "login", "public.ecr.aws", "--username", "AWS"],
         )
 
         assert result.exit_code == 1
@@ -65,7 +65,7 @@ class TestAuthCLI:
         """Should exit 1 with error about username required."""
         result = runner.invoke(
             app,
-            ["auth", "login", "--registry", "public.ecr.aws", "--password-stdin"],
+            ["auth", "login", "public.ecr.aws", "--password-stdin"],
             input="mytoken\n",
         )
 
@@ -79,7 +79,7 @@ class TestAuthCLI:
 
         result = runner.invoke(
             app,
-            ["auth", "logout", "--registry", "public.ecr.aws"],
+            ["auth", "logout", "public.ecr.aws"],
         )
 
         assert result.exit_code == 0
@@ -95,7 +95,6 @@ class TestAuthCLI:
             [
                 "auth",
                 "login",
-                "--registry",
                 "public.ecr.aws",
                 "--username",
                 "AWS",
@@ -122,7 +121,7 @@ class TestAuthCLI:
 
         result = runner.invoke(
             app,
-            ["auth", "login", "--registry", "public.ecr.aws", "--username", "AWS", "--password-stdin"],
+            ["auth", "login", "public.ecr.aws", "--username", "AWS", "--password-stdin"],
             input="mytoken\n",
         )
 
