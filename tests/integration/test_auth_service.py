@@ -23,8 +23,8 @@ class TestLoginService:
 
         mock_client.login.assert_called_once_with(hostname="public.ecr.aws", username="AWS", password="token123")
 
-    def test_login_with_save_expiry_calls_save_expiry(self, mocker: Any) -> None:
-        """Should call save_expiry in credentials when save_expiry=True."""
+    def test_login_with_expiry_hours_calls_save_expiry(self, mocker: Any) -> None:
+        """Should call save_expiry in credentials when expiry_hours is provided."""
         mock_client = MagicMock()
         mocker.patch("margot.services.auth.oci.OrasClient", return_value=mock_client)
         mock_save = mocker.patch("margot.services.auth.creds_infra.save_expiry")
@@ -33,7 +33,7 @@ class TestLoginService:
             registry="public.ecr.aws",
             username="AWS",
             password="token123",
-            save_expiry=True,
+            expiry_hours=12,
         )
 
         mock_save.assert_called_once()
@@ -42,8 +42,8 @@ class TestLoginService:
         # Second arg is the datetime — just check it's set
         assert call_args[0][1] is not None
 
-    def test_login_without_save_expiry_does_not_call_save_expiry(self, mocker: Any) -> None:
-        """Should NOT call save_expiry when save_expiry=False."""
+    def test_login_without_expiry_hours_does_not_call_save_expiry(self, mocker: Any) -> None:
+        """Should NOT call save_expiry when expiry_hours is None."""
         mock_client = MagicMock()
         mocker.patch("margot.services.auth.oci.OrasClient", return_value=mock_client)
         mock_save = mocker.patch("margot.services.auth.creds_infra.save_expiry")

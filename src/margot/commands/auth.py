@@ -16,13 +16,13 @@ def login(
     registry: Annotated[str, Argument(help="Registry hostname (e.g. public.ecr.aws).")],
     username: Annotated[str | None, Option("--username", "-u", help="Username for authentication.")] = None,
     password_stdin: Annotated[bool, Option("--password-stdin", help="Read password from stdin.")] = False,
-    save_expiry: Annotated[
-        bool,
+    expiry_hours: Annotated[
+        int | None,
         Option(
-            "--save-expiry",
-            help="Save credential expiry (12h) to credentials file. ECR tokens expire after 12 hours.",
+            "--expiry-hours",
+            help="Save credential expiry to credentials file. Provide the number of hours until expiry (e.g. 12 for ECR).",
         ),
-    ] = False,
+    ] = None,
 ) -> None:
     """Login to an OCI registry."""
     if not username:
@@ -40,7 +40,7 @@ def login(
             registry=registry,
             username=username,
             password=password,
-            save_expiry=save_expiry,
+            expiry_hours=expiry_hours,
         )
         console.success(f"Logged in to {registry}.")
     except Exception as e:  # noqa: BLE001

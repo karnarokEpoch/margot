@@ -29,7 +29,7 @@ class TestAuthCLI:
         assert "registry" in result.stdout.lower()
         assert "username" in result.stdout
         assert "password" in result.stdout
-        assert "save" in result.stdout
+        assert "expiry" in result.stdout
 
     def test_auth_login_success(self, mocker: Any) -> None:
         """Should call service.login with correct args and exit 0."""
@@ -46,7 +46,7 @@ class TestAuthCLI:
             registry="public.ecr.aws",
             username="AWS",
             password="mytoken",
-            save_expiry=False,
+            expiry_hours=None,
         )
         assert "Logged in to public.ecr.aws" in result.stdout
 
@@ -86,8 +86,8 @@ class TestAuthCLI:
         mock_logout.assert_called_once_with(registry="public.ecr.aws")
         assert "Logged out from public.ecr.aws" in result.stdout
 
-    def test_auth_login_with_save_expiry(self, mocker: Any) -> None:
-        """Should pass save_expiry=True to service when --save-expiry is set."""
+    def test_auth_login_with_expiry_hours(self, mocker: Any) -> None:
+        """Should pass expiry_hours=12 to service when --expiry-hours 12 is set."""
         mock_login = mocker.patch("margot.commands.auth.auth_service.login")
 
         result = runner.invoke(
@@ -99,7 +99,8 @@ class TestAuthCLI:
                 "--username",
                 "AWS",
                 "--password-stdin",
-                "--save-expiry",
+                "--expiry-hours",
+                "12",
             ],
             input="mytoken\n",
         )
@@ -109,7 +110,7 @@ class TestAuthCLI:
             registry="public.ecr.aws",
             username="AWS",
             password="mytoken",
-            save_expiry=True,
+            expiry_hours=12,
         )
 
     def test_auth_login_service_raises_exits_1(self, mocker: Any) -> None:

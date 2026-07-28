@@ -12,24 +12,23 @@ def login(
     username: str,
     password: str,
     *,
-    save_expiry: bool = False,
-    expiry_hours: int = 12,
+    expiry_hours: int | None = None,
 ) -> None:
     """Login to an OCI registry.
 
     Steps:
     1. Create OrasClient and call login().
-    2. If save_expiry: compute expires_at = now + expiry_hours, persist to credentials file.
+    2. If expiry_hours provided: compute expires_at = now + expiry_hours, persist to credentials file.
     3. Emit console.info on step completion.
     """
     console.info(f"Logging in to {registry} as {username}.")
     client = oci.OrasClient()
     client.login(hostname=registry, username=username, password=password)
 
-    if save_expiry:
+    if expiry_hours is not None:
         expires_at = datetime.now(tz=UTC) + timedelta(hours=expiry_hours)
         creds_infra.save_expiry(registry, expires_at)
-        console.info(f"Expiry saved: {expires_at.strftime('%Y-%m-%dT%H:%M:%SZ')}.")
+        console.info(f"Expiry saved: {expires_at.strftime('%Y-%m-%dT%H:%M:%SZ')} ({expiry_hours}h).")
 
     console.info("Login complete.")
 
