@@ -113,6 +113,17 @@ class TestRemoveExpiry:
         assert load_expiry("public.ecr.aws", credentials_file=creds_file) is None
         assert load_expiry("other.registry.io", credentials_file=creds_file) == datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)
 
+    def test_removes_last_entry_leaves_empty_file(self, creds_file: Path) -> None:
+        """Should write an empty file when the only entry is removed."""
+        creds_file.parent.mkdir(parents=True, exist_ok=True)
+        creds_file.write_text('[registries."public.ecr.aws"]\nexpires_at = "2026-06-26T23:00:00Z"\n')
+
+        remove_expiry("public.ecr.aws", credentials_file=creds_file)
+
+        # File still exists but the entry is gone
+        assert creds_file.exists()
+        assert load_expiry("public.ecr.aws", credentials_file=creds_file) is None
+
 
 class TestCheckCredentials:
     """Tests for check_credentials()."""
