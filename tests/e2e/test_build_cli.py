@@ -7,6 +7,7 @@ from typing import Any
 from pytest import fixture
 from typer.testing import CliRunner
 
+from margot.domain.models import PackageType
 from margot.main import app
 
 runner = CliRunner()
@@ -276,9 +277,8 @@ class TestBuildAllSkipsMissingE2E:
 
     def test_build_all_reraises_non_skip_value_error(self, cli_project_partial: Path, mocker: Any) -> None:
         """Should exit 1 when --type all triggers a ValueError unrelated to missing component."""
-        from margot.domain.models import PackageType
 
-        def _raise_for_compose(package_type: PackageType, **kwargs: Any) -> list[Any]:
+        def _raise_for_compose(package_type: PackageType, **_kwargs: Any) -> list[Any]:
             if package_type.value == "compose":
                 raise ValueError("invalid version format")
             return []

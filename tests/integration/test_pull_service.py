@@ -9,6 +9,7 @@ from pytest import raises
 from margot import console
 from margot.domain.models import PackageType
 from margot.services import pull as pull_service
+from margot.services.pull import _available_layer_types
 
 
 def _make_manifest(
@@ -527,16 +528,12 @@ class TestAvailableLayerTypes:
 
     def test_empty_layers_returns_no_layers_present(self) -> None:
         """Should return 'No layers present.' for an empty list."""
-        from margot.services.pull import _available_layer_types
-
         result = _available_layer_types([])
 
         assert result == "No layers present."
 
     def test_known_media_type_shows_friendly_name(self) -> None:
         """Should include friendly name and full media type for known types."""
-        from margot.services.pull import _available_layer_types
-
         layers = [{"mediaType": "application/vnd.org.margo.component.compose.tar+gzip"}]
 
         result = _available_layer_types(layers)
@@ -546,8 +543,6 @@ class TestAvailableLayerTypes:
 
     def test_unknown_media_type_shows_raw_string(self) -> None:
         """Should show raw mediaType string without friendly name wrapper for unknown types."""
-        from margot.services.pull import _available_layer_types
-
         layers = [{"mediaType": "application/vnd.unknown.type+json"}]
 
         result = _available_layer_types(layers)

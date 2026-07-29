@@ -8,7 +8,7 @@ import tarfile
 from pytest import fixture, raises
 
 from margot import console
-from margot.domain.metadata import MargoYaml
+from margot.domain.metadata import ComponentConfig, MargoYaml
 from margot.domain.models import PackageType
 from margot.services import build
 
@@ -224,8 +224,6 @@ margo:
 
     def test_build_placeholder_map_version_override_applies_to_defined_components(self) -> None:
         """version_override should apply to defined components, not undefined ones."""
-        from margot.domain.metadata import ComponentConfig
-
         meta = MargoYaml(
             api_version="v1",
             name="test-app",

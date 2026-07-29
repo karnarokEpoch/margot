@@ -6,6 +6,11 @@ from unittest.mock import MagicMock
 from margot import console
 from margot.infra.oci import OrasClient
 
+FAKE_OUTDIR = "/fake/outdir"
+FAKE_FILE_A = "/fake/outdir/a"
+FAKE_FILE_B = "/fake/outdir/b"
+FAKE_BLOB_OUT = "/fake/outdir/out.tgz"
+
 
 class TestOrasClient:
     """Tests for OrasClient."""
@@ -29,12 +34,12 @@ class TestOrasClient:
     def test_pull_returns_list_of_paths(self, mocker: Any) -> None:
         """pull() should return the list of paths from the underlying client."""
         mock_lib = MagicMock()
-        mock_lib.pull.return_value = ["/tmp/a", "/tmp/b"]
+        mock_lib.pull.return_value = [FAKE_FILE_A, FAKE_FILE_B]
         mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
         client = OrasClient()
-        result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", "/tmp")
-        assert result == ["/tmp/a", "/tmp/b"]
-        mock_lib.pull.assert_called_once_with(target="public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir="/tmp")
+        result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", FAKE_OUTDIR)
+        assert result == [FAKE_FILE_A, FAKE_FILE_B]
+        mock_lib.pull.assert_called_once_with(target="public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=FAKE_OUTDIR)
 
     def test_pull_returns_empty_list_when_client_returns_empty_list(self, mocker: Any) -> None:
         """pull() should return [] when the underlying client returns an empty list (no layers pulled)."""
@@ -42,7 +47,7 @@ class TestOrasClient:
         mock_lib.pull.return_value = []
         mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
         client = OrasClient()
-        result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", "/tmp")
+        result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", FAKE_OUTDIR)
         assert result == []
 
     def test_pull_normalizes_none_to_empty_list(self, mocker: Any) -> None:
@@ -51,7 +56,7 @@ class TestOrasClient:
         mock_lib.pull.return_value = None
         mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
         client = OrasClient()
-        result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", "/tmp")
+        result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", FAKE_OUTDIR)
         assert result == []
 
     def test_pull_normalizes_non_list_to_empty_list(self, mocker: Any) -> None:
@@ -60,7 +65,7 @@ class TestOrasClient:
         mock_lib.pull.return_value = "oops"
         mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
         client = OrasClient()
-        result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", "/tmp")
+        result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", FAKE_OUTDIR)
         assert result == []
 
     def test_download_blob_returns_outfile(self, mocker: Any) -> None:
@@ -68,9 +73,9 @@ class TestOrasClient:
         mock_lib = MagicMock()
         mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
         client = OrasClient()
-        result = client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", "/tmp/out.tgz")
-        assert result == "/tmp/out.tgz"
-        mock_lib.download_blob.assert_called_once_with("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", "/tmp/out.tgz")
+        result = client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
+        assert result == FAKE_BLOB_OUT
+        mock_lib.download_blob.assert_called_once_with("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
 
     def test_login_delegates_to_client(self, mocker: Any) -> None:
         """login() should delegate to the underlying client with correct kwargs."""
@@ -128,7 +133,7 @@ class TestOciAdapterDebugLogging:
         mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
         out, err = capture_console
         client = OrasClient()
-        client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", "/tmp")
+        client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", FAKE_OUTDIR)
         assert "Pull layers:" in err.getvalue()
         assert out.getvalue() == ""
 
@@ -139,9 +144,9 @@ class TestOciAdapterDebugLogging:
         console.set_debug(True)
         mock_lib = MagicMock()
         mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
-        out, err = capture_console
+        _out, err = capture_console
         client = OrasClient()
-        client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", "/tmp/out.tgz")
+        client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
         assert "Download blob:" in err.getvalue()
 
     def test_login_emits_debug_when_debug_mode(
@@ -151,7 +156,7 @@ class TestOciAdapterDebugLogging:
         console.set_debug(True)
         mock_lib = MagicMock()
         mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
-        out, err = capture_console
+        _out, err = capture_console
         client = OrasClient()
         client.login(hostname="public.ecr.aws", username="AWS", password="token")
         assert "Login:" in err.getvalue()
@@ -163,7 +168,7 @@ class TestOciAdapterDebugLogging:
         console.set_debug(True)
         mock_lib = MagicMock()
         mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
-        out, err = capture_console
+        _out, err = capture_console
         client = OrasClient()
         client.logout(hostname="public.ecr.aws")
         assert "Logout:" in err.getvalue()
