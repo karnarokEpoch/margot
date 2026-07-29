@@ -105,5 +105,20 @@ Rules:
   any other variant.
 - When `variants` is present, the component-level `version` is ignored. Each variant carries its own `version`.
 - `--variant all` builds every declared variant. `--variant NAME` selects one.
-- Version strings use `_` to encode `+` (SemVer build metadata separator), since `+` is not a valid OCI tag character.
-  This follows the Margo OCI distribution spec.
+
+## Version strings and OCI tags
+
+!!! warning
+    The `+` character (SemVer build metadata separator) is **not valid in OCI tags**. Write versions with `+` in
+    `margo.yaml` — margot automatically converts `+` to `_` when producing OCI tags.
+
+For example:
+
+| `margo.yaml` version | OCI tag pushed |
+|-----------------------|----------------|
+| `1.0.0+margo` | `1.0.0_margo` |
+| `1.0.0+quadlet` | `1.0.0_quadlet` |
+| `2.1.0+simple` | `2.1.0_simple` |
+
+This is the standard way to prevent tag collisions when multiple components share the same repository — append
+build metadata (`+margo`, `+quadlet`, `+compose`, variant name, etc.) to distinguish them.

@@ -24,6 +24,10 @@ theme:
 nav:
   - Home: index.md
   - margo.yaml: margo-yaml.md
+  - Examples:
+    - Minimal (Helm): examples/minimal.md
+    - Basic (Quadlet): examples/basic-quadlet.md
+    - Full (Multi-component): examples/full.md
 
 markdown_extensions:
   - admonition
