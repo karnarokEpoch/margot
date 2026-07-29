@@ -65,6 +65,13 @@ def success(message: str) -> None:
     _get_stdout().print(f"[green]{message}[/green]")
 
 
+def print_json(data: dict | list) -> None:
+    """Pretty-print a JSON-serializable object to stdout. Always shown."""
+    import json
+
+    _get_stdout().print_json(json.dumps(data))
+
+
 def warning(message: str) -> None:
     """Print a yellow warning message to stderr. Always shown."""
     _get_stderr().print(f"[yellow]Warning:[/yellow] {message}")
