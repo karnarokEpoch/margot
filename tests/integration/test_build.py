@@ -222,6 +222,48 @@ margo:
         assert "<app_tag>" in result
         assert result["<app_tag>"] == "3.1.0"
 
+    def test_build_placeholder_map_version_override_applies_to_defined_components(self) -> None:
+        """version_override should apply to defined components, not undefined ones."""
+        from margot.domain.metadata import ComponentConfig
+
+        meta = MargoYaml(
+            api_version="v1",
+            name="test-app",
+            description="Test",
+            app_version=None,
+            annotations={},
+            margo=ComponentConfig(directory="margo", version="1.0.0", repository=None, variants=()),
+            compose=None,
+            quadlet=None,
+        )
+
+        result = build._build_placeholder_map(meta, "2.0.0")  # noqa: SLF001
+
+        assert result["<margo_tag>"] == "2.0.0"
+        assert result["<compose_tag>"] == ""
+        assert result["<quadlet_tag>"] == ""
+
+    def test_build_placeholder_map_version_override_ignored_for_undefined_components(self) -> None:
+        """version_override should not populate compose/quadlet tags when those components are undefined."""
+        meta = MargoYaml(
+            api_version="v1",
+            name="test-app",
+            description="Test",
+            app_version=None,
+            annotations={},
+            margo=None,
+            compose=None,
+            quadlet=None,
+        )
+
+        result = build._build_placeholder_map(meta, "9.9.9")  # noqa: SLF001
+
+        # margo_version uses `or` chaining (not ternary), so version_override applies even when margo=None
+        assert result["<margo_tag>"] == "9.9.9"
+        # compose/quadlet use ternary: `... if meta.compose else ""` — short-circuits before version_override
+        assert result["<compose_tag>"] == ""
+        assert result["<quadlet_tag>"] == ""
+
 
 class TestBuildCompose:
     """Tests for building compose component."""
