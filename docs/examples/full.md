@@ -9,7 +9,7 @@ and symlinks to avoid file duplication. This is the most realistic production la
 web-platform/
 ├── margo.yaml
 ├── margo/
-│   ├── app.yaml
+│   ├── app.yaml.jinja
 │   └── resources/
 │       ├── icon.png
 │       └── description.md
@@ -28,18 +28,19 @@ web-platform/
     │   ├── nginx-index.html
     │   └── apache-index.html
     └── minimal/
-        ├── nginx.container -> ../default/nginx.container
+        ├── nginx.container
         ├── web.network -> ../default/web.network
         └── nginx-index.html -> ../default/nginx-index.html
 ```
 
-The `minimal` quadlet variant uses **symlinks** for shared files (`nginx.container`, `web.network`, `nginx-index.html`).
-margot's builder resolves symlinks and copies their content — the pushed artifact contains regular files.
+The `minimal` quadlet variant uses **symlinks** for shared files (`web.network`, `nginx-index.html`). margot's builder
+resolves symlinks and copies their content — the pushed artifact contains regular files.
 
 ## margo.yaml
 
 ```yaml
 apiVersion: v1
+id: com-example-web-platform
 name: web-platform
 appVersion: "2.1.0"
 description: "NGINX + Apache web platform"
@@ -56,36 +57,42 @@ margo:
 
 compose:
   directory: compose
+  version: 2.1.0
   repository: public.ecr.aws/g2n4p2m7/margo
   variants:
     - name: default
-      version: 2.1.0+compose
     - name: minimal
-      version: 2.1.0+compose-minimal
 
 quadlet:
   directory: quadlet
+  version: 2.1.0
   repository: public.ecr.aws/g2n4p2m7/margo
   variants:
     - name: default
-      version: 2.1.0+quadlet
     - name: minimal
-      version: 2.1.0+quadlet-minimal
 ```
 
-Each component has two variants. The build metadata suffix (`+compose`, `+quadlet`, `+compose-minimal`, etc.) prevents
-tag collisions since all artifacts share the same repository. Remember: `+` is converted to `_` in OCI tags.
+Variant `version` is omitted — margot derives it as `<component-version>+<type>-<variant-name>`:
 
-## app.yaml
+| Variant | Derived version | OCI tag |
+|---------|-----------------|---------|
+| compose/default | `2.1.0+compose-default` | `2.1.0_compose-default` |
+| compose/minimal | `2.1.0+compose-minimal` | `2.1.0_compose-minimal` |
+| quadlet/default | `2.1.0+quadlet-default` | `2.1.0_quadlet-default` |
+| quadlet/minimal | `2.1.0+quadlet-minimal` | `2.1.0_quadlet-minimal` |
 
-```yaml
+No tag collisions, no manual versioning per variant.
+
+## app.yaml.jinja
+
+```jinja
 apiVersion: margo.org/v1-alpha1
 kind: ApplicationDescription
-id: com-example-web-platform
+id: {{ app.id }}
 metadata:
   name: Web Platform
-  description: NGINX + Apache web platform
-  version: <app_tag>
+  description: {{ app.description }}
+  version: {{ app.version }}
   catalog:
     application:
       icon: ./resources/icon.png
@@ -94,9 +101,10 @@ metadata:
     organization:
       - name: Example Corp
         site: https://example.com
+
 deploymentProfiles:
   - type: helm
-    id: com-example-web-platform-helm
+    id: {{ app.id }}-helm
     components:
       - name: nginx
         properties:
@@ -106,48 +114,42 @@ deploymentProfiles:
         properties:
           repository: oci://registry-1.docker.io/bitnamicharts/apache
           revision: 11.4.29
+{%- for v in compose.variants %}
   - type: compose
-    id: com-example-web-platform-compose-default
+    id: {{ app.id }}-compose-{{ v.name }}
     components:
-      - name: web-platform-compose-default
+      - name: {{ v.component }}
         properties:
-          repository: public.ecr.aws/g2n4p2m7/margo
-          revision: <compose_tag>
-  - type: compose
-    id: com-example-web-platform-compose-minimal
-    components:
-      - name: web-platform-compose-minimal
-        properties:
-          repository: public.ecr.aws/g2n4p2m7/margo
-          revision: 2.1.0_compose-minimal
+          repository: {{ v.repository }}
+          revision: {{ v.tag }}
+{%- endfor %}
+{%- for v in quadlet.variants %}
   - type: quadlet
-    id: com-example-web-platform-quadlet-default
+    id: {{ app.id }}-quadlet-{{ v.name }}
     components:
-      - name: web-platform-quadlet-default
+      - name: {{ v.component }}
         properties:
-          repository: public.ecr.aws/g2n4p2m7/margo
-          revision: <quadlet_tag>
-  - type: quadlet
-    id: com-example-web-platform-quadlet-minimal
-    components:
-      - name: web-platform-quadlet-minimal
-        properties:
-          repository: public.ecr.aws/g2n4p2m7/margo
-          revision: 2.1.0_quadlet-minimal
+          repository: {{ v.repository }}
+          revision: {{ v.tag }}
+{%- endfor %}
+
 parameters:
   nginxPort:
     value: 8080
     targets:
       - pointer: NGINX_PORT
         components:
-          - web-platform-compose-default
-          - web-platform-compose-minimal
-          - web-platform-quadlet-default
-          - web-platform-quadlet-minimal
+{%- for v in compose.variants + quadlet.variants %}
+          - {{ v.component }}
+{%- endfor %}
 ```
 
-`<app_tag>` → `2.1.0`, `<compose_tag>` → `2.1.0_compose` (first compose variant), `<quadlet_tag>` → `2.1.0_quadlet`
-(first quadlet variant).
+Adding a new variant to `margo.yaml` requires **zero edits** to `app.yaml.jinja` — the loops pick it up
+automatically. At build time, the context resolves to:
+
+- `{{ v.component }}` → `com-example-web-platform-compose-default`, etc. (derived: `<id>-<type>-<variant-name>`)
+- `{{ v.tag }}` → `2.1.0_compose-default`, etc. (OCI-safe form of the derived version)
+- `{{ v.repository }}` → `public.ecr.aws/g2n4p2m7/margo`
 
 ## Compose files
 
@@ -300,9 +302,9 @@ margot push
 This produces five OCI artifacts at `public.ecr.aws/g2n4p2m7/margo`:
 
 | Tag | Artifact type |
-| ----- | --------------- |
+|-----|---------------|
 | `1.0.0_margo` | `application/vnd.margo.app.v1+json` |
-| `2.1.0_compose` | `application/vnd.org.margo.component.compose+json` |
+| `2.1.0_compose-default` | `application/vnd.org.margo.component.compose+json` |
 | `2.1.0_compose-minimal` | `application/vnd.org.margo.component.compose+json` |
-| `2.1.0_quadlet` | `application/vnd.org.margo.component.quadlet+json` |
+| `2.1.0_quadlet-default` | `application/vnd.org.margo.component.quadlet+json` |
 | `2.1.0_quadlet-minimal` | `application/vnd.org.margo.component.quadlet+json` |

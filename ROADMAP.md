@@ -173,22 +173,79 @@ not own the file. The developer authors the parts they control; margot augments 
 overwrites the structural parts it can compute at build time. The two zones must be
 cleanly separable.
 
-**Open question — templating engine:** the right approach is not obvious and should be a
-design spike at the start of the sprint:
-- **Plain string replace (extended):** simple, already in place, sufficient if structural
-  generation is handled by a separate merge step. Cannot handle loops or conditionals.
-- **Jinja2:** mature Python templating, handles loops/conditionals/filters, already used
-  in many Python toolchains. Risk: YAML + Jinja indentation is error-prone; developers
-  must learn Jinja syntax in their `app.yaml`.
-- **Hybrid — generation + merge:** margot generates the structural scaffold from
-  `margo.yaml` declarations and deep-merges it with the developer's `app.yaml` (which
-  only contains the variable parts). Plain string replace (or Jinja2) applies only to the
-  developer-authored portion. Cleanest separation of concerns but requires a defined
-  merge strategy and schema for what margot auto-generates.
-- **Helm-style Go templates reimplemented in Python:** effectively reinventing Jinja2
-  with worse ergonomics. Not recommended.
+**Decision (locked):** Jinja2, with an optional `margo/app.yaml.jinja` template file.
 
-**Decision needed at sprint planning** before any implementation begins.
+**File resolution:**
+
+- `app.yaml.jinja` present → rendered against a context derived from `margo.yaml`, output
+  written as `app.yaml` in the build dir. The `.jinja` source MUST NOT ship in the artifact.
+- `app.yaml.jinja` absent → `app.yaml` is required and copied **verbatim**. Fully static,
+  no substitution.
+- Both present → hard error. The render would otherwise silently clobber the copied file.
+
+Rendering uses Jinja2 `StrictUndefined` so an undefined variable fails the build naming the
+variable, rather than emitting empty YAML.
+
+**Template context** (derived from `margo.yaml`, read-only):
+
+```text
+app.id  app.name  app.version  app.description  app.annotations  app.maintainers
+margo.version  margo.tag  margo.ref  margo.repository  margo.directory
+compose.directory  compose.repository
+compose.variants                      # ordered list of variant objects
+compose.<variant-name>                # direct access, e.g. compose.minimal.tag
+quadlet.*                             # same shape
+```
+
+Variant object: `name`, `version`, `tag`, `ref`, `repository`, `component`.
+
+- `version` is optional. Default: `<component-version>+<type>-<variant-name>` (e.g. for a
+  compose component at version `2.1.0` with variant `minimal`, the derived version is
+  `2.1.0+compose-minimal`). As authored it uses `+`; `tag` is the OCI-safe form with `_`.
+  `ref` is `repository:tag`. `tag` and `ref` are **computed and not authorable** — enforced
+  by strict schema (unknown keys in `margo.yaml` are rejected).
+- `component` (the Margo component name) is **developer-owned**. margot supplies a valid
+  default of `<id>-<type>-<variant-name>` and never rewrites a value the developer sets.
+- Flat components (no `variants`) still expose a single synthetic entry in `variants`, so
+  templates iterate identically in both modes.
+- Variant names that collide with component field names (`directory`, `repository`,
+  `variants`, `version`, `tag`, `ref`, `component`) MUST be rejected at parse time.
+
+**Deferred (additive, second pass):** a `| to_yaml(indent=N)` filter fed by pre-rendered
+deployment-profile fragments. Pass 1 renders a developer-authored profile template per
+variant and parses it into structured data; pass 2 splices it via the filter. This keeps
+profile *shape* owned by the developer while collapsing the YAML-indentation hazard to a
+single filter call. Not required for the first cut.
+
+**Rejected alternatives:**
+
+- **Plain string replace (extended):** cannot address per-variant tags, so a project with
+  two compose variants must hardcode the second one — the duplicate-source-of-truth bug
+  this work exists to fix. No loops, no conditionals.
+- **Hybrid generation + merge:** requires margot to own the deployment-profile schema and a
+  defined deep-merge strategy. The deferred two-pass render achieves the same ergonomics
+  without transferring shape ownership away from the developer.
+- **Helm-style Go templates reimplemented in Python:** reinventing Jinja2 with worse
+  ergonomics.
+
+#### 3. Breaking refactor — `app.yaml` placeholders removed
+
+**Impact: breaking.** Bundled with the change above, and the reason this work is a refactor
+rather than a feature.
+
+- `<app_tag>`, `<margo_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>` are
+  removed from the `app.yaml` path entirely. A static `app.yaml` is copied verbatim;
+  projects relying on substitution inside it break and must migrate to `app.yaml.jinja`.
+- These placeholders **remain** for compose/quadlet text files, where plain string replace
+  is still the right model (see item 1).
+- `<helm_chart_tag>` is dropped as a concept. It resolves to an empty string today, and
+  margot does not build Helm charts — chart revisions are literals the developer authors.
+- `id` moves into `margo.yaml` as a required top-level field. It currently exists only in
+  `app.yaml`, but the template context needs it and it is the base for derived component
+  name defaults.
+
+margot is pre-1.0 and unpublished, so the clean break is preferred over a compatibility
+shim. No deprecation window.
 
 ---
 

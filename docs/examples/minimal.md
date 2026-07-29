@@ -10,13 +10,14 @@ itself.
 nginx-helm/
 ├── margo.yaml
 └── margo/
-    └── app.yaml
+    └── app.yaml.jinja
 ```
 
 ## margo.yaml
 
 ```yaml
 apiVersion: v1
+id: com-example-nginx
 name: nginx
 appVersion: "1.27.0"
 description: "NGINX web server deployed via Helm chart"
@@ -30,21 +31,19 @@ margo:
 Only the `margo` component is declared — no `compose`, no `quadlet`. margot builds and pushes the application
 descriptor artifact only.
 
-## app.yaml
+## app.yaml.jinja
 
-The Margo application description references a Helm chart already published in an OCI registry:
-
-```yaml
+```jinja
 apiVersion: margo.org/v1-alpha1
 kind: ApplicationDescription
-id: com-example-nginx
+id: {{ app.id }}
 metadata:
   name: NGINX
-  description: NGINX web server
-  version: <app_tag>
+  description: {{ app.description }}
+  version: {{ app.version }}
 deploymentProfiles:
   - type: helm
-    id: com-example-nginx-helm
+    id: {{ app.id }}-helm
     components:
       - name: nginx
         properties:
@@ -54,7 +53,7 @@ deploymentProfiles:
           timeout: 5m0s
 ```
 
-The `<app_tag>` placeholder is substituted at build time with the `appVersion` value from `margo.yaml` (`1.27.0`).
+`{{ app.version }}` resolves to `1.27.0` (from `appVersion`), `{{ app.id }}` to `com-example-nginx`.
 
 !!! note
     `parameters` and `configuration` sections are omitted here to keep the example short. In a real project you

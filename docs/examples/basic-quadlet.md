@@ -9,7 +9,7 @@ No variants — flat layout.
 nginx-quadlet/
 ├── margo.yaml
 ├── margo/
-│   └── app.yaml
+│   └── app.yaml.jinja
 └── quadlet/
     └── nginx.container
 ```
@@ -18,6 +18,7 @@ nginx-quadlet/
 
 ```yaml
 apiVersion: v1
+id: com-example-nginx
 name: nginx
 appVersion: "1.27.0"
 description: "NGINX web server deployed via Quadlet"
@@ -41,27 +42,32 @@ suffixes prevent tag collision when both artifacts share the same repository.
     `1.0.0+margo` becomes OCI tag `1.0.0_margo`. Write versions with `+` in `margo.yaml` — the conversion is
     handled transparently.
 
-## app.yaml
+## app.yaml.jinja
 
-```yaml
+```jinja
 apiVersion: margo.org/v1-alpha1
 kind: ApplicationDescription
-id: com-example-nginx
+id: {{ app.id }}
 metadata:
   name: NGINX
-  description: NGINX web server
-  version: <app_tag>
+  description: {{ app.description }}
+  version: {{ app.version }}
 deploymentProfiles:
   - type: quadlet
-    id: com-example-nginx-quadlet
+    id: {{ app.id }}-quadlet
     components:
-      - name: nginx
+      - name: {{ quadlet.component }}
         properties:
-          repository: public.ecr.aws/g2n4p2m7/margo
-          revision: <quadlet_tag>
+          repository: {{ quadlet.repository }}
+          revision: {{ quadlet.tag }}
 ```
 
-`<app_tag>` resolves to `1.27.0`, `<quadlet_tag>` resolves to `1.0.0_quadlet` at build time.
+At build time:
+
+- `{{ app.id }}` → `com-example-nginx`
+- `{{ app.version }}` → `1.27.0`
+- `{{ quadlet.component }}` → `com-example-nginx-quadlet` (derived: `<id>-<type>`)
+- `{{ quadlet.tag }}` → `1.0.0_quadlet` (OCI-safe form of `1.0.0+quadlet`)
 
 !!! note
     `parameters` and `configuration` sections are omitted to keep the example concise.

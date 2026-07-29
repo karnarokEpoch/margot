@@ -5,6 +5,7 @@ source of truth read by `margot build` and `margot push`.
 
 ```yaml
 apiVersion: v1
+id: com-example-myapp
 name: myapp
 appVersion: "1.0.0"
 description: "Human-readable description of the application"
@@ -16,7 +17,7 @@ maintainers:
 
 margo:
   directory: margo
-  version: 1.0.0
+  version: 1.0.0+margo
   repository: public.ecr.aws/g2n4p2m7/margo
 
 compose:
@@ -25,11 +26,7 @@ compose:
   repository: public.ecr.aws/g2n4p2m7/margo
   variants:
     - name: default
-      version: 1.0.0
     - name: simple
-      version: 1.0.0_simple
-    - name: addon-mosquitto
-      version: 1.0.0_addon-mosquitto
 
 quadlet:
   directory: quadlet
@@ -37,9 +34,7 @@ quadlet:
   repository: public.ecr.aws/g2n4p2m7/margo
   variants:
     - name: default
-      version: 1.0.0
     - name: simple
-      version: 1.0.0_simple
 ```
 
 ## Fields
@@ -47,9 +42,10 @@ quadlet:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `apiVersion` | Yes | Config schema version. Currently `v1`. |
+| `id` | Yes | Margo application identifier. Lowercase letters, digits, and dashes only. Used as the base for derived component names and deployment profile IDs. |
 | `name` | Yes | Application name. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation. |
-| `appVersion` | No | Human-facing application version. Not validated as SemVer. Used as the value for `<app_tag>` placeholder substitution. If absent, `<app_tag>` resolves to an empty string. |
-| `description` | Yes | Short description. Used in OCI description annotation. |
+| `appVersion` | No | Human-facing application version. Not validated as SemVer. Exposed as `app.version` in templates. |
+| `description` | Yes | Short description. Used in OCI description annotation and exposed as `app.description` in templates. |
 | `annotations` | No | Arbitrary key/value pairs passed as OCI annotations. |
 | `maintainers` | No | List of maintainers, each with `name` (required) and `email` (optional). |
 
@@ -62,16 +58,15 @@ Every component shares these fields:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `directory` | Yes | Path (relative to project root) to the component source directory. |
-| `version` | Yes* | OCI tag for the artifact. Must be a valid OCI tag; SemVer recommended. Ignored when `variants` is present. |
+| `directory` | No | Path (relative to project root) to the component source directory. Default: component type name (`margo`, `compose`, `quadlet`). |
+| `version` | Yes | Base version for the component. Used directly as OCI tag in flat mode; used as the derivation base for variant versions. |
 | `repository` | No | OCI repository for this component. Overrides the global `repository` from tool config / CLI flag / env var. |
-
-\* Required only when no `variants` are declared for that component.
+| `component` | No | Margo component name (developer-owned). Default: `<id>-<type>`. Flat mode only. |
 
 ### margo
 
-The core Margo application descriptor artifact. Its source directory must contain `app.yaml` (with optional
-`resources/` subdirectory). This component does not support variants.
+The core Margo application descriptor artifact. Its source directory must contain either `app.yaml.jinja` (rendered
+at build time) or `app.yaml` (copied verbatim). This component does not support variants.
 
 ### compose
 
@@ -90,20 +85,34 @@ maps to a subdirectory under the component's `directory`:
 ```yaml
 compose:
   directory: compose
+  version: 2.1.0
   variants:
     - name: default
-      version: 1.0.0
-    - name: simple
-      version: 1.0.0_simple
+    - name: minimal
 ```
 
-This produces two artifacts built from `compose/default/` and `compose/simple/`.
+This produces two artifacts built from `compose/default/` and `compose/minimal/`.
 
-Rules:
+### Variant fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Variant name. Maps to `<directory>/<name>/` subdirectory. |
+| `version` | No | Override the derived version. Default: `<component-version>+<type>-<variant-name>`. |
+| `component` | No | Override the derived component name. Default: `<id>-<type>-<variant-name>`. |
+
+With the example above (`version: 2.1.0`, compose variants `default` and `minimal`):
+
+| Variant | Derived version | OCI tag |
+|---------|-----------------|---------|
+| default | `2.1.0+compose-default` | `2.1.0_compose-default` |
+| minimal | `2.1.0+compose-minimal` | `2.1.0_compose-minimal` |
+
+### Rules
 
 - `name: default` is a **reserved name** but not special — it maps to `<directory>/default/`, a real subdirectory like
   any other variant.
-- When `variants` is present, the component-level `version` is ignored. Each variant carries its own `version`.
+- When `variants` is present, the component-level `version` is used as the derivation base, not as a direct OCI tag.
 - `--variant all` builds every declared variant. `--variant NAME` selects one.
 
 ## Version strings and OCI tags
@@ -117,8 +126,36 @@ For example:
 | `margo.yaml` version | OCI tag pushed |
 |-----------------------|----------------|
 | `1.0.0+margo` | `1.0.0_margo` |
-| `1.0.0+quadlet` | `1.0.0_quadlet` |
-| `2.1.0+simple` | `2.1.0_simple` |
+| `2.1.0+compose-default` | `2.1.0_compose-default` |
+| `2.1.0+quadlet-minimal` | `2.1.0_quadlet-minimal` |
 
 This is the standard way to prevent tag collisions when multiple components share the same repository — append
-build metadata (`+margo`, `+quadlet`, `+compose`, variant name, etc.) to distinguish them.
+build metadata (`+margo`, `+quadlet`, `+compose-<variant>`, etc.) to distinguish them.
+
+## Template context
+
+When `app.yaml.jinja` is present, margot renders it with Jinja2 using a context derived from `margo.yaml`. The
+context exposes these fields:
+
+```text
+app.id  app.name  app.version  app.description  app.annotations  app.maintainers
+
+margo.version  margo.tag  margo.ref  margo.repository  margo.component
+
+compose.version  compose.tag  compose.repository  compose.component
+compose.variants                          # ordered list of variant objects
+compose.<variant-name>.tag                # direct access by name
+
+quadlet.*                                 # same shape as compose
+```
+
+Each variant object exposes: `name`, `version`, `tag`, `ref`, `repository`, `component`.
+
+- `version` — as authored or derived (with `+`)
+- `tag` — OCI-safe form (with `_`). **Computed, not authorable.**
+- `ref` — `repository:tag`. **Computed, not authorable.**
+- `component` — developer-owned, with a derived default
+
+!!! note
+    If `app.yaml.jinja` is absent, `app.yaml` is required and copied verbatim — no substitution occurs.
+    Both files present is a hard error.
