@@ -8,6 +8,7 @@ Verbosity is controlled by two module-level flags:
   - _debug: Enables debug() output (low-level infra calls). Implies _verbose.
 """
 
+import json
 import sys
 
 from rich.console import Console
@@ -63,6 +64,11 @@ def is_debug() -> bool:
 def success(message: str) -> None:
     """Print a green success message to stdout. Always shown."""
     _get_stdout().print(f"[green]{message}[/green]")
+
+
+def print_json(data: dict | list) -> None:
+    """Pretty-print a JSON-serializable object to stdout. Always shown."""
+    _get_stdout().print_json(json.dumps(data))
 
 
 def warning(message: str) -> None:

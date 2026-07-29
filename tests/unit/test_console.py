@@ -322,3 +322,29 @@ class TestInteraction:
         assert "Warning" in err_text
         assert "Info" in err_text
         assert "Debug" in err_text
+
+
+class TestPrintJson:
+    """Tests for print_json() output."""
+
+    def test_print_json_writes_to_stdout(self, capture_console, reset_console):
+        """print_json() should write to stdout, not stderr."""
+        out, err = capture_console
+        _console.print_json({"key": "value"})
+        assert "key" in out.getvalue()
+        assert "value" in out.getvalue()
+        assert err.getvalue() == ""
+
+    def test_print_json_always_shown(self, capture_console, reset_console):
+        """print_json() should be shown regardless of verbose/debug flags."""
+        out, _err = capture_console
+        _console.print_json({"schemaVersion": 2})
+        assert "schemaVersion" in out.getvalue()
+
+    def test_print_json_formats_as_json(self, capture_console, reset_console):
+        """print_json() should produce valid JSON-formatted output."""
+        out, _err = capture_console
+        _console.print_json({"a": 1, "b": [1, 2, 3]})
+        output = out.getvalue()
+        assert '"a"' in output
+        assert '"b"' in output

@@ -145,3 +145,34 @@ class TestAuthCLI:
         assert result.exit_code == 0
         assert "Logged in to public.ecr.aws" in result.stdout
         assert "expires" in result.stdout.lower()
+
+    def test_auth_login_displays_already_expired_when_past_datetime(self, mocker: Any) -> None:
+        """Should display 'already expired' when service returns a past datetime."""
+        past = datetime(2000, 1, 1, 0, 0, 0, tzinfo=UTC)
+        mocker.patch("margot.commands.auth.auth_service.login", return_value=past)
+
+        result = runner.invoke(
+            app,
+            ["auth", "login", "public.ecr.aws", "--username", "AWS", "--password-stdin"],
+            input="mytoken\n",
+        )
+
+        assert result.exit_code == 0
+        assert "Logged in to public.ecr.aws" in result.stdout
+        assert "already expired" in result.stdout
+
+    def test_auth_logout_service_raises_exits_1(self, mocker: Any) -> None:
+        """Should exit 1 with error message when service raises."""
+        mocker.patch(
+            "margot.commands.auth.auth_service.logout",
+            side_effect=Exception("connection refused"),
+        )
+
+        result = runner.invoke(
+            app,
+            ["auth", "logout", "public.ecr.aws"],
+        )
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "Logout failed" in output

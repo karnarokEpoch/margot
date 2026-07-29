@@ -9,6 +9,7 @@ from pytest import raises
 from margot import console
 from margot.domain.models import PackageType
 from margot.services import pull as pull_service
+from margot.services.pull import _available_layer_types
 
 
 def _make_manifest(
@@ -520,3 +521,31 @@ class TestPullArtifactVerbose:
         pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
         assert err.getvalue() == ""
         assert out.getvalue() == ""
+
+
+class TestAvailableLayerTypes:
+    """Unit tests for _available_layer_types helper."""
+
+    def test_empty_layers_returns_no_layers_present(self) -> None:
+        """Should return 'No layers present.' for an empty list."""
+        result = _available_layer_types([])
+
+        assert result == "No layers present."
+
+    def test_known_media_type_shows_friendly_name(self) -> None:
+        """Should include friendly name and full media type for known types."""
+        layers = [{"mediaType": "application/vnd.org.margo.component.compose.tar+gzip"}]
+
+        result = _available_layer_types(layers)
+
+        assert "compose" in result
+        assert "application/vnd.org.margo.component.compose.tar+gzip" in result
+
+    def test_unknown_media_type_shows_raw_string(self) -> None:
+        """Should show raw mediaType string without friendly name wrapper for unknown types."""
+        layers = [{"mediaType": "application/vnd.unknown.type+json"}]
+
+        result = _available_layer_types(layers)
+
+        assert "application/vnd.unknown.type+json" in result
+        assert result == "Available layer types: application/vnd.unknown.type+json"

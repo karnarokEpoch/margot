@@ -52,6 +52,18 @@ class TestFetchCLI:
         output = result.stdout + result.stderr
         assert "Error fetching manifest" in output
 
+    def test_fetch_success_outputs_valid_json(self, mocker: Any, mock_manifest: dict[str, Any]) -> None:
+        """Manifest output should be pretty-printed JSON containing all top-level fields."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
+
+        result = runner.invoke(app, ["fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
+
+        assert result.exit_code == 0
+        assert "schemaVersion" in result.stdout
+        assert "mediaType" in result.stdout
+
     def test_margot_version_flag(self) -> None:
         """Should print version with --version flag."""
         result = runner.invoke(app, ["--version"])
