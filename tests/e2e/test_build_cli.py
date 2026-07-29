@@ -274,6 +274,26 @@ class TestBuildAllSkipsMissingE2E:
         assert result.exit_code == 0
         assert "Built" in plain
 
+    def test_build_all_reraises_non_skip_value_error(self, cli_project_partial: Path, mocker: Any) -> None:
+        """Should exit 1 when --type all triggers a ValueError unrelated to missing component."""
+        from margot.domain.models import PackageType
+
+        def _raise_for_compose(package_type: PackageType, **kwargs: Any) -> list[Any]:
+            if package_type.value == "compose":
+                raise ValueError("invalid version format")
+            return []
+
+        mocker.patch("margot.commands.build.build_service.build", side_effect=_raise_for_compose)
+
+        result = runner.invoke(
+            app,
+            ["build", "--type", "all", "--build-dir", str(cli_project_partial / ".dist")],
+        )
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 1
+        assert "invalid version format" in plain
+
 
 class TestBuildMultiType:
     """E2E tests for multiple -t flags."""
