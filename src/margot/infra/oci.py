@@ -77,3 +77,25 @@ class OrasClient:
         console.debug(f"Download blob: {digest} → {outfile}")
         self._client.download_blob(uri, digest, outfile)
         return outfile
+
+    def login(self, hostname: str, username: str, password: str) -> None:
+        """
+        Authenticate with an OCI registry.
+
+        Args:
+            hostname: Registry hostname (e.g. 'public.ecr.aws').
+            username: Username (e.g. 'AWS' for ECR).
+            password: Password or token.
+        """
+        console.debug(f"Login: {hostname} as {username}")
+        self._client.login(username=username, password=password, hostname=hostname)
+
+    def logout(self, hostname: str) -> None:
+        """
+        Remove stored credentials for registry.
+
+        Args:
+            hostname: Registry hostname.
+        """
+        console.debug(f"Logout: {hostname}")
+        self._client.logout(hostname=hostname)
