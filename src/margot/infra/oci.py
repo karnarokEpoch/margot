@@ -1,8 +1,12 @@
 """OCI registry adapter: oras-py wrapper."""
 
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
+import oras.defaults
+import oras.oci
 from oras.client import OrasClient as OrasClientLib
 
 from margot import console
@@ -129,32 +133,28 @@ class OrasClient:
 
         margo_dir = Path(build_dir) / version / "margo"
 
-        # Required file
-        files: list[str] = [
-            f"{margo_dir / 'app.yaml'}:application/vnd.margo.app.description.v1+yaml",
+        # Build file list: (path, media_type, annotation_title)
+        file_entries: list[tuple[Path, str, str]] = [
+            (margo_dir / "app.yaml", "application/vnd.margo.app.description.v1+yaml", "app.yaml"),
         ]
-
-        # Optional files
-        optional_files = [
-            (margo_dir / "resources" / "icon.png", "application/vnd.margo.app.icon.v1+png"),
-            (margo_dir / "resources" / "license.txt", "application/vnd.margo.app.license.v1+plain"),
-            (margo_dir / "resources" / "release-notes.md", "application/vnd.margo.app.releaseNotes.v1+markdown"),
-            (margo_dir / "resources" / "description.md", "application/vnd.margo.app.descriptionFile.v1+markdown"),
+        optional = [
+            (margo_dir / "resources" / "icon.png", "application/vnd.margo.app.icon.v1+png", "resources/icon.png"),
+            (margo_dir / "resources" / "license.txt", "application/vnd.margo.app.license.v1+plain", "resources/license.txt"),
+            (margo_dir / "resources" / "release-notes.md", "application/vnd.margo.app.releaseNotes.v1+markdown", "resources/release-notes.md"),
+            (margo_dir / "resources" / "description.md", "application/vnd.margo.app.descriptionFile.v1+markdown", "resources/description.md"),
         ]
-        for file_path, media_type in optional_files:
-            if file_path.exists():
-                files.append(f"{file_path}:{media_type}")
+        for path, mt, title in optional:
+            if path.exists():
+                file_entries.append((path, mt, title))
 
-        manifest_annotations = {
-            "org.opencontainers.image.title": name,
-            "org.opencontainers.image.description": description,
-        }
-
-        self._client.push(
-            files=files,
+        self._push_artifact(
             target=target,
-            manifest_config="/dev/null:application/vnd.oci.empty.v1+json",
-            manifest_annotations=manifest_annotations,
+            artifact_type="application/vnd.margo.app.v1+json",
+            file_entries=file_entries,
+            manifest_annotations={
+                "org.opencontainers.image.title": name,
+                "org.opencontainers.image.description": description,
+            },
         )
 
     def push_compose(
@@ -179,20 +179,18 @@ class OrasClient:
         """
         target = f"{registry}/{repository}:{version}"
         console.debug(f"Push compose: {target}")
-
-        files = [f"{archive_path}:application/vnd.org.margo.component.compose.tar+gzip"]
-        manifest_annotations = {
-            "org.margo.component.type": "compose",
-            "org.margo.component.version": version,
-            "org.opencontainers.image.title": name,
-            "org.opencontainers.image.description": description,
-        }
-
-        self._client.push(
-            files=files,
+        self._push_artifact(
             target=target,
-            manifest_config="/dev/null:application/vnd.oci.empty.v1+json",
-            manifest_annotations=manifest_annotations,
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            file_entries=[
+                (Path(archive_path), "application/vnd.org.margo.component.compose.tar+gzip", Path(archive_path).name),
+            ],
+            manifest_annotations={
+                "org.margo.component.type": "compose",
+                "org.margo.component.version": version,
+                "org.opencontainers.image.title": name,
+                "org.opencontainers.image.description": description,
+            },
         )
 
     def push_quadlet(
@@ -217,18 +215,65 @@ class OrasClient:
         """
         target = f"{registry}/{repository}:{version}"
         console.debug(f"Push quadlet: {target}")
-
-        files = [f"{archive_path}:application/vnd.org.margo.component.quadlet.tar+gzip"]
-        manifest_annotations = {
-            "org.margo.component.type": "quadlet",
-            "org.margo.component.version": version,
-            "org.opencontainers.image.title": name,
-            "org.opencontainers.image.description": description,
-        }
-
-        self._client.push(
-            files=files,
+        self._push_artifact(
             target=target,
-            manifest_config="/dev/null:application/vnd.oci.empty.v1+json",
-            manifest_annotations=manifest_annotations,
+            artifact_type="application/vnd.org.margo.component.quadlet+json",
+            file_entries=[
+                (Path(archive_path), "application/vnd.org.margo.component.quadlet.tar+gzip", Path(archive_path).name),
+            ],
+            manifest_annotations={
+                "org.margo.component.type": "quadlet",
+                "org.margo.component.version": version,
+                "org.opencontainers.image.title": name,
+                "org.opencontainers.image.description": description,
+            },
         )
+
+    def _push_artifact(
+        self,
+        target: str,
+        artifact_type: str,
+        file_entries: list[tuple[Path, str, str]],
+        manifest_annotations: dict[str, str],
+    ) -> None:
+        """Low-level OCI artifact push with artifactType support.
+
+        Args:
+            target: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0).
+            artifact_type: The artifactType to set in the manifest.
+            file_entries: List of (path, media_type, annotation_title) tuples for layers.
+            manifest_annotations: Annotations to set on the manifest.
+        """
+        container = self._client.get_container(target)
+        self._client.auth.load_configs(container)
+
+        manifest = oras.oci.NewManifest()
+        manifest["artifactType"] = artifact_type
+
+        # Build and upload layers
+        layers = []
+        for file_path, media_type, title in file_entries:
+            layer = oras.oci.NewLayer(blob_path=str(file_path), media_type=media_type)
+            layer["annotations"] = {oras.defaults.annotation_title: title}
+            response = self._client.upload_blob(blob=str(file_path), container=container, layer=layer)
+            self._client._check_200_response(response)
+            layers.append(layer)
+
+        # Build and upload the empty config blob
+        conf, _ = oras.oci.ManifestConfig(path=None, media_type="application/vnd.oci.empty.v1+json")
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        tmp.write("{}")
+        tmp.close()
+        try:
+            response = self._client.upload_blob(blob=tmp.name, container=container, layer=conf)
+            self._client._check_200_response(response)
+        finally:
+            os.unlink(tmp.name)
+
+        # Assemble manifest
+        manifest["config"] = conf
+        manifest["layers"] = layers
+        manifest["annotations"] = manifest_annotations
+
+        response = self._client.upload_manifest(manifest=manifest, container=container)
+        self._client._check_200_response(response)
