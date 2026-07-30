@@ -46,9 +46,12 @@ appVersion: "2.1.0"
 description: "NGINX + Apache web platform"
 annotations:
   team: platform-engineering
-maintainers:
+author:
   - name: Alice Example
     email: alice@example.com
+organization:
+  - name: Example Corp
+    site: https://example.com
 
 margo:
   directory: margo
@@ -98,9 +101,7 @@ metadata:
       icon: ./resources/icon.png
       descriptionFile: ./resources/description.md
       tags: ["web", "reverse-proxy"]
-    organization:
-      - name: Example Corp
-        site: https://example.com
+    organization: {{ app.organization | to_yaml }}
 
 deploymentProfiles:
   - type: helm

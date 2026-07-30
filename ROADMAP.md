@@ -75,7 +75,7 @@ any network call. Green unit + integration + E2E tests.
 ### Tasks (thin vertical slice)
 
 | # | Task | Layer | Notes |
-|---|------|-------|-------|
+| --- | ------ | ------- | ------- |
 | 1 | Credentials file R/W + expiry check | `infra/credentials.py` | `~/.config/margot/credentials.toml`. `check_credentials(registry)` warns/fails near/past expiry. |
 | 2 | oras-py login/logout wrappers | `infra/oci.py` | Extend existing OCI infra with `login(...)` and `logout(...)`. |
 | 3 | Auth service (login/logout orchestration) | `services/auth.py` | Call oras-py login/logout + optional expiry persistence. No registry-specific logic. |
@@ -128,6 +128,7 @@ registry operation and seeing it fail. Developers need a quick sanity check befo
 push, especially given ECR's 12-hour token TTL.
 
 **What it should show:**
+
 - For each registry tracked in `~/.config/margot/credentials.toml`: registry hostname,
   expiry timestamp, time remaining (or EXPIRED), and a clear VALID / EXPIRING / EXPIRED
   status label.
@@ -154,6 +155,7 @@ anchors) are untested.
 **Constraint:** for compose and quadlet, plain string replace on text files is the right
 model — developers work with real, runnable files that contain placeholders, and `build`
 produces the shippable tarball. The engine should stay simple. What needs work is:
+
 - A formal, tested list of all supported placeholders and their resolved values.
 - Confidence that substitution handles common YAML formatting patterns correctly.
 - Clear error or warning when a placeholder in a file has no declared value.
@@ -189,7 +191,7 @@ variable, rather than emitting empty YAML.
 **Template context** (derived from `margo.yaml`, read-only):
 
 ```text
-app.id  app.name  app.version  app.description  app.annotations  app.maintainers
+app.id  app.name  app.version  app.description  app.annotations  app.author  app.organization
 margo.version  margo.tag  margo.ref  margo.repository  margo.directory
 compose.directory  compose.repository
 compose.variants                      # ordered list of variant objects
@@ -262,7 +264,7 @@ shim. No deprecation window.
 ## Completed Sprints
 
 | Sprint | Capability | Release |
-|--------|-----------|---------|
+| -------- | ----------- | --------- |
 | Sprint 1 | `margot fetch` — anonymous OCI manifest retrieval, pretty-printed JSON output, URI validation, `margot --version` | [0.1.0](https://github.com/karnarokEpoch/margot/releases/tag/0.1.0) |
 | Sprint 2 | `margot pull` — anonymous OCI artifact pull to disk, artifact type detection via `artifactType`, layer naming (title annotation → manifest-level fallback), `--force` override for unknown types, shared `domain/uri.py` | — |
 | Sprint 3 | `margot build` — local artifact build for margo/compose/quadlet package types, placeholder substitution (`<app_tag>` from `appVersion`, `<margo_tag>`, `<compose_tag>`, `<quadlet_tag>`), variant support, idempotent output dir, multi-type `-t` flag, `margo.yaml` project descriptor, dynaconf config layering, pure-Python filesystem ops | — |

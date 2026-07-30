@@ -11,9 +11,12 @@ appVersion: "1.0.0"
 description: "Human-readable description of the application"
 annotations:
   opentelemetry.io/instrumented: "true"
-maintainers:
+author:
   - name: Alice Example
     email: alice@example.com
+organization:
+  - name: Example Corp
+    site: https://example.com
 
 margo:
   directory: margo
@@ -40,14 +43,15 @@ quadlet:
 ## Fields
 
 | Field | Required | Description |
-|-------|----------|-------------|
+| ------- | ---------- | ------------- |
 | `apiVersion` | Yes | Config schema version. Currently `v1`. |
 | `id` | Yes | Margo application identifier. Lowercase letters, digits, and dashes only. Used as the base for derived component names and deployment profile IDs. |
 | `name` | Yes | Application name. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation. |
 | `appVersion` | No | Human-facing application version. Not validated as SemVer. Exposed as `app.version` in templates. |
 | `description` | Yes | Short description. Used in OCI description annotation and exposed as `app.description` in templates. |
 | `annotations` | No | Arbitrary key/value pairs passed as OCI annotations. |
-| `maintainers` | No | List of maintainers, each with `name` (required) and `email` (optional). |
+| `author` | No | List of authors, each with `name` (optional) and `email` (optional). Maps to `metadata.catalog.author` in the Margo spec. |
+| `organization` | No | List of organizations, each with `name` (required) and `site` (optional). Maps to `metadata.catalog.organization` in the Margo spec. |
 
 ## Components
 
@@ -57,7 +61,7 @@ component types are `margo`, `compose`, and `quadlet`.
 Every component shares these fields:
 
 | Field | Required | Description |
-|-------|----------|-------------|
+| ------- | ---------- | ------------- |
 | `directory` | No | Path (relative to project root) to the component source directory. Default: component type name (`margo`, `compose`, `quadlet`). |
 | `version` | Yes | Base version for the component. Used directly as OCI tag in flat mode; used as the derivation base for variant versions. |
 | `repository` | No | OCI repository for this component. Overrides the global `repository` from tool config / CLI flag / env var. |
@@ -96,7 +100,7 @@ This produces two artifacts built from `compose/default/` and `compose/minimal/`
 ### Variant fields
 
 | Field | Required | Description |
-|-------|----------|-------------|
+| ------- | ---------- | ------------- |
 | `name` | Yes | Variant name. Maps to `<directory>/<name>/` subdirectory. |
 | `version` | No | Override the derived version. Default: `<component-version>+<type>-<variant-name>`. |
 | `component` | No | Override the derived component name. Default: `<id>-<type>-<variant-name>`. |
@@ -124,7 +128,7 @@ With the example above (`version: 2.1.0`, compose variants `default` and `minima
 For example:
 
 | `margo.yaml` version | OCI tag pushed |
-|-----------------------|----------------|
+| ----------------------- | ---------------- |
 | `1.0.0+margo` | `1.0.0_margo` |
 | `2.1.0+compose-default` | `2.1.0_compose-default` |
 | `2.1.0+quadlet-minimal` | `2.1.0_quadlet-minimal` |
@@ -138,7 +142,7 @@ When `app.yaml.jinja` is present, margot renders it with Jinja2 using a context 
 context exposes these fields:
 
 ```text
-app.id  app.name  app.version  app.description  app.annotations  app.maintainers
+app.id  app.name  app.version  app.description  app.annotations  app.author  app.organization
 
 margo.version  margo.tag  margo.ref  margo.repository  margo.component
 

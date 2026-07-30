@@ -87,9 +87,12 @@ appVersion: "1.0.0"                # application version — used for <app_tag> 
 description: "Human-readable description of the application"
 annotations:                       # arbitrary key/value pairs, optional
   opentelemetry.io/instrumented: "true"
-maintainers:                       # optional list
+author:                            # optional list
   - name: Alice Example
     email: alice@example.com
+organization:                      # optional list
+  - name: Example Corp
+    site: https://example.com
 
 margo:
   directory: margo                 # path to the margo artifact source dir (contains app.yaml + resources/)
