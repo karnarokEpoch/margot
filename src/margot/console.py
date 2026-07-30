@@ -8,7 +8,10 @@ Verbosity is controlled by two module-level flags:
   - _debug: Enables debug() output (low-level infra calls). Implies _verbose.
 """
 
+from datetime import UTC, datetime
+import inspect
 import json
+import os
 import sys
 
 from rich.console import Console
@@ -19,6 +22,38 @@ _stdout: Console | None = None
 _stderr: Console | None = None
 _verbose: bool = False
 _debug: bool = False
+
+
+def _now_ms() -> str:
+    """Current time as HH:MM:SS.mmm string."""
+    now = datetime.now(tz=UTC).astimezone()
+    return now.strftime("%H:%M:%S.") + f"{now.microsecond // 1000:03d}"
+
+
+def _caller_location() -> str:
+    """Walk the call stack to find the first frame outside console.py itself.
+
+    Return a short module path like 'services/push' or 'infra/oci'.
+    Strip the 'src/margot/' prefix and '.py' suffix.
+    Return 'margot' as fallback.
+    """
+    for frame_info in inspect.stack()[2:]:  # skip _caller_location + the console fn itself
+        filename = frame_info.filename
+        if "console.py" in filename:
+            continue
+        # Try to make relative to src/margot/
+        try:
+            rel = os.path.relpath(filename)
+            # Strip leading src/margot/ and .py
+            rel = rel.replace("\\", "/")
+            for prefix in ("src/margot/", "margot/"):
+                if prefix in rel:
+                    rel = rel.split(prefix, 1)[1]
+                    break
+            return rel.removesuffix(".py")
+        except ValueError:
+            return "margot"
+    return "margot"
 
 
 def _get_stdout() -> Console:
@@ -72,20 +107,30 @@ def print_json(data: dict | list) -> None:
 
 
 def warning(message: str) -> None:
-    """Print a yellow warning message to stderr. Always shown."""
-    _get_stderr().print(f"[yellow]Warning:[/yellow] {message}")
+    """Print a yellow warning to stderr. Always shown."""
+    if _debug:
+        _get_stderr().print(
+            f"[dim]{_now_ms()}[/dim] [yellow]warning:[/yellow] [dim cyan][{_caller_location()}][/dim cyan] {message}"
+        )
+    else:
+        _get_stderr().print(f"[yellow]warning:[/yellow] {message}")
 
 
 def info(message: str) -> None:
-    """Print a dim step-level info message to stderr. Only shown if verbose=True."""
-    if _verbose:
-        _get_stderr().print(f"[dim]{message}[/dim]")
+    """Print a dim info message to stderr. Only shown if verbose=True."""
+    if not _verbose:
+        return
+    if _debug:
+        _get_stderr().print(f"[dim]{_now_ms()} info: [{_caller_location()}] {message}[/dim]")
+    else:
+        _get_stderr().print(f"[dim]info: {message}[/dim]")
 
 
 def debug(message: str) -> None:
-    """Print a dim cyan debug message to stderr. Only shown if debug=True."""
-    if _debug:
-        _get_stderr().print(f"[dim cyan]debug:[/dim cyan] [dim]{message}[/dim]")
+    """Print a debug message to stderr. Only shown if debug=True."""
+    if not _debug:
+        return
+    _get_stderr().print(f"[dim]{_now_ms()} debug: [{_caller_location()}] {message}[/dim]")
 
 
 def fatal(message: str) -> None:

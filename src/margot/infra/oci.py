@@ -1,6 +1,7 @@
 """OCI registry adapter: oras-py wrapper."""
 
 from datetime import UTC, datetime
+import logging
 from pathlib import Path
 import tempfile
 from typing import Any
@@ -12,6 +13,34 @@ import oras.oci
 from margot import console
 
 
+class _OrasLogHandler(logging.Handler):
+    """Route oras-py log records to margot's console."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        msg = self.format(record)
+        level = record.levelno
+        if level >= logging.WARNING:
+            console.warning(f"[oras] {msg}")
+        elif level >= logging.INFO:
+            console.info(f"[oras] {msg}")
+        else:  # DEBUG
+            console.debug(f"[oras] {msg}")
+
+
+def _configure_oras_logger() -> None:
+    """Attach margot's log handler to the oras logger. Idempotent."""
+    oras_logger = logging.getLogger("oras.logger")
+    # Remove any existing handlers to avoid duplicate output
+    for handler in list(oras_logger.handlers):
+        oras_logger.removeHandler(handler)
+    handler = _OrasLogHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    oras_logger.addHandler(handler)
+    oras_logger.propagate = False
+    level = logging.DEBUG if console.is_debug() else (logging.INFO if console.is_verbose() else logging.WARNING)
+    oras_logger.setLevel(level)
+
+
 class OrasClient(OrasClientLib):
     """OCI client extending oras.client.OrasClient for anonymous OCI operations.
 
@@ -21,6 +50,7 @@ class OrasClient(OrasClientLib):
     def __init__(self) -> None:
         """Initialize OrasClient for anonymous registry access."""
         super().__init__()
+        _configure_oras_logger()
 
     def get_manifest(self, uri: str) -> dict[str, Any]:
         """
@@ -256,7 +286,6 @@ class OrasClient(OrasClientLib):
         self.auth.load_configs(container)
 
         manifest = oras.oci.NewManifest()
-        # Rebuild with artifactType right after mediaType
         manifest = {
             "schemaVersion": manifest["schemaVersion"],
             "mediaType": manifest["mediaType"],
@@ -271,12 +300,14 @@ class OrasClient(OrasClientLib):
         for file_path, media_type, title in file_entries:
             layer = oras.oci.NewLayer(blob_path=str(file_path), media_type=media_type)
             layer["annotations"] = {oras.defaults.annotation_title: title}
+            console.debug(f"  layer: {title} [{media_type}] ({layer['size']} bytes, {layer['digest']})")
             response = self.upload_blob(blob=str(file_path), container=container, layer=layer)
             self._check_200_response(response)
             layers.append(layer)
 
         # Build and upload the empty config blob
         conf, _ = oras.oci.ManifestConfig(path=None, media_type="application/vnd.oci.empty.v1+json")
+        console.debug(f"  config: {conf['mediaType']} ({conf['size']} bytes, {conf['digest']})")
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
             tmp.write("{}")
             tmp_path = Path(tmp.name)
@@ -294,6 +325,9 @@ class OrasClient(OrasClientLib):
             "org.opencontainers.image.created": created,
             **manifest_annotations,
         }
+        console.debug(f"  annotations: {list(manifest['annotations'].keys())}")
+        console.debug(f"  uploading manifest → {target}")
 
+        console.debug(f"  manifest uploaded ({response.status_code})")
         response = self.upload_manifest(manifest=manifest, container=container)
         self._check_200_response(response)

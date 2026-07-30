@@ -149,7 +149,7 @@ class TestCheckCredentials:
         check_credentials("public.ecr.aws", credentials_file=creds_file)
 
         err_text = err.getvalue()
-        assert "Warning:" in err_text
+        assert "warning:" in err_text
         assert "public.ecr.aws" in err_text
         assert "minutes" in err_text
 

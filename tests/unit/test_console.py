@@ -1,12 +1,20 @@
 """Unit tests for margot.console module."""
 
 from io import StringIO
+import re
 
 from pytest import fixture, raises
 from rich.console import Console
 from typer import Exit
 
 import margot.console as _console
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text for plain-string assertions."""
+    return _ANSI_RE.sub("", text)
 
 
 @fixture
@@ -19,10 +27,10 @@ def capture_console():
     original_get_stderr = _console._get_stderr
 
     def mock_get_stdout():
-        return Console(file=out)
+        return Console(file=out, width=200, no_color=True)
 
     def mock_get_stderr():
-        return Console(file=err)
+        return Console(file=err, width=200, no_color=True)
 
     _console._get_stdout = mock_get_stdout
     _console._get_stderr = mock_get_stderr
@@ -140,19 +148,31 @@ class TestWarning:
         assert "Test warning" in err_text
 
     def test_warning_includes_prefix(self, capture_console, reset_console):
-        """warning() output should include 'Warning:' prefix."""
+        """warning() output should include 'warning:' prefix."""
         _out, err = capture_console
         _console.warning("Test warning")
         err_text = err.getvalue()
 
-        assert "Warning:" in err_text
+        assert "warning:" in err_text
         assert "Test warning" in err_text
 
     def test_warning_always_shown(self, capture_console, reset_console):
         """warning() should be shown regardless of verbose/debug flags."""
         _out, err = capture_console
         _console.warning("Warning with no flags")
-        assert "Warning:" in err.getvalue()
+        assert "warning:" in err.getvalue()
+
+    def test_warning_debug_mode_has_timestamp_and_location(self, capture_console, reset_console):
+        """warning() in debug mode should include timestamp and [location] bracket."""
+        _out, err = capture_console
+        _console.set_debug(True)
+        _console.warning("creds expire")
+        err_text = _strip_ansi(err.getvalue())
+        assert "warning:" in err_text
+        assert "creds expire" in err_text
+        assert re.search(r"\d{2}:\d{2}:\d{2}\.\d{3}", err_text)
+        assert "[" in err_text
+        assert "]" in err_text
 
 
 class TestInfo:
@@ -176,6 +196,7 @@ class TestInfo:
 
         assert out_text == ""
         assert "Test info" in err_text
+        assert "info:" in err_text
 
     def test_info_shown_with_debug(self, capture_console, reset_console):
         """info() should write to stderr when debug=True (debug implies verbose)."""
@@ -187,6 +208,19 @@ class TestInfo:
 
         assert out_text == ""
         assert "Test info" in err_text
+        assert "info:" in err_text
+
+    def test_info_debug_mode_has_timestamp_and_location(self, capture_console, reset_console):
+        """info() in debug mode should include timestamp and [location] bracket."""
+        _out, err = capture_console
+        _console.set_debug(True)
+        _console.info("step completed")
+        err_text = _strip_ansi(err.getvalue())
+        assert "info:" in err_text
+        assert "step completed" in err_text
+        assert re.search(r"\d{2}:\d{2}:\d{2}\.\d{3}", err_text)
+        assert "[" in err_text
+        assert "]" in err_text
 
 
 class TestDebug:
@@ -230,6 +264,18 @@ class TestDebug:
 
         assert "debug:" in err_text
         assert "Test debug message" in err_text
+
+    def test_debug_has_timestamp_and_location(self, capture_console, reset_console):
+        """debug() should include timestamp and [location] bracket."""
+        _out, err = capture_console
+        _console.set_debug(True)
+        _console.debug("low level call")
+        err_text = _strip_ansi(err.getvalue())
+        assert "debug:" in err_text
+        assert "low level call" in err_text
+        assert re.search(r"\d{2}:\d{2}:\d{2}\.\d{3}", err_text)
+        assert "[" in err_text
+        assert "]" in err_text
 
 
 class TestFatal:

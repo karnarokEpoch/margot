@@ -1,11 +1,12 @@
 """Unit tests for infra/oci.py OrasClient wrapper."""
 
+import logging
 from typing import Any
 
 from oras.client import OrasClient as OrasClientLib
 
 from margot import console
-from margot.infra.oci import OrasClient
+from margot.infra.oci import OrasClient, _OrasLogHandler
 
 FAKE_OUTDIR = "/fake/outdir"
 FAKE_FILE_A = "/fake/outdir/a"
@@ -75,6 +76,40 @@ class TestOrasClient:
         result = client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
         assert result == FAKE_BLOB_OUT
         mock_download.assert_called_once_with("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
+
+    def test_oras_logger_configured_on_init(self, mocker: Any) -> None:
+        """After OrasClient(), oras.logger logger should have an _OrasLogHandler."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        OrasClient()
+        oras_logger = logging.getLogger("oras.logger")
+        assert any(isinstance(h, _OrasLogHandler) for h in oras_logger.handlers)
+
+    def test_oras_logger_level_debug_when_debug_mode(self, mocker: Any) -> None:
+        """Logger level should be DEBUG when console debug mode is active."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mocker.patch("margot.infra.oci.console.is_debug", return_value=True)
+        mocker.patch("margot.infra.oci.console.is_verbose", return_value=True)
+        OrasClient()
+        oras_logger = logging.getLogger("oras.logger")
+        assert oras_logger.level == logging.DEBUG
+
+    def test_oras_logger_level_info_when_verbose_only(self, mocker: Any) -> None:
+        """Logger level should be INFO when verbose but not debug."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mocker.patch("margot.infra.oci.console.is_debug", return_value=False)
+        mocker.patch("margot.infra.oci.console.is_verbose", return_value=True)
+        OrasClient()
+        oras_logger = logging.getLogger("oras.logger")
+        assert oras_logger.level == logging.INFO
+
+    def test_oras_logger_level_warning_when_quiet(self, mocker: Any) -> None:
+        """Logger level should be WARNING when neither verbose nor debug."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mocker.patch("margot.infra.oci.console.is_debug", return_value=False)
+        mocker.patch("margot.infra.oci.console.is_verbose", return_value=False)
+        OrasClient()
+        oras_logger = logging.getLogger("oras.logger")
+        assert oras_logger.level == logging.WARNING
 
     def test_login_delegates_to_client(self, mocker: Any) -> None:
         """login() should delegate to the underlying client with correct kwargs."""
