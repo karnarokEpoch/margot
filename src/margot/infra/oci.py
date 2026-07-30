@@ -145,7 +145,6 @@ class OrasClient:
             if file_path.exists():
                 files.append(f"{file_path}:{media_type}")
 
-        manifest_config = {"mediaType": "application/vnd.margo.app.v1+json"}
         manifest_annotations = {
             "org.opencontainers.image.title": name,
             "org.opencontainers.image.description": description,
@@ -154,7 +153,7 @@ class OrasClient:
         self._client.push(
             files=files,
             target=target,
-            manifest_config=manifest_config,
+            manifest_config="/dev/null:application/vnd.oci.empty.v1+json",
             manifest_annotations=manifest_annotations,
         )
 
@@ -182,7 +181,6 @@ class OrasClient:
         console.debug(f"Push compose: {target}")
 
         files = [f"{archive_path}:application/vnd.org.margo.component.compose.tar+gzip"]
-        manifest_config = {"mediaType": "application/vnd.org.margo.component.compose+json"}
         manifest_annotations = {
             "org.margo.component.type": "compose",
             "org.margo.component.version": version,
@@ -193,7 +191,7 @@ class OrasClient:
         self._client.push(
             files=files,
             target=target,
-            manifest_config=manifest_config,
+            manifest_config="/dev/null:application/vnd.oci.empty.v1+json",
             manifest_annotations=manifest_annotations,
         )
 
@@ -221,7 +219,6 @@ class OrasClient:
         console.debug(f"Push quadlet: {target}")
 
         files = [f"{archive_path}:application/vnd.org.margo.component.quadlet.tar+gzip"]
-        manifest_config = {"mediaType": "application/vnd.org.margo.component.quadlet+json"}
         manifest_annotations = {
             "org.margo.component.type": "quadlet",
             "org.margo.component.version": version,
@@ -232,6 +229,6 @@ class OrasClient:
         self._client.push(
             files=files,
             target=target,
-            manifest_config=manifest_config,
+            manifest_config="/dev/null:application/vnd.oci.empty.v1+json",
             manifest_annotations=manifest_annotations,
         )

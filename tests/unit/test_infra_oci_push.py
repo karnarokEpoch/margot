@@ -33,7 +33,7 @@ class TestPushMargo:
         mock_lib.push.assert_called_once_with(
             files=[f"{margo_dir / 'app.yaml'}:application/vnd.margo.app.description.v1+yaml"],
             target="public.ecr.aws/g2n4p2m7/margo:1.0.0",
-            manifest_config={"mediaType": "application/vnd.margo.app.v1+json"},
+            manifest_config="/dev/null:application/vnd.oci.empty.v1+json",
             manifest_annotations={
                 "org.opencontainers.image.title": "testapp",
                 "org.opencontainers.image.description": "Test application",
@@ -117,7 +117,7 @@ class TestPushCompose:
         mock_lib.push.assert_called_once_with(
             files=["/build/1.0.0/testapp-1.0.0.tgz:application/vnd.org.margo.component.compose.tar+gzip"],
             target="public.ecr.aws/g2n4p2m7/margo:1.0.0",
-            manifest_config={"mediaType": "application/vnd.org.margo.component.compose+json"},
+            manifest_config="/dev/null:application/vnd.oci.empty.v1+json",
             manifest_annotations={
                 "org.margo.component.type": "compose",
                 "org.margo.component.version": "1.0.0",
@@ -148,7 +148,7 @@ class TestPushQuadlet:
         mock_lib.push.assert_called_once_with(
             files=["/build/1.0.0/testapp-1.0.0.tgz:application/vnd.org.margo.component.quadlet.tar+gzip"],
             target="public.ecr.aws/g2n4p2m7/margo:1.0.0",
-            manifest_config={"mediaType": "application/vnd.org.margo.component.quadlet+json"},
+            manifest_config="/dev/null:application/vnd.oci.empty.v1+json",
             manifest_annotations={
                 "org.margo.component.type": "quadlet",
                 "org.margo.component.version": "1.0.0",
