@@ -12,15 +12,15 @@ import oras.oci
 from margot import console
 
 
-class OrasClient:
-    """Wrapper around oras.client.OrasClient for anonymous OCI operations.
+class OrasClient(OrasClientLib):
+    """OCI client extending oras.client.OrasClient for anonymous OCI operations.
 
     Provides pull() for bulk layer download and download_blob() for individual blob retrieval.
     """
 
     def __init__(self) -> None:
         """Initialize OrasClient for anonymous registry access."""
-        self._client = OrasClientLib()
+        super().__init__()
 
     def get_manifest(self, uri: str) -> dict[str, Any]:
         """
@@ -36,7 +36,7 @@ class OrasClient:
             Exception: If fetch fails.
         """
         console.debug(f"GET manifest: {uri}")
-        return self._client.get_manifest(uri)
+        return super().get_manifest(uri)
 
     def pull(self, uri: str, outdir: str) -> list[str]:
         """
@@ -58,7 +58,7 @@ class OrasClient:
             Exception: If pull fails.
         """
         console.debug(f"Pull layers: {uri} → {outdir}")
-        result = self._client.pull(target=uri, outdir=outdir)
+        result = super().pull(target=uri, outdir=outdir)
         if isinstance(result, list):
             return result
         return []
@@ -80,7 +80,7 @@ class OrasClient:
             Exception: If download fails.
         """
         console.debug(f"Download blob: {digest} → {outfile}")
-        self._client.download_blob(uri, digest, outfile)
+        super().download_blob(uri, digest, outfile)
         return outfile
 
     def login(self, hostname: str, username: str, password: str) -> None:
@@ -93,7 +93,7 @@ class OrasClient:
             password: Password or token.
         """
         console.debug(f"Login: {hostname} as {username}")
-        self._client.login(username=username, password=password, hostname=hostname)
+        super().login(username=username, password=password, hostname=hostname)
 
     def logout(self, hostname: str) -> None:
         """
@@ -103,7 +103,7 @@ class OrasClient:
             hostname: Registry hostname.
         """
         console.debug(f"Logout: {hostname}")
-        self._client.logout(hostname=hostname)
+        super().logout(hostname=hostname)
 
     def push_margo(  # noqa: PLR0913
         self,
@@ -252,8 +252,8 @@ class OrasClient:
             file_entries: List of (path, media_type, annotation_title) tuples for layers.
             manifest_annotations: Annotations to set on the manifest.
         """
-        container = self._client.get_container(target)
-        self._client.auth.load_configs(container)
+        container = self.get_container(target)
+        self.auth.load_configs(container)
 
         manifest = oras.oci.NewManifest()
         # Rebuild with artifactType right after mediaType
@@ -271,8 +271,8 @@ class OrasClient:
         for file_path, media_type, title in file_entries:
             layer = oras.oci.NewLayer(blob_path=str(file_path), media_type=media_type)
             layer["annotations"] = {oras.defaults.annotation_title: title}
-            response = self._client.upload_blob(blob=str(file_path), container=container, layer=layer)
-            self._client._check_200_response(response)  # noqa: SLF001
+            response = self.upload_blob(blob=str(file_path), container=container, layer=layer)
+            self._check_200_response(response)
             layers.append(layer)
 
         # Build and upload the empty config blob
@@ -281,8 +281,8 @@ class OrasClient:
             tmp.write("{}")
             tmp_path = Path(tmp.name)
         try:
-            response = self._client.upload_blob(blob=str(tmp_path), container=container, layer=conf)
-            self._client._check_200_response(response)  # noqa: SLF001
+            response = self.upload_blob(blob=str(tmp_path), container=container, layer=conf)
+            self._check_200_response(response)
         finally:
             tmp_path.unlink()
 
@@ -295,5 +295,5 @@ class OrasClient:
             **manifest_annotations,
         }
 
-        response = self._client.upload_manifest(manifest=manifest, container=container)
-        self._client._check_200_response(response)  # noqa: SLF001
+        response = self.upload_manifest(manifest=manifest, container=container)
+        self._check_200_response(response)

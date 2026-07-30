@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 from margot.infra.oci import OrasClient
 
@@ -12,8 +11,7 @@ class TestPushMargo:
 
     def test_push_margo_calls_client_push_with_correct_args(self, mocker: Any, tmp_path: Path) -> None:
         """Should call _push_artifact with correct target, artifact_type, file_entries, manifest_annotations."""
-        mock_lib = MagicMock()
-        mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
 
         # Create build dir structure
         margo_dir = tmp_path / "1.0.0" / "margo"
@@ -46,8 +44,7 @@ class TestPushMargo:
 
     def test_push_margo_includes_optional_files_when_present(self, mocker: Any, tmp_path: Path) -> None:
         """Should include optional resource files when they exist on disk."""
-        mock_lib = MagicMock()
-        mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
 
         # Create build dir with optional files
         margo_dir = tmp_path / "1.0.0" / "margo"
@@ -82,8 +79,7 @@ class TestPushMargo:
 
     def test_push_margo_skips_missing_optional_files(self, mocker: Any, tmp_path: Path) -> None:
         """Should skip optional files that don't exist on disk."""
-        mock_lib = MagicMock()
-        mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
 
         # Create build dir with only required file
         margo_dir = tmp_path / "1.0.0" / "margo"
@@ -113,8 +109,7 @@ class TestPushCompose:
 
     def test_push_compose_calls_client_push_with_correct_args(self, mocker: Any) -> None:
         """Should call _push_artifact with correct target, artifact_type, file_entries, manifest_annotations."""
-        mock_lib = MagicMock()
-        mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
 
         client = OrasClient()
         mocker.patch.object(client, "_push_artifact")
@@ -152,8 +147,7 @@ class TestPushQuadlet:
 
     def test_push_quadlet_calls_client_push_with_correct_args(self, mocker: Any) -> None:
         """Should call _push_artifact with correct target, artifact_type, file_entries, manifest_annotations."""
-        mock_lib = MagicMock()
-        mocker.patch("margot.infra.oci.OrasClientLib", return_value=mock_lib)
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
 
         client = OrasClient()
         mocker.patch.object(client, "_push_artifact")
