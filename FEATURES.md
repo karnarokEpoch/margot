@@ -300,7 +300,7 @@ tasks is **removed**. Artifact type disambiguation happens via `artifactType` fi
 Push built artifacts to OCI registry via ORAS.
 
 ```
-margot push [--type margo|compose|quadlet|all] [--version VERSION]
+margot push [--type margo|compose|quadlet|all]
               [--registry REG] [--repository REPO] [--build-dir DIR]
               [--variant VARIANT]
 ```
@@ -340,7 +340,7 @@ client.push(
 )
 ```
 
-**Registry auth:** credentials must be active. Run `margot login` before pushing.
+**Registry auth:** credentials must be active. Run `margot auth login` before pushing.
 
 ---
 
@@ -524,7 +524,7 @@ the tag string entirely.
 
 - Missing `margo.yaml` → clear error: `"margo.yaml not found in current directory. Run margot init or create it manually."` (exit 1)
 - Invalid OCI tag → reject immediately before any build/push step
-- Credentials expired or near-expiry → warn or hard-fail with `margot login` hint
+- Credentials expired or near-expiry → warn or hard-fail with `margot auth login` hint
 - oras-py push/pull failure → surface exception message, exit 1
 - Validation errors → rich table, exit 1
 
@@ -555,13 +555,13 @@ build_dir = ".dist"
 run_dir = ".run"
 ```
 
-### `margot login`
+### `margot auth login`
 
 Authenticate with an OCI registry and persist credentials.
 
 ```
-margot login [--registry REG] [--username USER] [--password-stdin]
-               [--save-expiry]
+margot auth login REGISTRY [--username USER] [--password-stdin]
+                  [--expiry-hours N]
 ```
 
 **How it works:**
@@ -594,12 +594,12 @@ print a warning and optionally prompt to re-login.
 
 ---
 
-### `margot logout`
+### `margot auth logout`
 
 Remove stored credentials for a registry.
 
 ```
-margot logout [--registry REG]
+margot auth logout REGISTRY
 ```
 
 ```python
@@ -624,7 +624,7 @@ def check_credentials(registry: str) -> None:
         return  # no expiry tracked, proceed
     remaining = expiry - datetime.now(UTC)
     if remaining <= timedelta(0):
-        raise CredentialsExpiredError(f"Credentials for {registry} expired. Run: margot login")
+        raise CredentialsExpiredError(f"Credentials for {registry} expired. Run: margot auth login")
     if remaining < timedelta(minutes=5):
         console.print(f"[yellow]Warning: credentials for {registry} expire in {remaining}[/yellow]")
 ```
