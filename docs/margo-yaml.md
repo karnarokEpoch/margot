@@ -10,6 +10,8 @@ name: myapp
 version: "1.0.0"
 appVersion: "2.3.1"
 description: "Human-readable description of the application"
+directory: margo
+repository: public.ecr.aws/g2n4p2m7/margo
 annotations:
   opentelemetry.io/instrumented: "true"
 author:
@@ -18,11 +20,6 @@ author:
 organization:
   - name: Example Corp
     site: https://example.com
-
-margo:
-  directory: margo
-  version: 1.0.0+margo
-  repository: public.ecr.aws/g2n4p2m7/margo
 
 compose:
   directory: compose
@@ -54,25 +51,12 @@ quadlet:
 | `annotations` | No | Arbitrary key/value pairs passed as OCI annotations. |
 | `author` | No | List of authors, each with `name` (optional) and `email` (optional). Maps to `metadata.catalog.author` in the Margo spec. |
 | `organization` | No | List of organizations, each with `name` (required) and `site` (optional). Maps to `metadata.catalog.organization` in the Margo spec. |
+| `directory` | No | Path to the margo artifact source directory. Default: `margo`. |
+| `repository` | No | Default OCI repository for all artifacts. Overridable per component. Can also be set via tool config / CLI / env. |
 
 ## Components
 
-A `margo.yaml` declares one or more **components** — each producing a separate OCI artifact when built. The three
-component types are `margo`, `compose`, and `quadlet`.
-
-Every component shares these fields:
-
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `directory` | No | `<type>` (i.e. `margo`, `compose`, or `quadlet`) | Path (relative to project root) to the component source directory. |
-| `version` | Yes | — | Base version for the component. Used directly as OCI tag in flat mode; used as the derivation base for variant versions. |
-| `repository` | No | Global `repository` from tool config / CLI / env | OCI repository for this component. |
-| `component` | No | `<id>-<type>` | Margo component name (developer-owned). Flat mode only. |
-
-### margo
-
-The core Margo application descriptor artifact. Its source directory must contain either `app.yaml.jinja` (rendered
-at build time) or `app.yaml` (copied verbatim). This component does not support variants.
+`compose` and `quadlet` declare deployment components — each producing a separate OCI artifact when built.
 
 ### compose
 
@@ -82,6 +66,15 @@ artifacts.
 ### quadlet
 
 A systemd Quadlet deployment artifact. Same structure and variant support as `compose`.
+
+### compose / quadlet fields
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `directory` | No | `<type>` (i.e. `compose` or `quadlet`) | Path (relative to project root) to the component source directory. |
+| `version` | Yes | — | Base version for the component. Used directly as OCI tag in flat mode; used as the derivation base for variant versions. |
+| `repository` | No | Global `repository` from tool config / CLI / env | OCI repository for this component. |
+| `component` | No | `<id>-<type>` | Margo component name (developer-owned). Flat mode only. |
 
 ## Variants
 
@@ -131,7 +124,7 @@ For example:
 
 | `margo.yaml` version | OCI tag pushed |
 | ----------------------- | ---------------- |
-| `1.0.0+margo` | `1.0.0_margo` |
+| `1.0.0+quadlet` | `1.0.0_quadlet` |
 | `2.1.0+compose-default` | `2.1.0_compose-default` |
 | `2.1.0+quadlet-minimal` | `2.1.0_quadlet-minimal` |
 
@@ -145,11 +138,10 @@ entire context lives under the `manifest` namespace:
 
 - `manifest`
   - `id`, `name`, `version`, `appVersion`, `description`
+  - `directory`, `repository`
   - `annotations` — dict
   - `author` — list of `{name, email}`
   - `organization` — list of `{name, site}`
-  - `margo`
-    - `version`, `tag`, `ref`, `repository`, `component`
   - `compose` and `quadlet`
     - `version`, `repository`, `component`
     - `variants` — ordered list of variant objects

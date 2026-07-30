@@ -45,6 +45,7 @@ name: web-platform
 version: "1.0.0"
 appVersion: "2.1.0"
 description: "NGINX + Apache web platform"
+repository: public.ecr.aws/g2n4p2m7/margo
 annotations:
   team: platform-engineering
 author:
@@ -54,15 +55,9 @@ organization:
   - name: Example Corp
     site: https://example.com
 
-margo:
-  directory: margo
-  version: 1.0.0+margo
-  repository: public.ecr.aws/g2n4p2m7/margo
-
 compose:
   directory: compose
   version: 2.1.0
-  repository: public.ecr.aws/g2n4p2m7/margo
   variants:
     - name: default
     - name: minimal
@@ -70,7 +65,6 @@ compose:
 quadlet:
   directory: quadlet
   version: 2.1.0
-  repository: public.ecr.aws/g2n4p2m7/margo
   variants:
     - name: default
     - name: minimal
@@ -305,7 +299,7 @@ This produces five OCI artifacts at `public.ecr.aws/g2n4p2m7/margo`:
 
 | Tag | Artifact type |
 | ----- | --------------- |
-| `1.0.0_margo` | `application/vnd.margo.app.v1+json` |
+| `1.0.0` | `application/vnd.margo.app.v1+json` |
 | `2.1.0_compose-default` | `application/vnd.org.margo.component.compose+json` |
 | `2.1.0_compose-minimal` | `application/vnd.org.margo.component.compose+json` |
 | `2.1.0_quadlet-default` | `application/vnd.org.margo.component.quadlet+json` |

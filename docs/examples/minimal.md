@@ -22,11 +22,7 @@ name: nginx
 version: "1.0.0"
 appVersion: "1.27.0"
 description: "NGINX web server deployed via Helm chart"
-
-margo:
-  directory: margo
-  version: 1.0.0
-  repository: public.ecr.aws/g2n4p2m7/margo
+repository: public.ecr.aws/g2n4p2m7/margo
 ```
 
 - `version` — the manifest/package version (this Margo application description release)
