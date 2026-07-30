@@ -3,14 +3,13 @@
 from pathlib import Path
 
 from margot import console
-from margot.domain.metadata import load_margo_yaml
+from margot.domain.metadata import ComponentConfig, MargoYaml, load_margo_yaml
 from margot.domain.models import BuildTarget, PackageType
 from margot.domain.tags import validate_oci_tag, validate_semver
-from margot.infra import credentials
-from margot.infra import oci
+from margot.infra import credentials, oci
 
 
-def push(
+def push(  # noqa: PLR0913
     package_type: PackageType,
     *,
     project_dir: str = ".",
@@ -67,16 +66,13 @@ def push(
 
 
 def _push_all(
-    meta: object,
+    meta: MargoYaml,
     build_dir: str,
     registry: str | None,
     repository: str | None,
     variant: str | None,
 ) -> list[BuildTarget]:
     """Push all components, skipping any not defined in margo.yaml."""
-    from margot.domain.metadata import MargoYaml
-
-    assert isinstance(meta, MargoYaml)  # noqa: S101
     targets: list[BuildTarget] = []
 
     try:
@@ -165,23 +161,19 @@ def _parse_component_repository(repo_field: str) -> tuple[str, str]:
     Raises:
         ValueError: If cannot be split into registry + path.
     """
-    parts = repo_field.split("/", 1)
-    if len(parts) < 2 or not parts[0] or not parts[1]:
+    registry, _, rest = repo_field.partition("/")
+    if not registry or not rest:
         raise ValueError(f"Cannot parse component repository '{repo_field}' as <registry>/<path>")
-    return parts[0], parts[1]
+    return registry, rest
 
 
 def _push_margo(
-    meta: object,
+    meta: MargoYaml,
     build_dir: str,
     cli_registry: str | None,
     cli_repository: str | None,
 ) -> BuildTarget:
     """Push margo component."""
-    from margot.domain.metadata import MargoYaml
-
-    assert isinstance(meta, MargoYaml)  # noqa: S101
-
     if meta.margo is None:
         raise ValueError("margo component not defined in margo.yaml")
 
@@ -230,7 +222,7 @@ def _push_margo(
 
 
 def _push_compose_or_quadlet(  # noqa: PLR0913
-    meta: object,
+    meta: MargoYaml,
     build_dir: str,
     cli_registry: str | None,
     cli_repository: str | None,
@@ -238,10 +230,6 @@ def _push_compose_or_quadlet(  # noqa: PLR0913
     component_type: PackageType,
 ) -> list[BuildTarget]:
     """Push compose or quadlet component(s)."""
-    from margot.domain.metadata import MargoYaml
-
-    assert isinstance(meta, MargoYaml)  # noqa: S101
-
     component_name = component_type.value
     component = meta.compose if component_type == PackageType.COMPOSE else meta.quadlet
     if component is None:
@@ -256,8 +244,8 @@ def _push_compose_or_quadlet(  # noqa: PLR0913
 
 
 def _push_flat_component(  # noqa: PLR0913
-    meta: object,
-    component: object,
+    meta: MargoYaml,
+    component: ComponentConfig,
     build_dir: str,
     cli_registry: str | None,
     cli_repository: str | None,
@@ -265,11 +253,6 @@ def _push_flat_component(  # noqa: PLR0913
     component_type: PackageType,
 ) -> list[BuildTarget]:
     """Push component with flat layout (no variants)."""
-    from margot.domain.metadata import ComponentConfig, MargoYaml
-
-    assert isinstance(meta, MargoYaml)  # noqa: S101
-    assert isinstance(component, ComponentConfig)  # noqa: S101
-
     component_name = component_type.value
 
     if variant is not None:
@@ -322,8 +305,8 @@ def _push_flat_component(  # noqa: PLR0913
 
 
 def _push_variant_component(  # noqa: PLR0913
-    meta: object,
-    component: object,
+    meta: MargoYaml,
+    component: ComponentConfig,
     build_dir: str,
     cli_registry: str | None,
     cli_repository: str | None,
@@ -331,11 +314,6 @@ def _push_variant_component(  # noqa: PLR0913
     component_type: PackageType,
 ) -> list[BuildTarget]:
     """Push component with variant layout."""
-    from margot.domain.metadata import ComponentConfig, MargoYaml
-
-    assert isinstance(meta, MargoYaml)  # noqa: S101
-    assert isinstance(component, ComponentConfig)  # noqa: S101
-
     component_name = component_type.value
     targets: list[BuildTarget] = []
 

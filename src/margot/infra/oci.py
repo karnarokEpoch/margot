@@ -1,14 +1,13 @@
 """OCI registry adapter: oras-py wrapper."""
 
-import os
-import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+import tempfile
 from typing import Any
 
+from oras.client import OrasClient as OrasClientLib
 import oras.defaults
 import oras.oci
-from oras.client import OrasClient as OrasClientLib
 
 from margot import console
 
@@ -106,7 +105,7 @@ class OrasClient:
         console.debug(f"Logout: {hostname}")
         self._client.logout(hostname=hostname)
 
-    def push_margo(
+    def push_margo(  # noqa: PLR0913
         self,
         build_dir: str,
         version: str,
@@ -141,8 +140,16 @@ class OrasClient:
         optional = [
             (margo_dir / "resources" / "icon.png", "application/vnd.margo.app.icon.v1+png", "resources/icon.png"),
             (margo_dir / "resources" / "license.txt", "application/vnd.margo.app.license.v1+plain", "resources/license.txt"),
-            (margo_dir / "resources" / "release-notes.md", "application/vnd.margo.app.releaseNotes.v1+markdown", "resources/release-notes.md"),
-            (margo_dir / "resources" / "description.md", "application/vnd.margo.app.descriptionFile.v1+markdown", "resources/description.md"),
+            (
+                margo_dir / "resources" / "release-notes.md",
+                "application/vnd.margo.app.releaseNotes.v1+markdown",
+                "resources/release-notes.md",
+            ),
+            (
+                margo_dir / "resources" / "description.md",
+                "application/vnd.margo.app.descriptionFile.v1+markdown",
+                "resources/description.md",
+            ),
         ]
         for path, mt, title in optional:
             if path.exists():
@@ -158,7 +165,7 @@ class OrasClient:
             },
         )
 
-    def push_compose(
+    def push_compose(  # noqa: PLR0913
         self,
         archive_path: str,
         version: str,
@@ -194,7 +201,7 @@ class OrasClient:
             },
         )
 
-    def push_quadlet(
+    def push_quadlet(  # noqa: PLR0913
         self,
         archive_path: str,
         version: str,
@@ -265,19 +272,19 @@ class OrasClient:
             layer = oras.oci.NewLayer(blob_path=str(file_path), media_type=media_type)
             layer["annotations"] = {oras.defaults.annotation_title: title}
             response = self._client.upload_blob(blob=str(file_path), container=container, layer=layer)
-            self._client._check_200_response(response)
+            self._client._check_200_response(response)  # noqa: SLF001
             layers.append(layer)
 
         # Build and upload the empty config blob
         conf, _ = oras.oci.ManifestConfig(path=None, media_type="application/vnd.oci.empty.v1+json")
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        tmp.write("{}")
-        tmp.close()
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+            tmp.write("{}")
+            tmp_path = Path(tmp.name)
         try:
-            response = self._client.upload_blob(blob=tmp.name, container=container, layer=conf)
-            self._client._check_200_response(response)
+            response = self._client.upload_blob(blob=str(tmp_path), container=container, layer=conf)
+            self._client._check_200_response(response)  # noqa: SLF001
         finally:
-            os.unlink(tmp.name)
+            tmp_path.unlink()
 
         # Assemble manifest
         manifest["config"] = conf
@@ -289,4 +296,4 @@ class OrasClient:
         }
 
         response = self._client.upload_manifest(manifest=manifest, container=container)
-        self._client._check_200_response(response)
+        self._client._check_200_response(response)  # noqa: SLF001

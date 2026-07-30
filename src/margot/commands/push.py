@@ -32,7 +32,7 @@ def _resolve_types(types: list[str] | None) -> tuple[list[str], bool]:
     return resolved, False
 
 
-def _invoke_push(
+def _invoke_push(  # noqa: PLR0913
     t: str,
     expanded_from_all: bool,
     build_dir: str,

@@ -312,7 +312,7 @@ margo:
         mock_client = MagicMock()
         mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
 
-        with raises(ValueError):
+        with raises(ValueError, match="not valid SemVer"):
             push.push(
                 PackageType.MARGO,
                 project_dir=str(tmp_path),

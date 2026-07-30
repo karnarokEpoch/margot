@@ -74,7 +74,11 @@ class TestPushMargo:
         assert len(file_entries) == 3
         assert (margo_dir / "app.yaml", "application/vnd.margo.app.description.v1+yaml", "app.yaml") in file_entries
         assert (resources_dir / "icon.png", "application/vnd.margo.app.icon.v1+png", "resources/icon.png") in file_entries
-        assert (resources_dir / "license.txt", "application/vnd.margo.app.license.v1+plain", "resources/license.txt") in file_entries
+        assert (
+            resources_dir / "license.txt",
+            "application/vnd.margo.app.license.v1+plain",
+            "resources/license.txt",
+        ) in file_entries
 
     def test_push_margo_skips_missing_optional_files(self, mocker: Any, tmp_path: Path) -> None:
         """Should skip optional files that don't exist on disk."""
@@ -128,7 +132,11 @@ class TestPushCompose:
             target="public.ecr.aws/g2n4p2m7/margo:1.0.0",
             artifact_type="application/vnd.org.margo.component.compose+json",
             file_entries=[
-                (Path("/build/1.0.0/testapp-1.0.0.tgz"), "application/vnd.org.margo.component.compose.tar+gzip", "testapp-1.0.0.tgz"),
+                (
+                    Path("/build/1.0.0/testapp-1.0.0.tgz"),
+                    "application/vnd.org.margo.component.compose.tar+gzip",
+                    "testapp-1.0.0.tgz",
+                ),
             ],
             manifest_annotations={
                 "org.margo.component.type": "compose",
@@ -163,7 +171,11 @@ class TestPushQuadlet:
             target="public.ecr.aws/g2n4p2m7/margo:1.0.0",
             artifact_type="application/vnd.org.margo.component.quadlet+json",
             file_entries=[
-                (Path("/build/1.0.0/testapp-1.0.0.tgz"), "application/vnd.org.margo.component.quadlet.tar+gzip", "testapp-1.0.0.tgz"),
+                (
+                    Path("/build/1.0.0/testapp-1.0.0.tgz"),
+                    "application/vnd.org.margo.component.quadlet.tar+gzip",
+                    "testapp-1.0.0.tgz",
+                ),
             ],
             manifest_annotations={
                 "org.margo.component.type": "quadlet",
