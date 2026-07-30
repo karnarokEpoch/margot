@@ -134,7 +134,7 @@ class TestPullCLIForce:
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
         assert result.exit_code == 0
-        assert "Warning: --force is active" in plain
+        assert "warning: --force is active" in plain
 
     def test_force_type_without_force_auto_enables_force(self, mocker: Any, tmp_path: Any) -> None:
         """--force-type without --force should exit 0 and warn that force was auto-enabled."""
@@ -240,7 +240,7 @@ class TestPullCLIForce:
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
         assert result.exit_code == 0
-        assert "Warning: --force is active. Safety checks bypassed." in plain
+        assert "warning: --force is active. Safety checks bypassed." in plain
 
     def test_unknown_artifact_type_without_force_exits_1(self, mocker: Any) -> None:
         """Unknown artifact type without --force should exit 1 with 'Unknown artifact type' in output."""
@@ -431,6 +431,6 @@ class TestPullCLIVerbosity:
         assert result.exit_code == 0
         stderr_text = _strip_ansi(result.stderr or "")
         stdout_text = _strip_ansi(result.stdout)
-        assert "Warning:" in stderr_text
+        assert "warning:" in stderr_text
         # Pulled file path should be in stdout, not stderr
         assert pulled_file in stdout_text
