@@ -258,7 +258,6 @@ class OrasClient(OrasClientLib):
         self.auth.load_configs(container)
 
         manifest = oras.oci.NewManifest()
-        # Rebuild with artifactType right after mediaType
         manifest = {
             "schemaVersion": manifest["schemaVersion"],
             "mediaType": manifest["mediaType"],
@@ -273,12 +272,14 @@ class OrasClient(OrasClientLib):
         for file_path, media_type, title in file_entries:
             layer = oras.oci.NewLayer(blob_path=str(file_path), media_type=media_type)
             layer["annotations"] = {oras.defaults.annotation_title: title}
+            console.debug(f"  layer: {title} [{media_type}] ({layer['size']} bytes, {layer['digest']})")
             response = self.upload_blob(blob=str(file_path), container=container, layer=layer)
             self._check_200_response(response)
             layers.append(layer)
 
         # Build and upload the empty config blob
         conf, _ = oras.oci.ManifestConfig(path=None, media_type="application/vnd.oci.empty.v1+json")
+        console.debug(f"  config: {conf['mediaType']} ({conf['size']} bytes, {conf['digest']})")
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
             tmp.write("{}")
             tmp_path = Path(tmp.name)
@@ -296,6 +297,9 @@ class OrasClient(OrasClientLib):
             "org.opencontainers.image.created": created,
             **manifest_annotations,
         }
+        console.debug(f"  annotations: {list(manifest['annotations'].keys())}")
+        console.debug(f"  uploading manifest → {target}")
 
+        console.debug(f"  manifest uploaded ({response.status_code})")
         response = self.upload_manifest(manifest=manifest, container=container)
         self._check_200_response(response)
