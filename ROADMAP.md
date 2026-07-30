@@ -75,7 +75,7 @@ any network call. Green unit + integration + E2E tests.
 ### Tasks (thin vertical slice)
 
 | # | Task | Layer | Notes |
-|---|------|-------|-------|
+| --- | ------ | ------- | ------- |
 | 1 | Credentials file R/W + expiry check | `infra/credentials.py` | `~/.config/margot/credentials.toml`. `check_credentials(registry)` warns/fails near/past expiry. |
 | 2 | oras-py login/logout wrappers | `infra/oci.py` | Extend existing OCI infra with `login(...)` and `logout(...)`. |
 | 3 | Auth service (login/logout orchestration) | `services/auth.py` | Call oras-py login/logout + optional expiry persistence. No registry-specific logic. |
@@ -128,6 +128,7 @@ registry operation and seeing it fail. Developers need a quick sanity check befo
 push, especially given ECR's 12-hour token TTL.
 
 **What it should show:**
+
 - For each registry tracked in `~/.config/margot/credentials.toml`: registry hostname,
   expiry timestamp, time remaining (or EXPIRED), and a clear VALID / EXPIRING / EXPIRED
   status label.
@@ -154,6 +155,7 @@ anchors) are untested.
 **Constraint:** for compose and quadlet, plain string replace on text files is the right
 model — developers work with real, runnable files that contain placeholders, and `build`
 produces the shippable tarball. The engine should stay simple. What needs work is:
+
 - A formal, tested list of all supported placeholders and their resolved values.
 - Confidence that substitution handles common YAML formatting patterns correctly.
 - Clear error or warning when a placeholder in a file has no declared value.
@@ -173,22 +175,79 @@ not own the file. The developer authors the parts they control; margot augments 
 overwrites the structural parts it can compute at build time. The two zones must be
 cleanly separable.
 
-**Open question — templating engine:** the right approach is not obvious and should be a
-design spike at the start of the sprint:
-- **Plain string replace (extended):** simple, already in place, sufficient if structural
-  generation is handled by a separate merge step. Cannot handle loops or conditionals.
-- **Jinja2:** mature Python templating, handles loops/conditionals/filters, already used
-  in many Python toolchains. Risk: YAML + Jinja indentation is error-prone; developers
-  must learn Jinja syntax in their `app.yaml`.
-- **Hybrid — generation + merge:** margot generates the structural scaffold from
-  `margo.yaml` declarations and deep-merges it with the developer's `app.yaml` (which
-  only contains the variable parts). Plain string replace (or Jinja2) applies only to the
-  developer-authored portion. Cleanest separation of concerns but requires a defined
-  merge strategy and schema for what margot auto-generates.
-- **Helm-style Go templates reimplemented in Python:** effectively reinventing Jinja2
-  with worse ergonomics. Not recommended.
+**Decision (locked):** Jinja2, with an optional `margo/app.yaml.jinja` template file.
 
-**Decision needed at sprint planning** before any implementation begins.
+**File resolution:**
+
+- `app.yaml.jinja` present → rendered against a context derived from `margo.yaml`, output
+  written as `app.yaml` in the build dir. The `.jinja` source MUST NOT ship in the artifact.
+- `app.yaml.jinja` absent → `app.yaml` is required and copied **verbatim**. Fully static,
+  no substitution.
+- Both present → hard error. The render would otherwise silently clobber the copied file.
+
+Rendering uses Jinja2 `StrictUndefined` so an undefined variable fails the build naming the
+variable, rather than emitting empty YAML.
+
+**Template context** (derived from `margo.yaml`, read-only):
+
+```text
+manifest.id  manifest.name  manifest.version  manifest.appVersion  manifest.description  manifest.annotations  manifest.author  manifest.organization
+manifest.margo.version  manifest.margo.tag  manifest.margo.ref  manifest.margo.repository  manifest.margo.directory
+manifest.compose.directory  manifest.compose.repository
+manifest.compose.variants                      # ordered list of variant objects
+manifest.compose.<variant-name>                # direct access, e.g. manifest.compose.minimal.tag
+manifest.quadlet.*                             # same shape
+```
+
+Variant object: `name`, `version`, `tag`, `ref`, `repository`, `component`.
+
+- `version` is optional. Default: `<component-version>+<type>-<variant-name>` (e.g. for a
+  compose component at version `2.1.0` with variant `minimal`, the derived version is
+  `2.1.0+compose-minimal`). As authored it uses `+`; `tag` is the OCI-safe form with `_`.
+  `ref` is `repository:tag`. `tag` and `ref` are **computed and not authorable** — enforced
+  by strict schema (unknown keys in `margo.yaml` are rejected).
+- `component` (the Margo component name) is **developer-owned**. margot supplies a valid
+  default of `<id>-<type>-<variant-name>` and never rewrites a value the developer sets.
+- Flat components (no `variants`) still expose a single synthetic entry in `variants`, so
+  templates iterate identically in both modes.
+- Variant names that collide with component field names (`directory`, `repository`,
+  `variants`, `version`, `tag`, `ref`, `component`) MUST be rejected at parse time.
+
+**Deferred (additive, second pass):** a `| to_yaml(indent=N)` filter fed by pre-rendered
+deployment-profile fragments. Pass 1 renders a developer-authored profile template per
+variant and parses it into structured data; pass 2 splices it via the filter. This keeps
+profile *shape* owned by the developer while collapsing the YAML-indentation hazard to a
+single filter call. Not required for the first cut.
+
+**Rejected alternatives:**
+
+- **Plain string replace (extended):** cannot address per-variant tags, so a project with
+  two compose variants must hardcode the second one — the duplicate-source-of-truth bug
+  this work exists to fix. No loops, no conditionals.
+- **Hybrid generation + merge:** requires margot to own the deployment-profile schema and a
+  defined deep-merge strategy. The deferred two-pass render achieves the same ergonomics
+  without transferring shape ownership away from the developer.
+- **Helm-style Go templates reimplemented in Python:** reinventing Jinja2 with worse
+  ergonomics.
+
+#### 3. Breaking refactor — `app.yaml` placeholders removed
+
+**Impact: breaking.** Bundled with the change above, and the reason this work is a refactor
+rather than a feature.
+
+- `<app_tag>`, `<margo_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>` are
+  removed from the `app.yaml` path entirely. A static `app.yaml` is copied verbatim;
+  projects relying on substitution inside it break and must migrate to `app.yaml.jinja`.
+- These placeholders **remain** for compose/quadlet text files, where plain string replace
+  is still the right model (see item 1).
+- `<helm_chart_tag>` is dropped as a concept. It resolves to an empty string today, and
+  margot does not build Helm charts — chart revisions are literals the developer authors.
+- `id` moves into `margo.yaml` as a required top-level field. It currently exists only in
+  `app.yaml`, but the template context needs it and it is the base for derived component
+  name defaults.
+
+margot is pre-1.0 and unpublished, so the clean break is preferred over a compatibility
+shim. No deprecation window.
 
 ---
 
@@ -205,7 +264,7 @@ design spike at the start of the sprint:
 ## Completed Sprints
 
 | Sprint | Capability | Release |
-|--------|-----------|---------|
+| -------- | ----------- | --------- |
 | Sprint 1 | `margot fetch` — anonymous OCI manifest retrieval, pretty-printed JSON output, URI validation, `margot --version` | [0.1.0](https://github.com/karnarokEpoch/margot/releases/tag/0.1.0) |
 | Sprint 2 | `margot pull` — anonymous OCI artifact pull to disk, artifact type detection via `artifactType`, layer naming (title annotation → manifest-level fallback), `--force` override for unknown types, shared `domain/uri.py` | — |
 | Sprint 3 | `margot build` — local artifact build for margo/compose/quadlet package types, placeholder substitution (`<app_tag>` from `appVersion`, `<margo_tag>`, `<compose_tag>`, `<quadlet_tag>`), variant support, idempotent output dir, multi-type `-t` flag, `margo.yaml` project descriptor, dynaconf config layering, pure-Python filesystem ops | — |

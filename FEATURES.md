@@ -83,13 +83,17 @@ Replaces the old `publish_metadata.json`. Read by `margot build` and `margot pus
 ```yaml
 apiVersion: v1                     # margot config schema version (not Margo spec version)
 name: myapp                        # application name (used in tarball filenames, OCI annotations)
-appVersion: "1.0.0"                # application version — used for <app_tag> placeholder substitution (optional)
+version: "1.0.0"                   # manifest/package version (required)
+appVersion: "2.3.1"               # version of the deployed application (optional, like Helm's appVersion)
 description: "Human-readable description of the application"
 annotations:                       # arbitrary key/value pairs, optional
   opentelemetry.io/instrumented: "true"
-maintainers:                       # optional list
+author:                            # optional list
   - name: Alice Example
     email: alice@example.com
+organization:                      # optional list
+  - name: Example Corp
+    site: https://example.com
 
 margo:
   directory: margo                 # path to the margo artifact source dir (contains app.yaml + resources/)
@@ -123,7 +127,8 @@ quadlet:
 
 - `apiVersion` — required. Currently `v1`.
 - `name` — required. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation.
-- `appVersion` — optional. Human-facing application version string. Not validated as SemVer. Used as the value for `<app_tag>` placeholder substitution. If absent, `<app_tag>` resolves to an empty string.
+- `version` — required. Manifest/package version. Exposed as `app.version` in templates.
+- `appVersion` — optional. Version of the deployed application (like Helm's `appVersion`). Not validated as SemVer. Exposed as `app.appVersion` in templates. Useful for passing as a parameter default (e.g. `image.tag`).
 - `description` — required. Used in OCI description annotation.
 - `margo.directory` — required. Default: `margo`.
 - `margo.version`, `compose.version`, `quadlet.version` — required per component if that component is built. Used as the tag when no variants are declared.

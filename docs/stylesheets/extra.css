@@ -1,0 +1,5 @@
+/* Prevent wrapping on inline code in table cells (field names) */
+.md-typeset table td code,
+.md-typeset table th code {
+  white-space: nowrap;
+}
