@@ -201,7 +201,7 @@ class TestPushArtifact:
         upload_manifest = mocker.patch.object(OrasClient, "upload_manifest", return_value=MagicMock(status_code=201))
 
         mocker.patch(
-            "margot.infra.oci.oras.oci.NewManifest",
+            "margot.infra.oci.NewManifest",
             return_value={
                 "schemaVersion": 2,
                 "mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -211,11 +211,11 @@ class TestPushArtifact:
             },
         )
         mocker.patch(
-            "margot.infra.oci.oras.oci.NewLayer",
+            "margot.infra.oci.NewLayer",
             return_value={"mediaType": "...", "size": 10, "digest": "sha256:abc", "annotations": {}},
         )
         mocker.patch(
-            "margot.infra.oci.oras.oci.ManifestConfig",
+            "margot.infra.oci.ManifestConfig",
             return_value=(
                 {
                     "mediaType": "application/vnd.oci.empty.v1+json",

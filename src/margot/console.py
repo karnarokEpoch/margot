@@ -9,9 +9,9 @@ Verbosity is controlled by two module-level flags:
 """
 
 from datetime import UTC, datetime
-import inspect
-import json
-import os
+from inspect import stack
+from json import dumps
+from os.path import relpath
 import sys
 
 from rich.console import Console
@@ -37,13 +37,13 @@ def _caller_location() -> str:
     Strip the 'src/margot/' prefix and '.py' suffix.
     Return 'margot' as fallback.
     """
-    for frame_info in inspect.stack()[2:]:  # skip _caller_location + the console fn itself
+    for frame_info in stack()[2:]:  # skip _caller_location + the console fn itself
         filename = frame_info.filename
         if "console.py" in filename:
             continue
         # Try to make relative to src/margot/
         try:
-            rel = os.path.relpath(filename)
+            rel = relpath(filename)
             # Strip leading src/margot/ and .py
             rel = rel.replace("\\", "/")
             for prefix in ("src/margot/", "margot/"):
@@ -103,7 +103,7 @@ def success(message: str) -> None:
 
 def print_json(data: dict | list) -> None:
     """Pretty-print a JSON-serializable object to stdout. Always shown."""
-    _get_stdout().print_json(json.dumps(data))
+    _get_stdout().print_json(dumps(data))
 
 
 def warning(message: str) -> None:

@@ -1,27 +1,27 @@
 """OCI registry adapter: oras-py wrapper."""
 
 from datetime import UTC, datetime
-import logging
+from logging import DEBUG, INFO, WARNING, Formatter, Handler, LogRecord, getLogger
 from pathlib import Path
-import tempfile
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 from oras.client import OrasClient as OrasClientLib
-import oras.defaults
-import oras.oci
+from oras.defaults import annotation_title
+from oras.oci import ManifestConfig, NewLayer, NewManifest
 
 from margot import console
 
 
-class _OrasLogHandler(logging.Handler):
+class _OrasLogHandler(Handler):
     """Route oras-py log records to margot's console."""
 
-    def emit(self, record: logging.LogRecord) -> None:
+    def emit(self, record: LogRecord) -> None:
         msg = self.format(record)
         level = record.levelno
-        if level >= logging.WARNING:
+        if level >= WARNING:
             console.warning(f"[oras] {msg}")
-        elif level >= logging.INFO:
+        elif level >= INFO:
             console.info(f"[oras] {msg}")
         else:  # DEBUG
             console.debug(f"[oras] {msg}")
@@ -29,15 +29,15 @@ class _OrasLogHandler(logging.Handler):
 
 def _configure_oras_logger() -> None:
     """Attach margot's log handler to the oras logger. Idempotent."""
-    oras_logger = logging.getLogger("oras.logger")
+    oras_logger = getLogger("oras.logger")
     # Remove any existing handlers to avoid duplicate output
     for handler in list(oras_logger.handlers):
         oras_logger.removeHandler(handler)
     handler = _OrasLogHandler()
-    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.setFormatter(Formatter("%(message)s"))
     oras_logger.addHandler(handler)
     oras_logger.propagate = False
-    level = logging.DEBUG if console.is_debug() else (logging.INFO if console.is_verbose() else logging.WARNING)
+    level = DEBUG if console.is_debug() else (INFO if console.is_verbose() else WARNING)
     oras_logger.setLevel(level)
 
 
@@ -285,7 +285,7 @@ class OrasClient(OrasClientLib):
         container = self.get_container(target)
         self.auth.load_configs(container)
 
-        manifest = oras.oci.NewManifest()
+        manifest = NewManifest()
         manifest = {
             "schemaVersion": manifest["schemaVersion"],
             "mediaType": manifest["mediaType"],
@@ -298,17 +298,17 @@ class OrasClient(OrasClientLib):
         # Build and upload layers
         layers = []
         for file_path, media_type, title in file_entries:
-            layer = oras.oci.NewLayer(blob_path=str(file_path), media_type=media_type)
-            layer["annotations"] = {oras.defaults.annotation_title: title}
+            layer = NewLayer(blob_path=str(file_path), media_type=media_type)
+            layer["annotations"] = {annotation_title: title}
             console.debug(f"  layer: {title} [{media_type}] ({layer['size']} bytes, {layer['digest']})")
             response = self.upload_blob(blob=str(file_path), container=container, layer=layer)
             self._check_200_response(response)
             layers.append(layer)
 
         # Build and upload the empty config blob
-        conf, _ = oras.oci.ManifestConfig(path=None, media_type="application/vnd.oci.empty.v1+json")
+        conf, _ = ManifestConfig(path=None, media_type="application/vnd.oci.empty.v1+json")
         console.debug(f"  config: {conf['mediaType']} ({conf['size']} bytes, {conf['digest']})")
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+        with NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
             tmp.write("{}")
             tmp_path = Path(tmp.name)
         try:
