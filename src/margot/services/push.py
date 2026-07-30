@@ -59,7 +59,7 @@ def push(  # noqa: PLR0913
     elif package_type == PackageType.QUADLET:
         targets.extend(_push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.QUADLET))
     else:
-        raise ValueError(f"Unsupported package_type: {package_type}")
+        raise ValueError(f"Unsupported package_type: {package_type}")  # pragma: no cover
 
     console.info(f"Push complete: {len(targets)} target(s).")
     return targets

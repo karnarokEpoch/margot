@@ -4,6 +4,7 @@ from io import StringIO
 from pathlib import Path
 import re
 import tarfile
+from typing import Any
 
 from pytest import fixture, raises
 
@@ -619,3 +620,234 @@ class TestBuildIdempotent:
         output_dir = Path(targets_2[0].output_dir)
         assert output_dir.exists()
         assert (output_dir / "app.yaml").exists()
+
+
+class TestBuildAllReRaise:
+    """Tests for _build_all re-raising non-'not defined' ValueErrors."""
+
+    def test_build_all_reraises_margo_non_not_defined_error(self, mocker: Any, fake_project: Path) -> None:
+        """Should re-raise ValueError from _build_margo if it's not 'not defined'."""
+        mocker.patch(
+            "margot.services.build._build_margo",
+            side_effect=ValueError("some other error"),
+        )
+
+        build_dir = fake_project / ".dist"
+        with raises(ValueError, match="some other error"):
+            build.build(
+                PackageType.ALL,
+                project_dir=str(fake_project),
+                build_dir=str(build_dir),
+            )
+
+    def test_build_all_reraises_compose_non_not_defined_error(self, mocker: Any, fake_project: Path) -> None:
+        """Should re-raise ValueError from compose if it's not 'not defined'."""
+        mocker.patch(
+            "margot.services.build._build_compose_or_quadlet",
+            side_effect=ValueError("compose broke unexpectedly"),
+        )
+
+        build_dir = fake_project / ".dist"
+        with raises(ValueError, match="compose broke unexpectedly"):
+            build.build(
+                PackageType.ALL,
+                project_dir=str(fake_project),
+                build_dir=str(build_dir),
+            )
+
+    def test_build_all_reraises_quadlet_non_not_defined_error(self, mocker: Any, tmp_path: Path) -> None:
+        """Should re-raise ValueError from quadlet if it's not 'not defined'."""
+        # Use a project with margo + compose defined (so they succeed) and quadlet that raises
+        margo_yaml_content = """\
+apiVersion: v1
+name: testapp
+description: Test application
+margo:
+  directory: margo
+  version: 1.0.0
+compose:
+  directory: compose
+  version: 1.0.0
+quadlet:
+  directory: quadlet
+  version: 1.0.0
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text("name: test\n")
+        compose_dir = tmp_path / "compose"
+        compose_dir.mkdir()
+        (compose_dir / "compose.yaml").write_text("version: '3'\n")
+        quadlet_dir = tmp_path / "quadlet"
+        quadlet_dir.mkdir()
+        (quadlet_dir / "app.container").write_text("[Container]\n")
+
+        # Patch _build_compose_or_quadlet to fail only for QUADLET
+        original_build = build._build_compose_or_quadlet  # noqa: SLF001
+
+        def patched_build(*args: Any, **kwargs: Any) -> Any:
+            # args[-2] is component_type in the positional call
+            if args[-2] == PackageType.QUADLET:
+                raise ValueError("quadlet disk full error")
+            return original_build(*args, **kwargs)
+
+        mocker.patch("margot.services.build._build_compose_or_quadlet", side_effect=patched_build)
+
+        build_dir = tmp_path / ".dist"
+        with raises(ValueError, match="quadlet disk full error"):
+            build.build(
+                PackageType.ALL,
+                project_dir=str(tmp_path),
+                build_dir=str(build_dir),
+            )
+
+
+class TestBuildAllSkipsQuadlet:
+    """Test _build_all skipping quadlet when not defined (line 102)."""
+
+    def test_build_all_skips_undefined_quadlet(self, tmp_path: Path) -> None:
+        """Should skip quadlet when not defined; return margo + compose targets."""
+        margo_yaml_content = """\
+apiVersion: v1
+name: testapp
+description: Test application
+margo:
+  directory: margo
+  version: 1.0.0
+compose:
+  directory: compose
+  version: 1.0.0
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text("name: testapp\n")
+        compose_dir = tmp_path / "compose"
+        compose_dir.mkdir()
+        (compose_dir / "compose.yaml").write_text("version: '3'\n")
+
+        build_dir = tmp_path / ".dist"
+        targets = build.build(
+            PackageType.ALL,
+            project_dir=str(tmp_path),
+            build_dir=str(build_dir),
+        )
+
+        package_types = [t.package_type for t in targets]
+        assert PackageType.MARGO in package_types
+        assert PackageType.COMPOSE in package_types
+        assert PackageType.QUADLET not in package_types
+
+
+class TestBuildMargoVersionNone:
+    """Test _build_margo with version None (line 181)."""
+
+    def test_build_margo_raises_when_version_not_specified(self, tmp_path: Path) -> None:
+        """Should raise ValueError when margo version is None and no override."""
+        margo_yaml_content = """\
+apiVersion: v1
+name: testapp
+description: Test application
+margo:
+  directory: margo
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text("name: testapp\n")
+
+        build_dir = tmp_path / ".dist"
+        with raises(ValueError, match="margo version not specified"):
+            build.build(
+                PackageType.MARGO,
+                project_dir=str(tmp_path),
+                build_dir=str(build_dir),
+            )
+
+
+class TestBuildFlatCompose:
+    """Tests for _build_flat_component success path (lines 271-294)."""
+
+    def test_build_flat_compose_success(self, tmp_path: Path) -> None:
+        """Should build flat compose (no variants) and return a single BuildTarget."""
+        margo_yaml_content = """\
+apiVersion: v1
+name: testapp
+description: Test application
+compose:
+  directory: compose
+  version: 1.0.0
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+        compose_dir = tmp_path / "compose"
+        compose_dir.mkdir()
+        (compose_dir / "compose.yaml").write_text("version: '3'\nservices:\n  app: test\n")
+
+        build_dir = tmp_path / ".dist"
+        targets = build.build(
+            PackageType.COMPOSE,
+            project_dir=str(tmp_path),
+            build_dir=str(build_dir),
+        )
+
+        assert len(targets) == 1
+        assert targets[0].package_type == PackageType.COMPOSE
+        assert targets[0].version == "1.0.0"
+        assert targets[0].variant_name is None
+
+        # Verify tarball exists
+        tarball = Path(targets[0].output_dir) / "testapp-1.0.0.tgz"
+        assert tarball.exists()
+
+    def test_build_flat_compose_version_none_raises(self, tmp_path: Path) -> None:
+        """Should raise ValueError when flat compose version is None."""
+        margo_yaml_content = """\
+apiVersion: v1
+name: testapp
+description: Test application
+compose:
+  directory: compose
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+        compose_dir = tmp_path / "compose"
+        compose_dir.mkdir()
+        (compose_dir / "compose.yaml").write_text("version: '3'\n")
+
+        build_dir = tmp_path / ".dist"
+        with raises(ValueError, match="compose version not specified"):
+            build.build(
+                PackageType.COMPOSE,
+                project_dir=str(tmp_path),
+                build_dir=str(build_dir),
+            )
+
+
+class TestBuildAllSkipsMargo:
+    """Test _build_all skipping margo when not defined (line 88)."""
+
+    def test_build_all_skips_undefined_margo(self, tmp_path: Path) -> None:
+        """Should skip margo when not defined; return only compose targets."""
+        margo_yaml_content = """\
+apiVersion: v1
+name: testapp
+description: Test application
+compose:
+  directory: compose
+  version: 1.0.0
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+        compose_dir = tmp_path / "compose"
+        compose_dir.mkdir()
+        (compose_dir / "compose.yaml").write_text("version: '3'\n")
+
+        build_dir = tmp_path / ".dist"
+        targets = build.build(
+            PackageType.ALL,
+            project_dir=str(tmp_path),
+            build_dir=str(build_dir),
+        )
+
+        package_types = [t.package_type for t in targets]
+        assert PackageType.MARGO not in package_types
+        assert PackageType.COMPOSE in package_types
