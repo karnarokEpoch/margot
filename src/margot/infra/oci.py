@@ -1,5 +1,6 @@
 """OCI registry adapter: oras-py wrapper."""
 
+from pathlib import Path
 from typing import Any
 
 from oras.client import OrasClient as OrasClientLib
@@ -99,3 +100,138 @@ class OrasClient:
         """
         console.debug(f"Logout: {hostname}")
         self._client.logout(hostname=hostname)
+
+    def push_margo(
+        self,
+        build_dir: str,
+        version: str,
+        registry: str,
+        repository: str,
+        name: str,
+        description: str,
+    ) -> None:
+        """
+        Push a margo artifact to OCI registry.
+
+        Reads files from: <build_dir>/<version>/margo/
+        Only includes files that actually exist in the build_dir (skip missing optional ones).
+
+        Args:
+            build_dir: Root build output directory.
+            version: SemVer version tag.
+            registry: OCI registry hostname.
+            repository: Repository path within registry.
+            name: Application name (for annotation).
+            description: Application description (for annotation).
+        """
+        target = f"{registry}/{repository}:{version}"
+        console.debug(f"Push margo: {target}")
+
+        margo_dir = Path(build_dir) / version / "margo"
+
+        # Required file
+        files: list[tuple[str, str]] = [
+            (str(margo_dir / "app.yaml"), "application/vnd.margo.app.description.v1+yaml"),
+        ]
+
+        # Optional files
+        optional_files = [
+            (margo_dir / "resources" / "icon.png", "image/png"),
+            (margo_dir / "resources" / "license.txt", "text/plain"),
+            (margo_dir / "resources" / "release-notes.md", "text/markdown"),
+            (margo_dir / "resources" / "description.md", "text/markdown"),
+        ]
+        for file_path, media_type in optional_files:
+            if file_path.exists():
+                files.append((str(file_path), media_type))
+
+        manifest_config = {"mediaType": "application/vnd.margo.app.v1+json"}
+        manifest_annotations = {
+            "org.opencontainers.image.title": name,
+            "org.opencontainers.image.description": description,
+        }
+
+        self._client.push(
+            files=files,
+            target=target,
+            manifest_config=manifest_config,
+            manifest_annotations=manifest_annotations,
+        )
+
+    def push_compose(
+        self,
+        archive_path: str,
+        version: str,
+        registry: str,
+        repository: str,
+        name: str,
+        description: str,
+    ) -> None:
+        """
+        Push a compose artifact to OCI registry.
+
+        Args:
+            archive_path: Path to the .tgz archive.
+            version: SemVer version tag.
+            registry: OCI registry hostname.
+            repository: Repository path within registry.
+            name: Application name (for annotation).
+            description: Application description (for annotation).
+        """
+        target = f"{registry}/{repository}:{version}"
+        console.debug(f"Push compose: {target}")
+
+        files = [(archive_path, "application/vnd.org.margo.component.compose.tar+gzip")]
+        manifest_config = {"mediaType": "application/vnd.org.margo.component.compose+json"}
+        manifest_annotations = {
+            "org.margo.component.type": "compose",
+            "org.margo.component.version": version,
+            "org.opencontainers.image.title": name,
+            "org.opencontainers.image.description": description,
+        }
+
+        self._client.push(
+            files=files,
+            target=target,
+            manifest_config=manifest_config,
+            manifest_annotations=manifest_annotations,
+        )
+
+    def push_quadlet(
+        self,
+        archive_path: str,
+        version: str,
+        registry: str,
+        repository: str,
+        name: str,
+        description: str,
+    ) -> None:
+        """
+        Push a quadlet artifact to OCI registry.
+
+        Args:
+            archive_path: Path to the .tgz archive.
+            version: SemVer version tag.
+            registry: OCI registry hostname.
+            repository: Repository path within registry.
+            name: Application name (for annotation).
+            description: Application description (for annotation).
+        """
+        target = f"{registry}/{repository}:{version}"
+        console.debug(f"Push quadlet: {target}")
+
+        files = [(archive_path, "application/vnd.org.margo.component.quadlet+json")]
+        manifest_config = {"mediaType": "application/vnd.org.margo.component.quadlet+json"}
+        manifest_annotations = {
+            "org.margo.component.type": "quadlet",
+            "org.margo.component.version": version,
+            "org.opencontainers.image.title": name,
+            "org.opencontainers.image.description": description,
+        }
+
+        self._client.push(
+            files=files,
+            target=target,
+            manifest_config=manifest_config,
+            manifest_annotations=manifest_annotations,
+        )
