@@ -97,3 +97,6 @@ ban-relative-imports = "all"
     "PLR2004", # magic values are fine in test assertions
     "ARG002",  # fixture params used for side effects are intentionally 'unused'
 ]
+"tests/unit/**/*.py" = [
+    "SLF001",  # unit tests deliberately access private members to test internals
+]
