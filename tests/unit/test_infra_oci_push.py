@@ -31,7 +31,7 @@ class TestPushMargo:
         )
 
         mock_lib.push.assert_called_once_with(
-            files=[(str(margo_dir / "app.yaml"), "application/vnd.margo.app.description.v1+yaml")],
+            files=[f"{margo_dir / 'app.yaml'}:application/vnd.margo.app.description.v1+yaml"],
             target="public.ecr.aws/g2n4p2m7/margo:1.0.0",
             manifest_config={"mediaType": "application/vnd.margo.app.v1+json"},
             manifest_annotations={
@@ -66,9 +66,9 @@ class TestPushMargo:
         call_args = mock_lib.push.call_args
         files = call_args[1]["files"]
         assert len(files) == 3
-        assert (str(margo_dir / "app.yaml"), "application/vnd.margo.app.description.v1+yaml") in files
-        assert (str(resources_dir / "icon.png"), "application/vnd.margo.app.icon.v1+png") in files
-        assert (str(resources_dir / "license.txt"), "application/vnd.margo.app.license.v1+plain") in files
+        assert f"{margo_dir / 'app.yaml'}:application/vnd.margo.app.description.v1+yaml" in files
+        assert f"{resources_dir / 'icon.png'}:application/vnd.margo.app.icon.v1+png" in files
+        assert f"{resources_dir / 'license.txt'}:application/vnd.margo.app.license.v1+plain" in files
 
     def test_push_margo_skips_missing_optional_files(self, mocker: Any, tmp_path: Path) -> None:
         """Should skip optional files that don't exist on disk."""
@@ -93,7 +93,7 @@ class TestPushMargo:
         call_args = mock_lib.push.call_args
         files = call_args[1]["files"]
         assert len(files) == 1
-        assert files[0] == (str(margo_dir / "app.yaml"), "application/vnd.margo.app.description.v1+yaml")
+        assert files[0] == f"{margo_dir / 'app.yaml'}:application/vnd.margo.app.description.v1+yaml"
 
 
 class TestPushCompose:
@@ -115,7 +115,7 @@ class TestPushCompose:
         )
 
         mock_lib.push.assert_called_once_with(
-            files=[("/build/1.0.0/testapp-1.0.0.tgz", "application/vnd.org.margo.component.compose.tar+gzip")],
+            files=["/build/1.0.0/testapp-1.0.0.tgz:application/vnd.org.margo.component.compose.tar+gzip"],
             target="public.ecr.aws/g2n4p2m7/margo:1.0.0",
             manifest_config={"mediaType": "application/vnd.org.margo.component.compose+json"},
             manifest_annotations={
@@ -146,7 +146,7 @@ class TestPushQuadlet:
         )
 
         mock_lib.push.assert_called_once_with(
-            files=[("/build/1.0.0/testapp-1.0.0.tgz", "application/vnd.org.margo.component.quadlet.tar+gzip")],
+            files=["/build/1.0.0/testapp-1.0.0.tgz:application/vnd.org.margo.component.quadlet.tar+gzip"],
             target="public.ecr.aws/g2n4p2m7/margo:1.0.0",
             manifest_config={"mediaType": "application/vnd.org.margo.component.quadlet+json"},
             manifest_annotations={

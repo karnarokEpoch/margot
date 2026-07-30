@@ -130,8 +130,8 @@ class OrasClient:
         margo_dir = Path(build_dir) / version / "margo"
 
         # Required file
-        files: list[tuple[str, str]] = [
-            (str(margo_dir / "app.yaml"), "application/vnd.margo.app.description.v1+yaml"),
+        files: list[str] = [
+            f"{margo_dir / 'app.yaml'}:application/vnd.margo.app.description.v1+yaml",
         ]
 
         # Optional files
@@ -143,7 +143,7 @@ class OrasClient:
         ]
         for file_path, media_type in optional_files:
             if file_path.exists():
-                files.append((str(file_path), media_type))
+                files.append(f"{file_path}:{media_type}")
 
         manifest_config = {"mediaType": "application/vnd.margo.app.v1+json"}
         manifest_annotations = {
@@ -181,7 +181,7 @@ class OrasClient:
         target = f"{registry}/{repository}:{version}"
         console.debug(f"Push compose: {target}")
 
-        files = [(archive_path, "application/vnd.org.margo.component.compose.tar+gzip")]
+        files = [f"{archive_path}:application/vnd.org.margo.component.compose.tar+gzip"]
         manifest_config = {"mediaType": "application/vnd.org.margo.component.compose+json"}
         manifest_annotations = {
             "org.margo.component.type": "compose",
@@ -220,7 +220,7 @@ class OrasClient:
         target = f"{registry}/{repository}:{version}"
         console.debug(f"Push quadlet: {target}")
 
-        files = [(archive_path, "application/vnd.org.margo.component.quadlet.tar+gzip")]
+        files = [f"{archive_path}:application/vnd.org.margo.component.quadlet.tar+gzip"]
         manifest_config = {"mediaType": "application/vnd.org.margo.component.quadlet+json"}
         manifest_annotations = {
             "org.margo.component.type": "quadlet",
