@@ -7,6 +7,7 @@ from typing import Any
 
 from oras.client import OrasClient as OrasClientLib
 import oras.defaults
+from oras.logger import setup_logger
 import oras.oci
 
 from margot import console
@@ -21,6 +22,7 @@ class OrasClient(OrasClientLib):
     def __init__(self) -> None:
         """Initialize OrasClient for anonymous registry access."""
         super().__init__()
+        setup_logger(quiet=not console.is_verbose(), debug=console.is_debug())
 
     def get_manifest(self, uri: str) -> dict[str, Any]:
         """

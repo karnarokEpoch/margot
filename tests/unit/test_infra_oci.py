@@ -76,6 +76,30 @@ class TestOrasClient:
         assert result == FAKE_BLOB_OUT
         mock_download.assert_called_once_with("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
 
+    def test_oras_logger_enabled_when_debug(self, mocker: Any) -> None:
+        """Should call setup_logger when console debug mode is active."""
+        mocker.patch("margot.infra.oci.console.is_debug", return_value=True)
+        mocker.patch("margot.infra.oci.console.is_verbose", return_value=True)
+        mock_setup = mocker.patch("margot.infra.oci.setup_logger")
+        OrasClient()
+        mock_setup.assert_called_once_with(quiet=False, debug=True)
+
+    def test_oras_logger_called_with_debug_false_when_not_debug(self, mocker: Any) -> None:
+        """Should call setup_logger with quiet=True when neither verbose nor debug."""
+        mocker.patch("margot.infra.oci.console.is_debug", return_value=False)
+        mocker.patch("margot.infra.oci.console.is_verbose", return_value=False)
+        mock_setup = mocker.patch("margot.infra.oci.setup_logger")
+        OrasClient()
+        mock_setup.assert_called_once_with(quiet=True, debug=False)
+
+    def test_oras_logger_not_quiet_in_verbose_mode(self, mocker: Any) -> None:
+        """Should call setup_logger with quiet=False when verbose but not debug."""
+        mocker.patch("margot.infra.oci.console.is_debug", return_value=False)
+        mocker.patch("margot.infra.oci.console.is_verbose", return_value=True)
+        mock_setup = mocker.patch("margot.infra.oci.setup_logger")
+        OrasClient()
+        mock_setup.assert_called_once_with(quiet=False, debug=False)
+
     def test_login_delegates_to_client(self, mocker: Any) -> None:
         """login() should delegate to the underlying client with correct kwargs."""
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
