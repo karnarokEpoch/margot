@@ -26,7 +26,6 @@ description: "NGINX web server deployed via Quadlet"
 repository: public.ecr.aws/g2n4p2m7/margo
 
 quadlet:
-  directory: quadlet
   version: 1.0.0+quadlet
 ```
 

@@ -56,14 +56,12 @@ organization:
     site: https://example.com
 
 compose:
-  directory: compose
   version: 2.1.0
   variants:
     - name: default
     - name: minimal
 
 quadlet:
-  directory: quadlet
   version: 2.1.0
   variants:
     - name: default

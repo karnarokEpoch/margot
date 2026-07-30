@@ -70,11 +70,11 @@ A systemd Quadlet deployment artifact. Same structure and variant support as `co
 ### compose / quadlet fields
 
 | Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `directory` | No | `<type>` (i.e. `compose` or `quadlet`) | Path (relative to project root) to the component source directory. |
+| ------- | ---------- | --------- | ------------- |
 | `version` | Yes | — | Base version for the component. Used directly as OCI tag in flat mode; used as the derivation base for variant versions. |
 | `repository` | No | Global `repository` from tool config / CLI / env | OCI repository for this component. |
 | `component` | No | `<id>-<type>` | Margo component name (developer-owned). Flat mode only. |
+| `directory` | No | `<type>` (i.e. `compose` or `quadlet`) | Path (relative to project root) to the component source directory. |
 
 ## Variants
 
@@ -95,7 +95,7 @@ This produces two artifacts built from `compose/default/` and `compose/minimal/`
 ### Variant fields
 
 | Field | Required | Default | Description |
-|-------|----------|---------|-------------|
+| ------- | ---------- | --------- | ------------- |
 | `name` | Yes | — | Variant name. Maps to `<directory>/<name>/` subdirectory. |
 | `version` | No | `<component-version>+<type>-<variant-name>` | OCI version for this variant. |
 | `component` | No | `<id>-<type>-<variant-name>` | Margo component name for this variant. |
@@ -150,7 +150,7 @@ entire context lives under the `manifest` namespace:
 Each **variant object** exposes:
 
 | Field | Derivation |
-|-------|------------|
+| ------- | ------------ |
 | `name` | As declared in `margo.yaml`. |
 | `version` | Authored value, or `<component-version>+<type>-<name>` if omitted. |
 | `tag` | `version` with `+` replaced by `_`. **Computed, not authorable.** |
