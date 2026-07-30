@@ -62,12 +62,12 @@ component types are `margo`, `compose`, and `quadlet`.
 
 Every component shares these fields:
 
-| Field | Required | Description |
-| ------- | ---------- | ------------- |
-| `directory` | No | Path (relative to project root) to the component source directory. Default: component type name (`margo`, `compose`, `quadlet`). |
-| `version` | Yes | Base version for the component. Used directly as OCI tag in flat mode; used as the derivation base for variant versions. |
-| `repository` | No | OCI repository for this component. Overrides the global `repository` from tool config / CLI flag / env var. |
-| `component` | No | Margo component name (developer-owned). Default: `<id>-<type>`. Flat mode only. |
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `directory` | No | `<type>` (i.e. `margo`, `compose`, or `quadlet`) | Path (relative to project root) to the component source directory. |
+| `version` | Yes | — | Base version for the component. Used directly as OCI tag in flat mode; used as the derivation base for variant versions. |
+| `repository` | No | Global `repository` from tool config / CLI / env | OCI repository for this component. |
+| `component` | No | `<id>-<type>` | Margo component name (developer-owned). Flat mode only. |
 
 ### margo
 
@@ -101,11 +101,11 @@ This produces two artifacts built from `compose/default/` and `compose/minimal/`
 
 ### Variant fields
 
-| Field | Required | Description |
-| ------- | ---------- | ------------- |
-| `name` | Yes | Variant name. Maps to `<directory>/<name>/` subdirectory. |
-| `version` | No | Override the derived version. Default: `<component-version>+<type>-<variant-name>`. |
-| `component` | No | Override the derived component name. Default: `<id>-<type>-<variant-name>`. |
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `name` | Yes | — | Variant name. Maps to `<directory>/<name>/` subdirectory. |
+| `version` | No | `<component-version>+<type>-<variant-name>` | OCI version for this variant. |
+| `component` | No | `<id>-<type>-<variant-name>` | Margo component name for this variant. |
 
 With the example above (`version: 2.1.0`, compose variants `default` and `minimal`):
 
@@ -144,26 +144,27 @@ When `app.yaml.jinja` is present, margot renders it with Jinja2 using a context 
 entire context lives under the `manifest` namespace:
 
 - `manifest`
-    - `id`, `name`, `version`, `appVersion`, `description`
-    - `annotations` — dict
-    - `author` — list of `{name, email}`
-    - `organization` — list of `{name, site}`
-    - `margo`
-        - `version`, `tag`, `ref`, `repository`, `component`
-    - `compose`
-        - `version`, `repository`, `component`
-        - `variants` — ordered list of variant objects
-        - `<variant-name>` — direct access (e.g. `manifest.compose.minimal.tag`)
-    - `quadlet` — same shape as `compose`
+  - `id`, `name`, `version`, `appVersion`, `description`
+  - `annotations` — dict
+  - `author` — list of `{name, email}`
+  - `organization` — list of `{name, site}`
+  - `margo`
+    - `version`, `tag`, `ref`, `repository`, `component`
+  - `compose` and `quadlet`
+    - `version`, `repository`, `component`
+    - `variants` — ordered list of variant objects
+    - `<variant-name>` — direct access (e.g. `manifest.compose.default.tag`)
 
 Each **variant object** exposes:
 
-- `name` — variant name
-- `version` — as authored or derived (with `+`)
-- `tag` — OCI-safe form (with `_`). **Computed, not authorable.**
-- `ref` — `repository:tag`. **Computed, not authorable.**
-- `repository` — inherited from component or overridden
-- `component` — developer-owned, with a derived default
+| Field | Derivation |
+|-------|------------|
+| `name` | As declared in `margo.yaml`. |
+| `version` | Authored value, or `<component-version>+<type>-<name>` if omitted. |
+| `tag` | `version` with `+` replaced by `_`. **Computed, not authorable.** |
+| `ref` | `<repository>:<tag>`. **Computed, not authorable.** |
+| `repository` | Inherited from component, or overridden per variant. |
+| `component` | Authored value, or `<id>-<type>-<name>` if omitted. |
 
 !!! note
     If `app.yaml.jinja` is absent, `app.yaml` is required and copied verbatim — no substitution occurs.
