@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -248,7 +249,15 @@ class OrasClient:
         self._client.auth.load_configs(container)
 
         manifest = oras.oci.NewManifest()
-        manifest["artifactType"] = artifact_type
+        # Rebuild with artifactType right after mediaType
+        manifest = {
+            "schemaVersion": manifest["schemaVersion"],
+            "mediaType": manifest["mediaType"],
+            "artifactType": artifact_type,
+            "config": manifest["config"],
+            "layers": manifest["layers"],
+            "annotations": manifest["annotations"],
+        }
 
         # Build and upload layers
         layers = []
@@ -273,7 +282,11 @@ class OrasClient:
         # Assemble manifest
         manifest["config"] = conf
         manifest["layers"] = layers
-        manifest["annotations"] = manifest_annotations
+        created = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        manifest["annotations"] = {
+            "org.opencontainers.image.created": created,
+            **manifest_annotations,
+        }
 
         response = self._client.upload_manifest(manifest=manifest, container=container)
         self._client._check_200_response(response)
