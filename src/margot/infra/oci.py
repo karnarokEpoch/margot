@@ -136,10 +136,10 @@ class OrasClient:
 
         # Optional files
         optional_files = [
-            (margo_dir / "resources" / "icon.png", "image/png"),
-            (margo_dir / "resources" / "license.txt", "text/plain"),
-            (margo_dir / "resources" / "release-notes.md", "text/markdown"),
-            (margo_dir / "resources" / "description.md", "text/markdown"),
+            (margo_dir / "resources" / "icon.png", "application/vnd.margo.app.icon.v1+png"),
+            (margo_dir / "resources" / "license.txt", "application/vnd.margo.app.license.v1+plain"),
+            (margo_dir / "resources" / "release-notes.md", "application/vnd.margo.app.releaseNotes.v1+markdown"),
+            (margo_dir / "resources" / "description.md", "application/vnd.margo.app.descriptionFile.v1+markdown"),
         ]
         for file_path, media_type in optional_files:
             if file_path.exists():
@@ -220,7 +220,7 @@ class OrasClient:
         target = f"{registry}/{repository}:{version}"
         console.debug(f"Push quadlet: {target}")
 
-        files = [(archive_path, "application/vnd.org.margo.component.quadlet+json")]
+        files = [(archive_path, "application/vnd.org.margo.component.quadlet.tar+gzip")]
         manifest_config = {"mediaType": "application/vnd.org.margo.component.quadlet+json"}
         manifest_annotations = {
             "org.margo.component.type": "quadlet",

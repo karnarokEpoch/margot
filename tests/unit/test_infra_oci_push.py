@@ -67,8 +67,8 @@ class TestPushMargo:
         files = call_args[1]["files"]
         assert len(files) == 3
         assert (str(margo_dir / "app.yaml"), "application/vnd.margo.app.description.v1+yaml") in files
-        assert (str(resources_dir / "icon.png"), "image/png") in files
-        assert (str(resources_dir / "license.txt"), "text/plain") in files
+        assert (str(resources_dir / "icon.png"), "application/vnd.margo.app.icon.v1+png") in files
+        assert (str(resources_dir / "license.txt"), "application/vnd.margo.app.license.v1+plain") in files
 
     def test_push_margo_skips_missing_optional_files(self, mocker: Any, tmp_path: Path) -> None:
         """Should skip optional files that don't exist on disk."""
@@ -146,7 +146,7 @@ class TestPushQuadlet:
         )
 
         mock_lib.push.assert_called_once_with(
-            files=[("/build/1.0.0/testapp-1.0.0.tgz", "application/vnd.org.margo.component.quadlet+json")],
+            files=[("/build/1.0.0/testapp-1.0.0.tgz", "application/vnd.org.margo.component.quadlet.tar+gzip")],
             target="public.ecr.aws/g2n4p2m7/margo:1.0.0",
             manifest_config={"mediaType": "application/vnd.org.margo.component.quadlet+json"},
             manifest_annotations={
