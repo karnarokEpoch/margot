@@ -143,24 +143,26 @@ build metadata (`+margo`, `+quadlet`, `+compose-<variant>`, etc.) to distinguish
 When `app.yaml.jinja` is present, margot renders it with Jinja2 using a context derived from `margo.yaml`. The
 entire context lives under the `manifest` namespace:
 
-```text
-manifest.id  manifest.name  manifest.version  manifest.appVersion  manifest.description
-manifest.annotations  manifest.author  manifest.organization
+- `manifest`
+    - `id`, `name`, `version`, `appVersion`, `description`
+    - `annotations` — dict
+    - `author` — list of `{name, email}`
+    - `organization` — list of `{name, site}`
+    - `margo`
+        - `version`, `tag`, `ref`, `repository`, `component`
+    - `compose`
+        - `version`, `repository`, `component`
+        - `variants` — ordered list of variant objects
+        - `<variant-name>` — direct access (e.g. `manifest.compose.minimal.tag`)
+    - `quadlet` — same shape as `compose`
 
-manifest.margo.version  manifest.margo.tag  manifest.margo.ref  manifest.margo.repository  manifest.margo.component
+Each **variant object** exposes:
 
-manifest.compose.version  manifest.compose.repository  manifest.compose.component
-manifest.compose.variants                          # ordered list of variant objects
-manifest.compose.<variant-name>.tag                # direct access by name
-
-manifest.quadlet.*                                 # same shape as compose
-```
-
-Each variant object exposes: `name`, `version`, `tag`, `ref`, `repository`, `component`.
-
+- `name` — variant name
 - `version` — as authored or derived (with `+`)
 - `tag` — OCI-safe form (with `_`). **Computed, not authorable.**
 - `ref` — `repository:tag`. **Computed, not authorable.**
+- `repository` — inherited from component or overridden
 - `component` — developer-owned, with a derived default
 
 !!! note
