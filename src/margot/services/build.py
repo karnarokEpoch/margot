@@ -1,8 +1,8 @@
 """Build service: orchestrate artifact building from margo.yaml."""
 
 from pathlib import Path
-import shutil
-import tempfile
+from shutil import rmtree
+from tempfile import mkdtemp
 
 from margot import console
 from margot.domain.metadata import ComponentConfig, MargoYaml, load_margo_yaml
@@ -281,7 +281,7 @@ def _build_flat_component(  # noqa: PLR0913
     output_path = str(Path(output_dir) / f"{meta.name}-{version}.tgz")
 
     # Build using temp directory
-    tmp_parent = tempfile.mkdtemp()
+    tmp_parent = mkdtemp()
     tmp_dir = str(Path(tmp_parent) / "content")
     try:
         copy_tree(source_dir, tmp_dir)
@@ -289,7 +289,7 @@ def _build_flat_component(  # noqa: PLR0913
         make_tarball(tmp_dir, output_path)
         console.info(f"{component_name} built: {output_path}")
     finally:
-        shutil.rmtree(tmp_parent, ignore_errors=True)
+        rmtree(tmp_parent, ignore_errors=True)
 
     return [
         BuildTarget(
@@ -339,7 +339,7 @@ def _build_variant_component(  # noqa: PLR0913
         output_path = str(Path(output_dir) / f"{meta.name}-{version}.tgz")
 
         # Build using temp directory
-        tmp_parent = tempfile.mkdtemp()
+        tmp_parent = mkdtemp()
         tmp_dir = str(Path(tmp_parent) / "content")
         try:
             copy_tree(source_dir, tmp_dir)
@@ -347,7 +347,7 @@ def _build_variant_component(  # noqa: PLR0913
             make_tarball(tmp_dir, output_path)
             console.info(f"{component_name} variant '{v.name}' built: {output_path}")
         finally:
-            shutil.rmtree(tmp_parent, ignore_errors=True)
+            rmtree(tmp_parent, ignore_errors=True)
 
         targets.append(
             BuildTarget(

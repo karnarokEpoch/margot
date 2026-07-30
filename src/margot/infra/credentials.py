@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-import tomllib
+from tomllib import load
 
 from margot import console
 
@@ -22,7 +22,7 @@ def load_expiry(registry: str, credentials_file: Path = CREDENTIALS_FILE) -> dat
         return None
 
     with credentials_file.open("rb") as f:
-        data = tomllib.load(f)
+        data = load(f)
 
     registries = data.get("registries", {})
     entry = registries.get(registry)
@@ -44,7 +44,7 @@ def save_expiry(registry: str, expires_at: datetime, credentials_file: Path = CR
     existing: dict[str, dict[str, str]] = {}
     if credentials_file.exists():
         with credentials_file.open("rb") as f:
-            data = tomllib.load(f)
+            data = load(f)
         registries = data.get("registries", {})
         for reg, entry in registries.items():
             if "expires_at" in entry:
@@ -63,7 +63,7 @@ def remove_expiry(registry: str, credentials_file: Path = CREDENTIALS_FILE) -> N
         return
 
     with credentials_file.open("rb") as f:
-        data = tomllib.load(f)
+        data = load(f)
 
     registries = data.get("registries", {})
     if registry not in registries:

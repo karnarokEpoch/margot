@@ -1,8 +1,8 @@
 """Pure-Python filesystem helpers for build operations."""
 
 from pathlib import Path
-import shutil
-import tarfile
+from shutil import copytree, ignore_patterns, rmtree
+from tarfile import open as tar_open
 
 from margot import console
 
@@ -24,7 +24,7 @@ def copy_tree(src: str, dst: str, *, ignore_file: str = ".rsyncignore") -> None:
     console.debug(f"Copy tree: {src} → {dst}")
 
     # Read ignore patterns if ignore file exists
-    ignore_patterns = []
+    exclude_patterns: list[str] = []
     ignore_path = src_path / ignore_file
     if ignore_path.exists():
         text = ignore_path.read_text()
@@ -32,24 +32,24 @@ def copy_tree(src: str, dst: str, *, ignore_file: str = ".rsyncignore") -> None:
             stripped = line.strip()
             # Skip blank lines and comments
             if stripped and not stripped.startswith("#"):
-                ignore_patterns.append(stripped)
-        console.debug(f"Loaded {len(ignore_patterns)} patterns from {ignore_file}")
+                exclude_patterns.append(stripped)
+        console.debug(f"Loaded {len(exclude_patterns)} patterns from {ignore_file}")
         # Always exclude the ignore file itself
-        ignore_patterns.append(ignore_file)
+        exclude_patterns.append(ignore_file)
 
     # Create parent directories of dst if needed
     dst_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Remove existing destination if it already exists (idempotent rebuild)
     if dst_path.exists():
-        shutil.rmtree(dst_path)
+        rmtree(dst_path)
         console.debug(f"Removed existing output dir: {dst}")
 
     # Prepare ignore callable
-    ignore_func = shutil.ignore_patterns(*ignore_patterns) if ignore_patterns else None
+    ignore_func = ignore_patterns(*exclude_patterns) if exclude_patterns else None
 
     # Copy tree (dst must not exist)
-    shutil.copytree(src_path, dst_path, ignore=ignore_func, dirs_exist_ok=False)
+    copytree(src_path, dst_path, ignore=ignore_func, dirs_exist_ok=False)
 
 
 def substitute_placeholders(directory: str, placeholders: dict[str, str]) -> None:
@@ -108,7 +108,7 @@ def make_tarball(source_dir: str, output_path: str) -> None:
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Create tarball with flat contents (arcname="." flattens the directory)
-    with tarfile.open(output_file, "w:gz") as tar:
+    with tar_open(output_file, "w:gz") as tar:
         # Add all contents of source_dir directly (no parent wrapping)
         for item in source_path.iterdir():
             tar.add(
