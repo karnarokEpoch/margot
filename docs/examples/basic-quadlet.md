@@ -48,27 +48,27 @@ suffixes prevent tag collision when both artifacts share the same repository.
 ```yaml+jinja
 apiVersion: margo.org/v1-alpha1
 kind: ApplicationDescription
-id: {{ app.id }}
+id: {{ manifest.id }}
 metadata:
   name: NGINX
-  description: {{ app.description }}
-  version: {{ app.version }}
+  description: {{ manifest.description }}
+  version: {{ manifest.version }}
 deploymentProfiles:
   - type: quadlet
-    id: {{ app.id }}-quadlet
+    id: {{ manifest.id }}-quadlet
     components:
-      - name: {{ quadlet.component }}
+      - name: {{ manifest.quadlet.component }}
         properties:
-          repository: {{ quadlet.repository }}
-          revision: {{ quadlet.tag }}
+          repository: {{ manifest.quadlet.repository }}
+          revision: {{ manifest.quadlet.tag }}
 ```
 
 At build time:
 
-- `{{ app.id }}` → `com-example-nginx`
-- `{{ app.version }}` → `1.0.0` (manifest version)
-- `{{ quadlet.component }}` → `com-example-nginx-quadlet` (derived: `<id>-<type>`)
-- `{{ quadlet.tag }}` → `1.0.0_quadlet` (OCI-safe form of `1.0.0+quadlet`)
+- `{{ manifest.id }}` → `com-example-nginx`
+- `{{ manifest.version }}` → `1.0.0` (manifest version)
+- `{{ manifest.quadlet.component }}` → `com-example-nginx-quadlet` (derived: `<id>-<type>`)
+- `{{ manifest.quadlet.tag }}` → `1.0.0_quadlet` (OCI-safe form of `1.0.0+quadlet`)
 
 ## Quadlet files
 

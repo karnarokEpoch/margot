@@ -37,14 +37,14 @@ margo:
 ```yaml+jinja
 apiVersion: margo.org/v1-alpha1
 kind: ApplicationDescription
-id: {{ app.id }}
+id: {{ manifest.id }}
 metadata:
   name: NGINX
-  description: {{ app.description }}
-  version: {{ app.version }}
+  description: {{ manifest.description }}
+  version: {{ manifest.version }}
 deploymentProfiles:
   - type: helm
-    id: {{ app.id }}-helm
+    id: {{ manifest.id }}-helm
     components:
       - name: nginx
         properties:
@@ -54,14 +54,14 @@ deploymentProfiles:
           timeout: 5m0s
 parameters:
   imageTag:
-    value: {{ app.appVersion }}
+    value: {{ manifest.appVersion }}
     targets:
       - pointer: image.tag
         components: ["nginx"]
 ```
 
-- `{{ app.version }}` → `1.0.0` (manifest version)
-- `{{ app.appVersion }}` → `1.27.0` (application version, used as the default for `image.tag`)
+- `{{ manifest.version }}` → `1.0.0` (manifest version)
+- `{{ manifest.appVersion }}` → `1.27.0` (application version, used as the default for `image.tag`)
 
 ## Build and push
 

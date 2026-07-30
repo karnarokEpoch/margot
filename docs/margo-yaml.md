@@ -48,9 +48,9 @@ quadlet:
 | `apiVersion` | Yes | Config schema version. Currently `v1`. |
 | `id` | Yes | Margo application identifier. Lowercase letters, digits, and dashes only. Used as the base for derived component names and deployment profile IDs. |
 | `name` | Yes | Application name. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation. |
-| `version` | Yes | Manifest/package version (like Helm's chart version). Exposed as `app.version` in templates. |
-| `appVersion` | No | Version of the deployed application (like Helm's `appVersion`). Not validated as SemVer. Exposed as `app.appVersion` in templates. Useful for passing as a parameter to deployment profiles (e.g. `image.tag`). |
-| `description` | Yes | Short description. Used in OCI description annotation and exposed as `app.description` in templates. |
+| `version` | Yes | Manifest/package version (like Helm's chart version). Exposed as `manifest.version` in templates. |
+| `appVersion` | No | Version of the deployed application (like Helm's `appVersion`). Not validated as SemVer. Exposed as `manifest.appVersion` in templates. Useful for passing as a parameter to deployment profiles (e.g. `image.tag`). |
+| `description` | Yes | Short description. Used in OCI description annotation and exposed as `manifest.description` in templates. |
 | `annotations` | No | Arbitrary key/value pairs passed as OCI annotations. |
 | `author` | No | List of authors, each with `name` (optional) and `email` (optional). Maps to `metadata.catalog.author` in the Margo spec. |
 | `organization` | No | List of organizations, each with `name` (required) and `site` (optional). Maps to `metadata.catalog.organization` in the Margo spec. |
@@ -141,18 +141,19 @@ build metadata (`+margo`, `+quadlet`, `+compose-<variant>`, etc.) to distinguish
 ## Template context
 
 When `app.yaml.jinja` is present, margot renders it with Jinja2 using a context derived from `margo.yaml`. The
-context exposes these fields:
+entire context lives under the `manifest` namespace:
 
 ```text
-app.id  app.name  app.version  app.appVersion  app.description  app.annotations  app.author  app.organization
+manifest.id  manifest.name  manifest.version  manifest.appVersion  manifest.description
+manifest.annotations  manifest.author  manifest.organization
 
-margo.version  margo.tag  margo.ref  margo.repository  margo.component
+manifest.margo.version  manifest.margo.tag  manifest.margo.ref  manifest.margo.repository  manifest.margo.component
 
-compose.version  compose.tag  compose.repository  compose.component
-compose.variants                          # ordered list of variant objects
-compose.<variant-name>.tag                # direct access by name
+manifest.compose.version  manifest.compose.repository  manifest.compose.component
+manifest.compose.variants                          # ordered list of variant objects
+manifest.compose.<variant-name>.tag                # direct access by name
 
-quadlet.*                                 # same shape as compose
+manifest.quadlet.*                                 # same shape as compose
 ```
 
 Each variant object exposes: `name`, `version`, `tag`, `ref`, `repository`, `component`.

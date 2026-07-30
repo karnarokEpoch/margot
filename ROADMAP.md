@@ -191,12 +191,12 @@ variable, rather than emitting empty YAML.
 **Template context** (derived from `margo.yaml`, read-only):
 
 ```text
-app.id  app.name  app.version  app.appVersion  app.description  app.annotations  app.author  app.organization
-margo.version  margo.tag  margo.ref  margo.repository  margo.directory
-compose.directory  compose.repository
-compose.variants                      # ordered list of variant objects
-compose.<variant-name>                # direct access, e.g. compose.minimal.tag
-quadlet.*                             # same shape
+manifest.id  manifest.name  manifest.version  manifest.appVersion  manifest.description  manifest.annotations  manifest.author  manifest.organization
+manifest.margo.version  manifest.margo.tag  manifest.margo.ref  manifest.margo.repository  manifest.margo.directory
+manifest.compose.directory  manifest.compose.repository
+manifest.compose.variants                      # ordered list of variant objects
+manifest.compose.<variant-name>                # direct access, e.g. manifest.compose.minimal.tag
+manifest.quadlet.*                             # same shape
 ```
 
 Variant object: `name`, `version`, `tag`, `ref`, `repository`, `component`.

@@ -92,21 +92,21 @@ No tag collisions, no manual versioning per variant.
 ```yaml+jinja
 apiVersion: margo.org/v1-alpha1
 kind: ApplicationDescription
-id: {{ app.id }}
+id: {{ manifest.id }}
 metadata:
   name: Web Platform
-  description: {{ app.description }}
-  version: {{ app.version }}
+  description: {{ manifest.description }}
+  version: {{ manifest.version }}
   catalog:
     application:
       icon: ./resources/icon.png
       descriptionFile: ./resources/description.md
       tags: ["web", "reverse-proxy"]
-    organization: {{ app.organization | to_yaml }}
+    organization: {{ manifest.organization | to_yaml }}
 
 deploymentProfiles:
   - type: helm
-    id: {{ app.id }}-helm
+    id: {{ manifest.id }}-helm
     components:
       - name: nginx
         properties:
@@ -116,18 +116,18 @@ deploymentProfiles:
         properties:
           repository: oci://registry-1.docker.io/bitnamicharts/apache
           revision: 11.4.29
-{%- for v in compose.variants %}
+{%- for v in manifest.compose.variants %}
   - type: compose
-    id: {{ app.id }}-compose-{{ v.name }}
+    id: {{ manifest.id }}-compose-{{ v.name }}
     components:
       - name: {{ v.component }}
         properties:
           repository: {{ v.repository }}
           revision: {{ v.tag }}
 {%- endfor %}
-{%- for v in quadlet.variants %}
+{%- for v in manifest.quadlet.variants %}
   - type: quadlet
-    id: {{ app.id }}-quadlet-{{ v.name }}
+    id: {{ manifest.id }}-quadlet-{{ v.name }}
     components:
       - name: {{ v.component }}
         properties:
@@ -141,7 +141,7 @@ parameters:
     targets:
       - pointer: NGINX_PORT
         components:
-{%- for v in compose.variants + quadlet.variants %}
+{%- for v in manifest.compose.variants + manifest.quadlet.variants %}
           - {{ v.component }}
 {%- endfor %}
 ```
