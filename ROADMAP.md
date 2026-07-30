@@ -191,7 +191,7 @@ variable, rather than emitting empty YAML.
 **Template context** (derived from `margo.yaml`, read-only):
 
 ```text
-app.id  app.name  app.version  app.description  app.annotations  app.author  app.organization
+app.id  app.name  app.version  app.appVersion  app.description  app.annotations  app.author  app.organization
 margo.version  margo.tag  margo.ref  margo.repository  margo.directory
 compose.directory  compose.repository
 compose.variants                      # ordered list of variant objects

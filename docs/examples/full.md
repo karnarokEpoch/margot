@@ -42,6 +42,7 @@ resolves symlinks and copies their content — the pushed artifact contains regu
 apiVersion: v1
 id: com-example-web-platform
 name: web-platform
+version: "1.0.0"
 appVersion: "2.1.0"
 description: "NGINX + Apache web platform"
 annotations:
@@ -78,7 +79,7 @@ quadlet:
 Variant `version` is omitted — margot derives it as `<component-version>+<type>-<variant-name>`:
 
 | Variant | Derived version | OCI tag |
-|---------|-----------------|---------|
+| --------- | ----------------- | --------- |
 | compose/default | `2.1.0+compose-default` | `2.1.0_compose-default` |
 | compose/minimal | `2.1.0+compose-minimal` | `2.1.0_compose-minimal` |
 | quadlet/default | `2.1.0+quadlet-default` | `2.1.0_quadlet-default` |
@@ -303,7 +304,7 @@ margot push
 This produces five OCI artifacts at `public.ecr.aws/g2n4p2m7/margo`:
 
 | Tag | Artifact type |
-|-----|---------------|
+| ----- | --------------- |
 | `1.0.0_margo` | `application/vnd.margo.app.v1+json` |
 | `2.1.0_compose-default` | `application/vnd.org.margo.component.compose+json` |
 | `2.1.0_compose-minimal` | `application/vnd.org.margo.component.compose+json` |

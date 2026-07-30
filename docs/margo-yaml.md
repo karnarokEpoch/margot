@@ -7,7 +7,8 @@ source of truth read by `margot build` and `margot push`.
 apiVersion: v1
 id: com-example-myapp
 name: myapp
-appVersion: "1.0.0"
+version: "1.0.0"
+appVersion: "2.3.1"
 description: "Human-readable description of the application"
 annotations:
   opentelemetry.io/instrumented: "true"
@@ -47,7 +48,8 @@ quadlet:
 | `apiVersion` | Yes | Config schema version. Currently `v1`. |
 | `id` | Yes | Margo application identifier. Lowercase letters, digits, and dashes only. Used as the base for derived component names and deployment profile IDs. |
 | `name` | Yes | Application name. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation. |
-| `appVersion` | No | Human-facing application version. Not validated as SemVer. Exposed as `app.version` in templates. |
+| `version` | Yes | Manifest/package version (like Helm's chart version). Exposed as `app.version` in templates. |
+| `appVersion` | No | Version of the deployed application (like Helm's `appVersion`). Not validated as SemVer. Exposed as `app.appVersion` in templates. Useful for passing as a parameter to deployment profiles (e.g. `image.tag`). |
 | `description` | Yes | Short description. Used in OCI description annotation and exposed as `app.description` in templates. |
 | `annotations` | No | Arbitrary key/value pairs passed as OCI annotations. |
 | `author` | No | List of authors, each with `name` (optional) and `email` (optional). Maps to `metadata.catalog.author` in the Margo spec. |
@@ -142,7 +144,7 @@ When `app.yaml.jinja` is present, margot renders it with Jinja2 using a context 
 context exposes these fields:
 
 ```text
-app.id  app.name  app.version  app.description  app.annotations  app.author  app.organization
+app.id  app.name  app.version  app.appVersion  app.description  app.annotations  app.author  app.organization
 
 margo.version  margo.tag  margo.ref  margo.repository  margo.component
 

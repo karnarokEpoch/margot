@@ -19,6 +19,7 @@ nginx-helm/
 apiVersion: v1
 id: com-example-nginx
 name: nginx
+version: "1.0.0"
 appVersion: "1.27.0"
 description: "NGINX web server deployed via Helm chart"
 
@@ -28,8 +29,8 @@ margo:
   repository: public.ecr.aws/g2n4p2m7/margo
 ```
 
-Only the `margo` component is declared — no `compose`, no `quadlet`. margot builds and pushes the application
-descriptor artifact only.
+- `version` — the manifest/package version (this Margo application description release)
+- `appVersion` — the version of the deployed application (nginx `1.27.0`)
 
 ## app.yaml.jinja
 
@@ -51,14 +52,16 @@ deploymentProfiles:
           revision: 25.0.15
           wait: true
           timeout: 5m0s
+parameters:
+  imageTag:
+    value: {{ app.appVersion }}
+    targets:
+      - pointer: image.tag
+        components: ["nginx"]
 ```
 
-`{{ app.version }}` resolves to `1.27.0` (from `appVersion`), `{{ app.id }}` to `com-example-nginx`.
-
-!!! note
-    `parameters` and `configuration` sections are omitted here to keep the example short. In a real project you
-    would define configurable values (e.g. replica count, resource limits) and their validation schema. See the
-    [full example](full.md) for a project with parameters.
+- `{{ app.version }}` → `1.0.0` (manifest version)
+- `{{ app.appVersion }}` → `1.27.0` (application version, used as the default for `image.tag`)
 
 ## Build and push
 

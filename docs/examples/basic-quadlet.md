@@ -20,6 +20,7 @@ nginx-quadlet/
 apiVersion: v1
 id: com-example-nginx
 name: nginx
+version: "1.0.0"
 appVersion: "1.27.0"
 description: "NGINX web server deployed via Quadlet"
 
@@ -65,12 +66,9 @@ deploymentProfiles:
 At build time:
 
 - `{{ app.id }}` → `com-example-nginx`
-- `{{ app.version }}` → `1.27.0`
+- `{{ app.version }}` → `1.0.0` (manifest version)
 - `{{ quadlet.component }}` → `com-example-nginx-quadlet` (derived: `<id>-<type>`)
 - `{{ quadlet.tag }}` → `1.0.0_quadlet` (OCI-safe form of `1.0.0+quadlet`)
-
-!!! note
-    `parameters` and `configuration` sections are omitted to keep the example concise.
 
 ## Quadlet files
 
