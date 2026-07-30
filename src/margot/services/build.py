@@ -65,7 +65,7 @@ def build(
             _build_compose_or_quadlet(meta, project_dir, build_dir, version_override, variant, PackageType.QUADLET, placeholders)
         )
     else:
-        raise ValueError(f"Unsupported package_type: {package_type}")
+        raise ValueError(f"Unsupported package_type: {package_type}")  # pragma: no cover
 
     console.info(f"Build complete: {len(targets)} target(s).")
     return targets

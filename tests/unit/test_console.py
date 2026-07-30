@@ -15,8 +15,8 @@ def capture_console():
     out = StringIO()
     err = StringIO()
     # Replace the getter functions to return StringIO-backed consoles
-    original_get_stdout = _console._get_stdout  # noqa: SLF001
-    original_get_stderr = _console._get_stderr  # noqa: SLF001
+    original_get_stdout = _console._get_stdout
+    original_get_stderr = _console._get_stderr
 
     def mock_get_stdout():
         return Console(file=out)
@@ -24,13 +24,13 @@ def capture_console():
     def mock_get_stderr():
         return Console(file=err)
 
-    _console._get_stdout = mock_get_stdout  # noqa: SLF001
-    _console._get_stderr = mock_get_stderr  # noqa: SLF001
+    _console._get_stdout = mock_get_stdout
+    _console._get_stderr = mock_get_stderr
 
     yield out, err
 
-    _console._get_stdout = original_get_stdout  # noqa: SLF001
-    _console._get_stderr = original_get_stderr  # noqa: SLF001
+    _console._get_stdout = original_get_stdout
+    _console._get_stderr = original_get_stderr
 
 
 @fixture(autouse=False)
