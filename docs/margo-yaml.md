@@ -75,6 +75,60 @@ A systemd Quadlet deployment artifact. Same structure and variant support as `co
 | `repository` | No | Global `repository` from tool config / CLI / env | OCI repository for this component. |
 | `component` | No | `<id>-<type>` | Margo component name (developer-owned). Flat mode only. |
 | `directory` | No | `<type>` (i.e. `compose` or `quadlet`) | Path (relative to project root) to the component source directory. |
+| `image` | No | — | `{search, replace}` block — swaps a dev-local image reference for the target one at build time. See [Image search-and-replace](#image-search-and-replace). Not available for `margo`. |
+
+## Image search-and-replace
+
+`compose` and `quadlet` sources are meant to be **runnable as checked in** — a developer runs
+`compose/compose.yaml` or `quadlet/*.container` locally against a dev-local image (e.g. built with
+`podman build -t localhost/myapp:dev .`) before margot ever touches it. At build time, margot swaps that
+dev-local reference for the environment-appropriate one — no manual editing of source files, no
+drift between what's run locally and what's shipped.
+
+```yaml
+compose:
+  directory: compose
+  version: 1.0.0
+  image:
+    search: "localhost/myapp:dev"
+    replace: "public.ecr.aws/g2n4p2m7/myapp:{{ manifest.appVersion }}"
+```
+
+- `search` — a **literal string** (not a regex), exactly as it appears in the component's source
+  text file(s), e.g. `localhost/myapp:dev`.
+- `replace` — a **Jinja2 template string**, rendered with the same [template context](#template-context)
+  used for `app.yaml.jinja`. Rendered once at build time, after every other `margo.yaml` field is
+  resolved — so bumping `appVersion` (or any other manifest field) alone updates every
+  `image.replace` result, with no separate edit to the `image` block itself.
+- May be declared at the component level (`compose:` / `quadlet:`) and/or per variant. A variant's
+  `image` block **fully overrides** the component-level one — it does not merge.
+- Optional. A component/variant with no `image` block gets no substitution.
+- An unmatched `search` string (declared but not found in any source file) produces a warning, not
+  a hard failure — the same posture as other unresolved placeholders.
+- An undefined Jinja variable in `replace` is a hard error at build time (fail fast), not a silent
+  empty string — same behavior as an invalid `app.yaml.jinja` template.
+- Not available for `margo` — `margo/app.yaml` (or `app.yaml.jinja`) is only ever rendered once at
+  build time and is never run directly, so it uses `app.yaml.jinja` directly instead.
+
+Per-variant override:
+
+```yaml
+compose:
+  directory: compose
+  version: 1.0.0
+  image:
+    search: "localhost/myapp:dev"
+    replace: "public.ecr.aws/g2n4p2m7/myapp:{{ manifest.appVersion }}"
+  variants:
+    - name: default        # inherits the component-level image block above
+    - name: addon-mosquitto
+      image:                # fully replaces the component-level block for this variant
+        search: "localhost/mosquitto:dev"
+        replace: "public.ecr.aws/g2n4p2m7/mosquitto:{{ manifest.appVersion }}"
+```
+
+See the [Image search-and-replace example](examples/image-search-replace.md) for a full walkthrough
+with `margot build` output.
 
 ## Variants
 
