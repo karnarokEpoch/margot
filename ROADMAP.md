@@ -32,11 +32,15 @@ block) starts once both are merged. Key locked decisions:
   files, where plain string replace is still the right model.
 - `id` becomes a required top-level field in `margo.yaml`.
 - New optional `image: {search, replace}` block per component/variant in `margo.yaml` —
-  literal string replace (not regex) applied to compose/quadlet source text files at
-  build time, so the checked-in source stays a real, runnable file locally (with a real
-  dev image ref) while `build` swaps in the environment-appropriate ref. Variant-level
-  `image` fully overrides the component-level one (not merged). Optional — components
-  with no dev-local image to swap declare nothing. Already reflected in `FEATURES.md`.
+  `search` is a literal string (not regex) matched against compose/quadlet source text
+  files at build time; `replace` is a **Jinja2 template** rendered from the same manifest
+  context as `app.yaml.jinja` (`StrictUndefined` — undefined variable is a hard error).
+  Keeps the checked-in source a real, runnable file locally (with a real dev image ref)
+  while `build` swaps in the environment-appropriate ref, and keeps `image.replace` in
+  sync automatically when `appVersion` (or any other manifest field) is bumped — no
+  separate edit to the `image` block itself. Variant-level `image` fully overrides the
+  component-level one (not merged). Optional — components with no dev-local image to
+  swap declare nothing. Already reflected in `FEATURES.md`.
 
 ---
 

@@ -105,8 +105,8 @@ compose:
   version: 1.0.0                   # OCI tag for the compose artifact(s) — used only when no variants
   repository: public.ecr.aws/g2n4p2m7/margo   # optional override; falls back to global repository
   image:                            # optional — dev-local image ref swap, applied at build time
-    search: "myapp:dev"             # literal string as it appears in compose.yaml (must be runnable locally as-is)
-    replace: "public.ecr.aws/g2n4p2m7/myapp:<app_tag>"   # target ref; may reuse placeholder tokens
+    search: "localhost/myapp:dev"             # literal string as it appears in compose.yaml (must be runnable locally as-is)
+    replace: "public.ecr.aws/g2n4p2m7/myapp:{{ manifest.appVersion }}"   # Jinja2 template, rendered from manifest context
   variants:
     - name: default                # reserved name — maps to compose/default/ subdir
       version: 1.0.0
@@ -116,16 +116,16 @@ compose:
     - name: addon-mosquitto        # maps to compose/addon-mosquitto/
       version: 1.0.0_addon-mosquitto
       image:                        # per-variant override — replaces the component-level image block, not merged
-        search: "mosquitto:dev"
-        replace: "public.ecr.aws/g2n4p2m7/mosquitto:<app_tag>"
+        search: "localhost/mosquitto:dev"
+        replace: "public.ecr.aws/g2n4p2m7/mosquitto:{{ manifest.appVersion }}"
 
 quadlet:
   directory: quadlet               # path to the quadlet source dir
   version: 1.0.0
   repository: public.ecr.aws/g2n4p2m7/margo
   image:
-    search: "myapp:dev"
-    replace: "public.ecr.aws/g2n4p2m7/myapp:<app_tag>"
+    search: "localhost/myapp:dev"
+    replace: "public.ecr.aws/g2n4p2m7/myapp:{{ manifest.appVersion }}"
   variants:
     - name: default                # reserved name — maps to quadlet/default/ subdir
       version: 1.0.0
@@ -150,18 +150,24 @@ quadlet:
 - `image` (compose/quadlet only) — optional `{search, replace}` block for swapping a
   dev-local container image reference for the environment-appropriate one at build time.
   - `search` — a literal string (not a regex), exactly as it appears in the component's
-    source text file(s) (e.g. `myapp:dev`). The source file must be a real, runnable
+    source text file(s) (e.g. `localhost/myapp:dev`). The source file must be a real, runnable
     artifact as checked in — developers run it locally against this dev image before
     `margot build` ever touches it.
-  - `replace` — the target string. May reuse the same placeholder tokens available to
-    compose/quadlet substitution (e.g. `<app_tag>`).
+  - `replace` — a **Jinja2 template string**, rendered with the same manifest context used
+    for `app.yaml.jinja` (see Template context below), scoped to the enclosing component/
+    variant (e.g. `{{ manifest.appVersion }}`, `{{ manifest.compose.repository }}`,
+    `{{ manifest.compose.default.tag }}`). Rendered once at build time, after all other
+    manifest fields are resolved — so bumping `appVersion` (or any other manifest field)
+    alone updates every `image.replace` result with no separate edit to the `image` block.
   - May be declared at the component level and/or per-variant. A variant's `image` block
     **fully overrides** (does not merge with) the component-level one.
   - Optional — a component/variant with no `image` block gets no image substitution.
   - Unmatched `search` string (declared but not found in any source file) produces a
     warning, not a hard failure — same posture as other unresolved placeholders.
+  - Undefined Jinja variable in `replace` → hard error at build time (fail fast, same as
+    an invalid template in `app.yaml.jinja`), not a silent empty string.
   - Not available for `margo` — `margo/app.yaml` is only ever rendered once at
-    build/publish time and is never run directly, so it uses template placeholders
+    build/publish time and is never run directly, so it uses `app.yaml.jinja` directly
     instead (see `margo` Package Type below), not a runnable-file search/replace.
 - Version strings with `_` are stored as-is in the OCI tag. The `_` encodes `+` (SemVer build metadata separator) per the Margo OCI distribution spec, since `+` is not a valid OCI tag character.
 
