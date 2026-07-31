@@ -104,18 +104,28 @@ compose:
   directory: compose               # path to the compose source dir (flat or variant subdirs)
   version: 1.0.0                   # OCI tag for the compose artifact(s) — used only when no variants
   repository: public.ecr.aws/g2n4p2m7/margo   # optional override; falls back to global repository
+  image:                            # optional — dev-local image ref swap, applied at build time
+    search: "myapp:dev"             # literal string as it appears in compose.yaml (must be runnable locally as-is)
+    replace: "public.ecr.aws/g2n4p2m7/myapp:<app_tag>"   # target ref; may reuse placeholder tokens
   variants:
     - name: default                # reserved name — maps to compose/default/ subdir
       version: 1.0.0
+      # no image override here — inherits the component-level image block above
     - name: simple                 # maps to compose/simple/
       version: 1.0.0_simple        # OCI tag for this variant ('_' encodes '+' per Margo OCI spec)
     - name: addon-mosquitto        # maps to compose/addon-mosquitto/
       version: 1.0.0_addon-mosquitto
+      image:                        # per-variant override — replaces the component-level image block, not merged
+        search: "mosquitto:dev"
+        replace: "public.ecr.aws/g2n4p2m7/mosquitto:<app_tag>"
 
 quadlet:
   directory: quadlet               # path to the quadlet source dir
   version: 1.0.0
   repository: public.ecr.aws/g2n4p2m7/margo
+  image:
+    search: "myapp:dev"
+    replace: "public.ecr.aws/g2n4p2m7/myapp:<app_tag>"
   variants:
     - name: default                # reserved name — maps to quadlet/default/ subdir
       version: 1.0.0
@@ -137,6 +147,22 @@ quadlet:
   - `name: default` is a **reserved name** but maps to `<component.directory>/default/` — a real subdir, not the component root.
   - All variant names (including `default`) map to `<component.directory>/<name>/`.
   - When `variants` is present, `compose.version` / `quadlet.version` is ignored — each variant carries its own `version`.
+- `image` (compose/quadlet only) — optional `{search, replace}` block for swapping a
+  dev-local container image reference for the environment-appropriate one at build time.
+  - `search` — a literal string (not a regex), exactly as it appears in the component's
+    source text file(s) (e.g. `myapp:dev`). The source file must be a real, runnable
+    artifact as checked in — developers run it locally against this dev image before
+    `margot build` ever touches it.
+  - `replace` — the target string. May reuse the same placeholder tokens available to
+    compose/quadlet substitution (e.g. `<app_tag>`).
+  - May be declared at the component level and/or per-variant. A variant's `image` block
+    **fully overrides** (does not merge with) the component-level one.
+  - Optional — a component/variant with no `image` block gets no image substitution.
+  - Unmatched `search` string (declared but not found in any source file) produces a
+    warning, not a hard failure — same posture as other unresolved placeholders.
+  - Not available for `margo` — `margo/app.yaml` is only ever rendered once at
+    build/publish time and is never run directly, so it uses template placeholders
+    instead (see `margo` Package Type below), not a runnable-file search/replace.
 - Version strings with `_` are stored as-is in the OCI tag. The `_` encodes `+` (SemVer build metadata separator) per the Margo OCI distribution spec, since `+` is not a valid OCI tag character.
 
 **Missing `margo.yaml`** → clear error: `"margo.yaml not found in current directory. Run margot init or create it manually."` (exit 1).
@@ -219,7 +245,7 @@ during the tree copy step. One file per source dir; applies to that dir only.
 - Artifact type: `application/vnd.org.margo.component.compose+json`
 - Layer: `<name>-<version>.tgz` → `application/vnd.org.margo.component.compose.tar+gzip`
 - Annotations: `org.margo.component.type=compose`, `org.margo.component.version`, OCI image annotations
-- Build step: copy source dir → temp dir (respecting `.rsyncignore`), substitute placeholders in all text files, `tar -czf` (pure Python, no host binaries)
+- Build step: copy source dir → temp dir (respecting `.rsyncignore`), substitute placeholders in all text files, apply the component/variant's `image` search/replace (if declared — see `margo.yaml` `image` field rules above), `tar -czf` (pure Python, no host binaries)
 - Variant source resolution:
   - No `variants` in `margo.yaml` → use component directory root, tag from `compose.version`
   - `name: default` → use `<compose.directory>/default/`
@@ -300,7 +326,7 @@ tasks is **removed**. Artifact type disambiguation happens via `artifactType` fi
 Push built artifacts to OCI registry via ORAS.
 
 ```
-margot push [--type margo|compose|quadlet|all] [--version VERSION]
+margot push [--type margo|compose|quadlet|all]
               [--registry REG] [--repository REPO] [--build-dir DIR]
               [--variant VARIANT]
 ```
@@ -340,7 +366,7 @@ client.push(
 )
 ```
 
-**Registry auth:** credentials must be active. Run `margot login` before pushing.
+**Registry auth:** credentials must be active. Run `margot auth login` before pushing.
 
 ---
 
@@ -524,7 +550,7 @@ the tag string entirely.
 
 - Missing `margo.yaml` → clear error: `"margo.yaml not found in current directory. Run margot init or create it manually."` (exit 1)
 - Invalid OCI tag → reject immediately before any build/push step
-- Credentials expired or near-expiry → warn or hard-fail with `margot login` hint
+- Credentials expired or near-expiry → warn or hard-fail with `margot auth login` hint
 - oras-py push/pull failure → surface exception message, exit 1
 - Validation errors → rich table, exit 1
 
@@ -555,13 +581,13 @@ build_dir = ".dist"
 run_dir = ".run"
 ```
 
-### `margot login`
+### `margot auth login`
 
 Authenticate with an OCI registry and persist credentials.
 
 ```
-margot login [--registry REG] [--username USER] [--password-stdin]
-               [--save-expiry]
+margot auth login REGISTRY [--username USER] [--password-stdin]
+                  [--expiry-hours N]
 ```
 
 **How it works:**
@@ -594,12 +620,12 @@ print a warning and optionally prompt to re-login.
 
 ---
 
-### `margot logout`
+### `margot auth logout`
 
 Remove stored credentials for a registry.
 
 ```
-margot logout [--registry REG]
+margot auth logout REGISTRY
 ```
 
 ```python
@@ -624,7 +650,7 @@ def check_credentials(registry: str) -> None:
         return  # no expiry tracked, proceed
     remaining = expiry - datetime.now(UTC)
     if remaining <= timedelta(0):
-        raise CredentialsExpiredError(f"Credentials for {registry} expired. Run: margot login")
+        raise CredentialsExpiredError(f"Credentials for {registry} expired. Run: margot auth login")
     if remaining < timedelta(minutes=5):
         console.print(f"[yellow]Warning: credentials for {registry} expire in {remaining}[/yellow]")
 ```
