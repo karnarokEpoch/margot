@@ -20,6 +20,9 @@ def global_options(
         set_debug(True)
     elif verbose:
         set_verbose(True)
+    else:
+        set_debug(False)
+        set_verbose(False)
 
     if version_flag:
         echo(f"margot {get_version()}")

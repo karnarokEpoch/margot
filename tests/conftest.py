@@ -49,10 +49,10 @@ def capture_console():
     original_get_stderr = _console._get_stderr  # noqa: SLF001
 
     def mock_get_stdout():
-        return Console(file=out)
+        return Console(file=out, width=200, no_color=True)
 
     def mock_get_stderr():
-        return Console(file=err)
+        return Console(file=err, width=200, no_color=True)
 
     _console._get_stdout = mock_get_stdout  # noqa: SLF001
     _console._get_stderr = mock_get_stderr  # noqa: SLF001

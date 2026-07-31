@@ -27,6 +27,9 @@ coverage.xml
 .dist/
 .run/
 
+# Git worktrees checked out inside the repo
+.wk-*/
+
 # MkDocs
 site/
 

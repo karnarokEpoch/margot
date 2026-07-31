@@ -2,10 +2,12 @@
 
 from typer import Typer
 
+from margot.commands.auth import app as auth_app
 from margot.commands.build import build_cmd
 from margot.commands.fetch import fetch
 from margot.commands.global_options import global_options
 from margot.commands.pull import pull
+from margot.commands.push import push_cmd
 
 app = Typer(
     name="margot",
@@ -17,7 +19,11 @@ app = Typer(
 # Register commands
 app.command()(fetch)
 app.command(name="build")(build_cmd)
+app.command(name="push")(push_cmd)
 app.command()(pull)
+
+# Register subcommand groups
+app.add_typer(auth_app, name="auth")
 
 # Register global flags callback
 app.callback(invoke_without_command=True)(global_options)
