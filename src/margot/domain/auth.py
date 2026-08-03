@@ -39,11 +39,11 @@ def parse_token_expiry(password: str) -> datetime | None:
 def classify_expiry(expires_at: datetime, now: datetime | None = None) -> str:
     """Classify a registry's credential expiry status.
 
-    Mirrors the 5-minute warning threshold used in infra/credentials.py check_credentials.
+    Mirrors the 1-hour warning threshold used in infra/credentials.py check_credentials.
 
     Returns:
         "EXPIRED" if now >= expires_at.
-        "EXPIRING" if now >= expires_at - 5 minutes.
+        "EXPIRING" if now >= expires_at - 1 hour.
         "VALID" otherwise.
     """
     if now is None:
@@ -52,7 +52,7 @@ def classify_expiry(expires_at: datetime, now: datetime | None = None) -> str:
     if now >= expires_at:
         return "EXPIRED"
 
-    if now >= expires_at - timedelta(minutes=5):
+    if now >= expires_at - timedelta(hours=1):
         return "EXPIRING"
 
     return "VALID"

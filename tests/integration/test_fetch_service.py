@@ -141,7 +141,7 @@ class TestFetchServiceAuth:
         """Near-expiry credentials should emit a console.warning but still fetch and return the manifest."""
 
         def _warn_and_proceed(_registry: str) -> None:
-            console.warning("Credentials for public.ecr.aws expire in less than 5 minutes.")
+            console.warning("Credentials for public.ecr.aws expire in less than 1 hour.")
 
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest
@@ -153,7 +153,7 @@ class TestFetchServiceAuth:
 
         assert "warning" in err.getvalue().lower()
         assert "expire in less than" in err.getvalue()
-        assert "minutes" in err.getvalue()
+        assert "hour" in err.getvalue()
         assert result == mock_manifest
         mock_client.get_manifest.assert_called_once_with("public.ecr.aws/g2n4p2m7/margo:1.0.0")
 

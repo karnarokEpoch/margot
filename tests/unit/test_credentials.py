@@ -144,9 +144,9 @@ class TestCheckCredentials:
         with raises(CredentialsExpiredError, match="expired"):
             check_credentials("public.ecr.aws", credentials_file=creds_file)
 
-    def test_emits_warning_when_within_5_minutes(self, creds_file: Path, capture_console: tuple[StringIO, StringIO]) -> None:
-        """Should emit a console warning when within 5 minutes of expiry."""
-        near_expiry = datetime.now(tz=UTC) + timedelta(minutes=3)
+    def test_emits_warning_when_within_1_hour(self, creds_file: Path, capture_console: tuple[StringIO, StringIO]) -> None:
+        """Should emit a console warning when within 1 hour of expiry."""
+        near_expiry = datetime.now(tz=UTC) + timedelta(minutes=30)
         save_expiry("public.ecr.aws", near_expiry, credentials_file=creds_file)
 
         _out, err = capture_console
@@ -155,14 +155,40 @@ class TestCheckCredentials:
         err_text = err.getvalue()
         assert "warning:" in err_text
         assert "public.ecr.aws" in err_text
-        assert "minutes" in err_text
+        assert "hour" in err_text
 
     def test_returns_silently_when_expiry_in_future(self, creds_file: Path) -> None:
-        """Should not raise or warn when expiry is more than 5 minutes away."""
+        """Should not raise or warn when expiry is more than 1 hour away."""
         future = datetime.now(tz=UTC) + timedelta(hours=6)
         save_expiry("public.ecr.aws", future, credentials_file=creds_file)
 
         check_credentials("public.ecr.aws", credentials_file=creds_file)
+
+    def test_emits_warning_at_exactly_1_hour_boundary(
+        self, creds_file: Path, capture_console: tuple[StringIO, StringIO]
+    ) -> None:
+        """Should emit a console warning when exactly 1 hour away from expiry."""
+        boundary_expiry = datetime.now(tz=UTC) + timedelta(hours=1)
+        save_expiry("public.ecr.aws", boundary_expiry, credentials_file=creds_file)
+
+        _out, err = capture_console
+        check_credentials("public.ecr.aws", credentials_file=creds_file)
+
+        err_text = err.getvalue()
+        assert "warning:" in err_text
+        assert "hour" in err_text
+
+    def test_returns_silently_when_expiry_just_over_1_hour(
+        self, creds_file: Path, capture_console: tuple[StringIO, StringIO]
+    ) -> None:
+        """Should not warn when expiry is just over 1 hour away."""
+        just_over = datetime.now(tz=UTC) + timedelta(hours=1, seconds=5)
+        save_expiry("public.ecr.aws", just_over, credentials_file=creds_file)
+
+        _out, err = capture_console
+        check_credentials("public.ecr.aws", credentials_file=creds_file)
+
+        assert err.getvalue() == ""
 
 
 class TestListTracked:

@@ -63,19 +63,19 @@ class TestClassifyExpiry:
         expires_at = now + timedelta(hours=6)
         assert classify_expiry(expires_at, now=now) == "VALID"
 
-    def test_valid_when_just_over_5_minutes_remaining(self):
+    def test_valid_when_just_over_1_hour_remaining(self):
         now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
-        expires_at = now + timedelta(minutes=5, seconds=1)
+        expires_at = now + timedelta(hours=1, seconds=1)
         assert classify_expiry(expires_at, now=now) == "VALID"
 
-    def test_expiring_at_exactly_5_minute_boundary(self):
+    def test_expiring_at_exactly_1_hour_boundary(self):
         now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
-        expires_at = now + timedelta(minutes=5)
+        expires_at = now + timedelta(hours=1)
         assert classify_expiry(expires_at, now=now) == "EXPIRING"
 
-    def test_expiring_just_under_5_minutes(self):
+    def test_expiring_just_under_1_hour(self):
         now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
-        expires_at = now + timedelta(minutes=4, seconds=59)
+        expires_at = now + timedelta(minutes=59)
         assert classify_expiry(expires_at, now=now) == "EXPIRING"
 
     def test_expired_when_now_equals_expires_at(self):

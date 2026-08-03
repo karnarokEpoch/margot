@@ -220,7 +220,7 @@ class TestAuthStatusCLI:
 
     def test_status_tracked_expiring_entry_shows_expiring(self, mocker: Any) -> None:
         """Should show EXPIRING status for a near-expiry tracked entry."""
-        expires_at = datetime.now(tz=UTC) + timedelta(minutes=2)
+        expires_at = datetime.now(tz=UTC) + timedelta(minutes=30)
         mocker.patch(
             "margot.commands.auth.auth_service.auth_status",
             return_value=AuthStatusResult(

@@ -181,7 +181,7 @@ class TestAuthStatusService:
         """Should classify each tracked registry's status correctly."""
         now = datetime.now(tz=UTC)
         valid_expiry = now + timedelta(hours=6)
-        expiring_expiry = now + timedelta(minutes=2)
+        expiring_expiry = now + timedelta(minutes=30)
         expired_expiry = now - timedelta(hours=1)
 
         mocker.patch(

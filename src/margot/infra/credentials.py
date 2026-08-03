@@ -86,7 +86,7 @@ def check_credentials(registry: str, credentials_file: Path = CREDENTIALS_FILE) 
 
     - If no expiry tracked: return silently (no tracking = no check).
     - If now >= expires_at: raise CredentialsExpiredError.
-    - If now >= expires_at - 5min: emit console.warning (do not raise).
+    - If now >= expires_at - 1 hour: emit console.warning (do not raise).
     """
     expires_at = load_expiry(registry, credentials_file)
     if expires_at is None:
@@ -97,8 +97,8 @@ def check_credentials(registry: str, credentials_file: Path = CREDENTIALS_FILE) 
         msg = f"Credentials for {registry} have expired."
         raise CredentialsExpiredError(msg)
 
-    if now >= expires_at - timedelta(minutes=5):
-        console.warning(f"Credentials for {registry} expire in less than 5 minutes.")
+    if now >= expires_at - timedelta(hours=1):
+        console.warning(f"Credentials for {registry} expire in less than 1 hour.")
 
 
 def _write_credentials(registries: dict[str, str], credentials_file: Path) -> None:
