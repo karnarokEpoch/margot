@@ -4,7 +4,7 @@ from typing import Any
 
 from margot import console
 from margot.domain import uri as uri_domain
-from margot.infra import oci
+from margot.infra import credentials, oci
 
 
 def fetch_manifest(uri: str) -> dict[str, Any]:
@@ -19,11 +19,15 @@ def fetch_manifest(uri: str) -> dict[str, Any]:
 
     Raises:
         ValueError: If URI is malformed.
+        CredentialsExpiredError: If credentials for the registry have expired.
         Exception: If fetch fails.
     """
     uri_domain.validate_uri(uri)
+    hostname = uri_domain.extract_hostname(uri)
+    console.info(f"Checking credentials for {hostname}")
+    credentials.check_credentials(hostname)
     console.info(f"Fetching manifest for: {uri}")
-    client = oci.OrasClient()
+    client = oci.OrasClient(hostname=hostname)
     result = client.get_manifest(uri)
     console.info("Manifest retrieved.")
     return result

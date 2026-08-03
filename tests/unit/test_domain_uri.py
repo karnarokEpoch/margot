@@ -2,7 +2,7 @@
 
 from pytest import raises
 
-from margot.domain.uri import extract_tag, validate_semver_tag, validate_uri
+from margot.domain.uri import extract_hostname, extract_tag, validate_semver_tag, validate_uri
 
 
 class TestValidateUri:
@@ -46,6 +46,37 @@ class TestExtractTag:
     def test_extracts_prerelease_tag(self) -> None:
         """Should return the pre-release tag including hyphen and dot separators."""
         assert extract_tag("reg/repo:1.3.0-simple.1") == "1.3.0-simple.1"
+
+
+class TestExtractHostname:
+    """Tests for extract_hostname()."""
+
+    def test_extracts_hostname_from_full_uri(self) -> None:
+        """Should return everything before the first '/' in a standard URI."""
+        assert extract_hostname("public.ecr.aws/g2n4p2m7/margo:1.0.0") == "public.ecr.aws"
+
+    def test_extracts_hostname_with_port(self) -> None:
+        """Should return the hostname including a port number."""
+        assert extract_hostname("localhost:5000/myapp:1.0.0") == "localhost:5000"
+
+    def test_extracts_simple_hostname(self) -> None:
+        """Should return the hostname from a simple registry/repo:tag URI."""
+        assert extract_hostname("reg/repo:latest") == "reg"
+
+    def test_empty_string_raises(self) -> None:
+        """Should raise ValueError with 'URI must not be empty' for empty string."""
+        with raises(ValueError, match="URI must not be empty"):
+            extract_hostname("")
+
+    def test_no_slash_separator_raises(self) -> None:
+        """Should raise ValueError when URI has no '/' separator."""
+        with raises(ValueError, match="URI must contain a hostname"):
+            extract_hostname("no-slash:1.0.0")
+
+    def test_leading_slash_raises(self) -> None:
+        """Should raise ValueError when URI starts with '/' (empty hostname)."""
+        with raises(ValueError, match="URI must contain a hostname"):
+            extract_hostname("/repo:1.0.0")
 
 
 class TestValidateSemverTag:

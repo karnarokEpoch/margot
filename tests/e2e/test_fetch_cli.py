@@ -33,6 +33,7 @@ class TestFetchCLI:
         """Should fetch manifest and print JSON output."""
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.credentials.check_credentials")
         mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -44,6 +45,7 @@ class TestFetchCLI:
         """Should handle network errors gracefully."""
         mock_client = MagicMock()
         mock_client.get_manifest.side_effect = Exception("Connection refused")
+        mocker.patch("margot.services.fetch.credentials.check_credentials")
         mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -56,6 +58,7 @@ class TestFetchCLI:
         """Manifest output should be pretty-printed JSON containing all top-level fields."""
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.credentials.check_credentials")
         mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -80,6 +83,7 @@ class TestFetchCLIVerbosity:
         """fetch with --verbose should emit info messages on stderr."""
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.credentials.check_credentials")
         mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["--verbose", "fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -95,6 +99,7 @@ class TestFetchCLIVerbosity:
         """fetch with -v short flag should emit info messages on stderr."""
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.credentials.check_credentials")
         mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["-v", "fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -107,6 +112,7 @@ class TestFetchCLIVerbosity:
         """fetch with --debug should emit info/debug messages on stderr."""
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.credentials.check_credentials")
         mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["--debug", "fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -120,6 +126,7 @@ class TestFetchCLIVerbosity:
         """fetch with -d short flag should emit debug messages."""
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.credentials.check_credentials")
         mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["-d", "fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -132,6 +139,7 @@ class TestFetchCLIVerbosity:
         """fetch without --verbose or --debug should complete successfully."""
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.credentials.check_credentials")
         mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -144,6 +152,7 @@ class TestFetchCLIVerbosity:
         """--verbose before fetch subcommand should work like fetch --verbose."""
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = mock_manifest
+        mocker.patch("margot.services.fetch.credentials.check_credentials")
         mocker.patch("margot.services.fetch.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["--verbose", "fetch", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
