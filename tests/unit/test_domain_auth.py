@@ -1,10 +1,12 @@
 """Unit tests for margot.domain.auth — pure function tests, no mocks needed."""
 
 import base64
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 
-from margot.domain.auth import parse_token_expiry
+from pytest import raises
+
+from margot.domain.auth import TrackedRegistryStatus, classify_expiry, parse_token_expiry
 
 
 def _make_ecr_token(expiration: int) -> str:
@@ -51,3 +53,83 @@ class TestParseTokenExpiry:
         result = parse_token_expiry(token)
         assert result is not None
         assert result.tzinfo is not None
+
+
+class TestClassifyExpiry:
+    """Tests for classify_expiry()."""
+
+    def test_valid_when_well_in_future(self):
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        expires_at = now + timedelta(hours=6)
+        assert classify_expiry(expires_at, now=now) == "VALID"
+
+    def test_valid_when_just_over_5_minutes_remaining(self):
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        expires_at = now + timedelta(minutes=5, seconds=1)
+        assert classify_expiry(expires_at, now=now) == "VALID"
+
+    def test_expiring_at_exactly_5_minute_boundary(self):
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        expires_at = now + timedelta(minutes=5)
+        assert classify_expiry(expires_at, now=now) == "EXPIRING"
+
+    def test_expiring_just_under_5_minutes(self):
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        expires_at = now + timedelta(minutes=4, seconds=59)
+        assert classify_expiry(expires_at, now=now) == "EXPIRING"
+
+    def test_expired_when_now_equals_expires_at(self):
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        assert classify_expiry(now, now=now) == "EXPIRED"
+
+    def test_expired_when_in_the_past(self):
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        expires_at = now - timedelta(hours=1)
+        assert classify_expiry(expires_at, now=now) == "EXPIRED"
+
+    def test_defaults_now_to_current_time_when_not_provided(self):
+        expires_at = datetime.now(tz=UTC) + timedelta(hours=6)
+        assert classify_expiry(expires_at) == "VALID"
+
+
+class TestTrackedRegistryStatus:
+    """Tests for the TrackedRegistryStatus dataclass."""
+
+    def test_constructs_with_expected_fields(self):
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        expires_at = now + timedelta(hours=1)
+        status = TrackedRegistryStatus(
+            hostname="public.ecr.aws",
+            expires_at=expires_at,
+            remaining=expires_at - now,
+            status="VALID",
+        )
+
+        assert status.hostname == "public.ecr.aws"
+        assert status.expires_at == expires_at
+        assert status.remaining == timedelta(hours=1)
+        assert status.status == "VALID"
+
+    def test_is_frozen(self):
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        status = TrackedRegistryStatus(
+            hostname="public.ecr.aws",
+            expires_at=now,
+            remaining=timedelta(0),
+            status="EXPIRED",
+        )
+
+        with raises(AttributeError):
+            status.hostname = "other.registry.io"
+
+    def test_remaining_can_be_negative_when_expired(self):
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        expires_at = now - timedelta(hours=1)
+        status = TrackedRegistryStatus(
+            hostname="public.ecr.aws",
+            expires_at=expires_at,
+            remaining=expires_at - now,
+            status="EXPIRED",
+        )
+
+        assert status.remaining == timedelta(hours=-1)

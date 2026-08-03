@@ -1,7 +1,7 @@
 """Integration tests for services/auth.py."""
 
 import base64
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import StringIO
 import json
 from typing import Any
@@ -162,3 +162,88 @@ class TestLogoutService:
 
         err_text = err.getvalue()
         assert "Logging out from public.ecr.aws" in err_text
+
+
+class TestAuthStatusService:
+    """Tests for auth.auth_status() service."""
+
+    def test_returns_empty_result_when_nothing_tracked(self, mocker: Any) -> None:
+        """Should return empty tracked and oras_only lists when both sources are empty."""
+        mocker.patch("margot.services.auth.creds_infra.list_tracked", return_value=[])
+        mocker.patch("margot.services.auth.creds_infra.list_oras_registries", return_value=[])
+
+        result = auth.auth_status()
+
+        assert result.tracked == []
+        assert result.oras_only == []
+
+    def test_tracked_only_classifies_each_entry(self, mocker: Any) -> None:
+        """Should classify each tracked registry's status correctly."""
+        now = datetime.now(tz=UTC)
+        valid_expiry = now + timedelta(hours=6)
+        expiring_expiry = now + timedelta(minutes=2)
+        expired_expiry = now - timedelta(hours=1)
+
+        mocker.patch(
+            "margot.services.auth.creds_infra.list_tracked",
+            return_value=[
+                ("valid.registry.io", valid_expiry),
+                ("expiring.registry.io", expiring_expiry),
+                ("expired.registry.io", expired_expiry),
+            ],
+        )
+        mocker.patch("margot.services.auth.creds_infra.list_oras_registries", return_value=[])
+
+        result = auth.auth_status()
+
+        statuses = {t.hostname: t.status for t in result.tracked}
+        assert statuses == {
+            "valid.registry.io": "VALID",
+            "expiring.registry.io": "EXPIRING",
+            "expired.registry.io": "EXPIRED",
+        }
+        assert result.oras_only == []
+
+    def test_oras_only_when_no_tracked_entries(self, mocker: Any) -> None:
+        """Should list oras-only registries when nothing is tracked."""
+        mocker.patch("margot.services.auth.creds_infra.list_tracked", return_value=[])
+        mocker.patch(
+            "margot.services.auth.creds_infra.list_oras_registries",
+            return_value=["untracked.registry.io"],
+        )
+
+        result = auth.auth_status()
+
+        assert result.tracked == []
+        assert result.oras_only == ["untracked.registry.io"]
+
+    def test_overlap_registry_appears_only_in_tracked(self, mocker: Any) -> None:
+        """A registry present in both lists must appear only once, in tracked."""
+        now = datetime.now(tz=UTC)
+        expiry = now + timedelta(hours=1)
+
+        mocker.patch(
+            "margot.services.auth.creds_infra.list_tracked",
+            return_value=[("public.ecr.aws", expiry)],
+        )
+        mocker.patch(
+            "margot.services.auth.creds_infra.list_oras_registries",
+            return_value=["public.ecr.aws", "other.registry.io"],
+        )
+
+        result = auth.auth_status()
+
+        assert [t.hostname for t in result.tracked] == ["public.ecr.aws"]
+        assert result.oras_only == ["other.registry.io"]
+
+    def test_emits_info_messages(self, mocker: Any, capture_console: tuple[StringIO, StringIO], reset_console: None) -> None:
+        """Should emit info messages via console at start and completion."""
+        console.set_verbose(True)
+        mocker.patch("margot.services.auth.creds_infra.list_tracked", return_value=[])
+        mocker.patch("margot.services.auth.creds_infra.list_oras_registries", return_value=[])
+
+        _out, err = capture_console
+        auth.auth_status()
+
+        err_text = err.getvalue()
+        assert "info:" in err_text

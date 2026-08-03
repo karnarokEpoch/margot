@@ -15,6 +15,7 @@ from os.path import relpath
 import sys
 
 from rich.console import Console
+from rich.table import Table
 from typer import Exit
 
 # Module-level console instances (for testing, may be replaced with mocks)
@@ -104,6 +105,11 @@ def success(message: str) -> None:
 def print_json(data: dict | list) -> None:
     """Pretty-print a JSON-serializable object to stdout. Always shown."""
     _get_stdout().print_json(dumps(data))
+
+
+def print_table(table: Table) -> None:
+    """Print a rich Table to stdout. Always shown."""
+    _get_stdout().print(table)
 
 
 def warning(message: str) -> None:
