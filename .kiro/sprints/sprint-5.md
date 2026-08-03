@@ -182,8 +182,8 @@ compose:
   version: 1.0.0
   repository: public.ecr.aws/g2n4p2m7/margo
   image:
-    search: "myapp:dev"                                          # exact literal string as it appears in the source file(s)
-    replace: "public.ecr.aws/g2n4p2m7/myapp:<app_tag>"            # target ref; may reuse existing placeholder syntax
+    search: "localhost/myapp:dev"                                 # exact literal string as it appears in the source file(s)
+    replace: "public.ecr.aws/g2n4p2m7/myapp:{{ manifest.appVersion }}"  # Jinja2 template — rendered from manifest context
   variants:
     - name: default
       version: 1.0.0
@@ -191,8 +191,8 @@ compose:
     - name: gpu
       version: 1.0.0_gpu
       image:                                                      # per-variant override — replaces, not merges
-        search: "myapp:dev-gpu"
-        replace: "public.ecr.aws/g2n4p2m7/myapp:<app_tag>-gpu"
+        search: "localhost/myapp:dev-gpu"
+        replace: "public.ecr.aws/g2n4p2m7/myapp:{{ manifest.appVersion }}-gpu"
 ```
 
 ```yaml
@@ -200,8 +200,8 @@ quadlet:
   directory: quadlet
   version: 1.0.0
   image:
-    search: "myapp:dev"
-    replace: "public.ecr.aws/g2n4p2m7/myapp:<app_tag>"
+    search: "localhost/myapp:dev"
+    replace: "public.ecr.aws/g2n4p2m7/myapp:{{ manifest.appVersion }}"
 ```
 
 **Rules:**
@@ -209,15 +209,21 @@ quadlet:
 1. **One `search`/`replace` pair per component (or per-variant override).** Multi-image
    support (project owner's decision) is achieved by declaring multiple components or
    variants — each with its own `image` block — not by a list of image mappings within
-   one block. Keeps the mechanism format-agnostic: it's a literal string replace on text
-   files, same primitive already used for placeholder substitution, no YAML-key-aware
-   parsing of `image:` lines (which would require compose- and quadlet-specific parsers).
+   one block. Keeps the mechanism format-agnostic: it's a literal string search against
+   text files (no YAML-key-aware parsing of `image:` lines, which would require compose-
+   and quadlet-specific parsers).
 2. **`search` is a literal string**, not a regex. Matched and replaced across all text
    files in the component's source dir (respecting `.rsyncignore`, same as existing
    substitution).
-3. **`replace` may reuse existing placeholder tokens** (e.g. `<app_tag>`) — resolved the
-   same way and at the same time as other compose/quadlet placeholders. No Jinja here;
-   Jinja is reserved for `app.yaml.jinja` (Item 3b) only.
+3. **`replace` is a Jinja2 template string**, rendered with the same manifest context
+   used for `app.yaml.jinja` (Item 3b), scoped to the enclosing component/variant (e.g.
+   `{{ manifest.appVersion }}`, `{{ manifest.compose.repository }}`,
+   `{{ manifest.compose.default.tag }}`). Rendered with `StrictUndefined` — same as
+   `app.yaml.jinja` — so an undefined variable is a hard build-time error, not a silent
+   empty string. This reuses the Jinja2 context/rendering machinery built for Item 3b
+   rather than the plain-string placeholder map (`<app_tag>` etc.): the whole point of
+   `image.replace` is that it stays in sync automatically when `appVersion` (or any other
+   manifest field) is bumped — no separate edit to the `image` block itself.
 4. **Variant-level `image` fully overrides** the component-level one (replace semantics,
    not merge) — needed because variants can legitimately point at entirely different
    local dev images (e.g. a `gpu` variant).
@@ -233,29 +239,42 @@ quadlet:
 - `VariantConfig` gains `image: ImageConfig | None` (override, not merged, when present).
 - Parse `image` block under both component root and each variant entry; validate both
   `search` and `replace` are present and non-empty when an `image` block exists.
+- `replace` is stored as a raw template string — no rendering happens in `metadata.py`
+  (pure parsing layer, no Jinja2 dependency here). Rendering happens in `services/build.py`
+  using the same Jinja2 environment/context as `app.yaml.jinja` (Item 3b).
 
 **`infra/filesystem.py` / `services/build.py` changes:**
-- Image search/replace runs as part of the same text-substitution pass as placeholder
-  substitution for compose/quadlet (not a separate walk).
-- Resolve effective `image` config per variant: variant's own `image` if present,
-  else the component-level `image`, else none.
+- `services/build.py` renders each resolved `image.replace` template (Jinja2,
+  `StrictUndefined`) using the manifest context *before* calling into the text
+  substitution pass, then hands the fully-resolved `{search, replace}` pair (both plain
+  strings at this point) to `infra/filesystem.py` for the literal string replace.
+- `infra/filesystem.py` itself stays Jinja2-agnostic — it only ever receives resolved
+  strings. It runs the image search/replace as part of the same text-substitution pass
+  as placeholder substitution for compose/quadlet (not a separate walk).
+- `services/build.py` resolves the effective `image` config per variant: variant's own
+  `image` if present, else the component-level `image`, else none.
 
 **Files touched (additive to the list below):**
 - `src/margot/domain/metadata.py` — `ImageConfig`, `ComponentConfig.image`,
   `VariantConfig.image`, parsing + validation.
 - `src/margot/infra/filesystem.py` — extend substitution pass to include image
-  search/replace; unmatched-search warning.
-- `src/margot/services/build.py` — resolve effective `image` config per variant/component
-  and pass it into the substitution call for compose/quadlet builds.
+  search/replace (receives pre-rendered strings only); unmatched-search warning.
+- `src/margot/services/build.py` — resolve effective `image` config per variant/component,
+  render `replace` via the shared Jinja2 environment/context (StrictUndefined), and pass
+  the resolved `{search, replace}` pair into the substitution call for compose/quadlet
+  builds.
 - `tests/unit/test_metadata.py` — `ImageConfig` parsing, variant override, missing
   fields.
 - `tests/unit/test_filesystem.py` — search/replace applied, unmatched search warns.
 - `tests/integration/test_build.py` — end-to-end: component-level image sub, variant
-  override, no `image` block declared (no-op).
+  override, no `image` block declared (no-op), `replace` template rendering with
+  manifest context, undefined Jinja variable in `replace` → hard error.
 - **`FEATURES.md` update required** — add `image` block to the `margo.yaml` format
   reference (compose/quadlet sections) and to the Package Types section. This is new
   spec surface, not implementation detail — must land in `FEATURES.md` per
-  `documentation.md` steering rules (spec first, docs follow).
+  `documentation.md` steering rules (spec first, docs follow). **Already done** —
+  `FEATURES.md` documents `image.replace` as a Jinja2 template string rendered from the
+  manifest context.
 
 **Files touched:**
 - `pyproject.toml` — add `jinja2` dependency.
