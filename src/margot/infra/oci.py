@@ -47,9 +47,18 @@ class OrasClient(OrasClientLib):
     Provides pull() for bulk layer download and download_blob() for individual blob retrieval.
     """
 
-    def __init__(self) -> None:
-        """Initialize OrasClient for anonymous registry access."""
+    def __init__(self, hostname: str | None = None) -> None:
+        """Initialize OrasClient for registry access.
+
+        Args:
+            hostname: Registry hostname (e.g. 'public.ecr.aws'). When provided,
+                stored credentials for that host are loaded automatically so
+                subsequent operations use them. When omitted, the client is
+                anonymous-only (no credential loading).
+        """
         super().__init__()
+        if hostname is not None:
+            self.auth.load_configs(self.get_container(hostname))
         _configure_oras_logger()
 
     def get_manifest(self, uri: str) -> dict[str, Any]:
