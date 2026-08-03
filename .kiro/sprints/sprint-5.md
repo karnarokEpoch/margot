@@ -41,7 +41,14 @@ Read-only command. No network calls, no mutations.
 
 ---
 
-### Item 2 — Authenticated `fetch` and `pull`
+### Item 2 — Authenticated `fetch` and `pull` — ✅ DONE
+
+> Implemented on `feat/update-fetch-pull`, commit `2e5074a`
+> (`feat(auth): authenticate fetch and pull via stored OCI credentials`).
+> `domain/uri.extract_hostname`, `infra/oci.OrasClient(hostname=...)`, and the
+> `check_credentials` wiring in `services/fetch.py` / `services/pull.py` are all in
+> place, with unit/integration/e2e coverage. No CLI flags were added — auth stays
+> transparent. Do not re-implement; extend in place if requirements change.
 
 Wire the existing `check_credentials` guard and oras-py auth into the two anonymous-only
 services.
