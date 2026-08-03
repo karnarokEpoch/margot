@@ -8,7 +8,7 @@ enough to land in the same sprint; Theme C is the heavyweight item.
 
 ## Scope
 
-### Item 1 — `margot auth status`
+### Item 1 — `margot auth status` ✓ done
 
 Read-only command. No network calls, no mutations.
 
@@ -20,8 +20,8 @@ Read-only command. No network calls, no mutations.
   margot expiry entry.
 - For each registry tracked in the margot file: display hostname, `expires_at`,
   time remaining, and a status label (VALID / EXPIRING / EXPIRED).
-  - VALID: more than 5 min remaining.
-  - EXPIRING: ≤ 5 min remaining (mirrors the warning threshold in `check_credentials`).
+  - VALID: more than 1 hour remaining.
+  - EXPIRING: ≤ 1 hour remaining (mirrors the warning threshold in `check_credentials`).
   - EXPIRED: `now >= expires_at`.
 - For each registry present only in the oras-py store: display hostname + "present but
   expiry unknown".
