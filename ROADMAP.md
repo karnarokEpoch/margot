@@ -23,7 +23,13 @@ items (`auth status`, authenticated fetch/pull, Jinja2 `app.yaml` refactor inclu
 Items 1 (`auth status`) and 2 (authenticated fetch/pull) run in parallel worktrees — they
 touch disjoint files (`infra/credentials.py`/`services/auth.py`/`commands/auth.py` vs.
 `infra/oci.py`/`services/fetch.py`/`services/pull.py`). Item 3 (Jinja2 refactor + `image`
-block) starts once both are merged. Key locked decisions:
+block) starts once both are merged.
+
+**Status:** Item 2 (authenticated `fetch`/`pull`) is ✅ **done** — see
+[`.kiro/sprints/sprint-5.md`](.kiro/sprints/sprint-5.md#item-2--authenticated-fetch-and-pull--done)
+for the commit reference. Items 1 and 3 remain open; sprint is not yet complete.
+
+Key locked decisions:
 
 - Breaking change, no deprecation window (margot is pre-1.0, unpublished): old
   `<app_tag>`/`<margo_tag>`/`<compose_tag>`/`<quadlet_tag>`/`<helm_chart_tag>`
