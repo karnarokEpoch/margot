@@ -619,7 +619,7 @@ class TestPullArtifactAuth:
         """Near-expiry credentials should emit a console.warning but still pull and return paths."""
 
         def _warn_and_proceed(_registry: str) -> None:
-            console.warning("Credentials for public.ecr.aws expire in less than 5 minutes.")
+            console.warning("Credentials for public.ecr.aws expire in less than 1 hour.")
 
         pulled_file = str(tmp_path / "margo.yaml")
         mock_client = MagicMock()

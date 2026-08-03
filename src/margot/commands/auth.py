@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import sys
 from typing import Annotated
 
+from rich.table import Table
 from typer import Argument, Option, Typer
 
 from margot import console
@@ -21,6 +22,18 @@ def _format_expiry(expires_at: datetime) -> str:
     hours, remainder = divmod(total_seconds, 3600)
     minutes = remainder // 60
     return f"{hours}h {minutes:02d}m (expires {expires_at.strftime('%Y-%m-%dT%H:%M:%SZ')})"
+
+
+_STATUS_COLORS = {"VALID": "green", "EXPIRING": "yellow", "EXPIRED": "red"}
+
+
+def _format_remaining(remaining_seconds: int) -> str:
+    """Format a remaining-time duration (in seconds) as a human-readable string."""
+    if remaining_seconds <= 0:
+        return "expired"
+    hours, remainder = divmod(remaining_seconds, 3600)
+    minutes = remainder // 60
+    return f"{hours}h {minutes:02d}m"
 
 
 @app.command()
@@ -71,3 +84,34 @@ def logout(
         console.success(f"Logged out from {registry}.")
     except Exception as e:  # noqa: BLE001
         console.fatal(f"Logout failed: {e}")
+
+
+@app.command()
+def status() -> None:
+    """Show credential status for all tracked OCI registries."""
+    result = auth_service.auth_status()
+
+    if not result.tracked and not result.oras_only:
+        console.success("No credentials tracked.")
+        return
+
+    table = Table(title="Registry Credential Status")
+    table.add_column("Registry")
+    table.add_column("Expires At")
+    table.add_column("Remaining")
+    table.add_column("Status")
+
+    for entry in result.tracked:
+        color = _STATUS_COLORS.get(entry.status, "white")
+        remaining = _format_remaining(int(entry.remaining.total_seconds()))
+        table.add_row(
+            entry.hostname,
+            entry.expires_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            remaining,
+            f"[{color}]{entry.status}[/{color}]",
+        )
+
+    for hostname in result.oras_only:
+        table.add_row(hostname, "-", "present but expiry unknown", "[cyan]UNKNOWN[/cyan]")
+
+    console.print_table(table)

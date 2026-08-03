@@ -621,7 +621,7 @@ Persist the expiry timestamp to `~/.config/margot/credentials.toml`:
 expires_at = "2026-06-26T23:00:00Z"
 ```
 
-Every command that calls the registry checks this file first. If `now >= expires_at - 5min`,
+Every command that calls the registry checks this file first. If `now >= expires_at - 1 hour`,
 print a warning and optionally prompt to re-login.
 
 ---
@@ -657,7 +657,7 @@ def check_credentials(registry: str) -> None:
     remaining = expiry - datetime.now(UTC)
     if remaining <= timedelta(0):
         raise CredentialsExpiredError(f"Credentials for {registry} expired. Run: margot auth login")
-    if remaining < timedelta(minutes=5):
+    if remaining < timedelta(hours=1):
         console.print(f"[yellow]Warning: credentials for {registry} expire in {remaining}[/yellow]")
 ```
 

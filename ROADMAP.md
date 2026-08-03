@@ -111,6 +111,19 @@ Unordered within groups; sequencing decided at sprint planning.
   `check_credentials(hostname)` before each call. Open question carried over: whether
   variant tags are also checked or only primary versions.
 
+### Known issues
+
+- `margot auth logout` does not remove the credential entry from the oras-py/Docker
+  credential store (`~/.docker/config.json`) — `oras.auth.base.AuthBackend.logout()`
+  only mutates its in-memory `_auth_config`; nothing in oras-py ever persists that
+  removal back to disk (confirmed: no `save`/`write_json` call anywhere in the logout
+  path, in any auth backend — `basic`, `token`, or `ecr`). `margot auth login` "works"
+  today only because it delegates to the `docker` Python SDK's own `client.login()`,
+  which writes the file as a side effect; there is no equivalent for logout. Fix
+  requires margot to implement its own removal (read `~/.docker/config.json`, delete
+  the `auths` entry incl. localhost variants, write back) rather than relying on
+  oras-py. Deferred — revisit alongside or after Sprint 5 Item 1 (`auth status`).
+
 ---
 
 ### Cross-cutting
