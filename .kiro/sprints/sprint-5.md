@@ -1,88 +1,12 @@
 # Sprint 5 — Jinja2 build refactor + auth polish
 
-**Goal:** Ship the Jinja2 `app.yaml` rendering pipeline (Theme C — breaking refactor),
-`margot auth status`, and authenticated `fetch`/`pull`. All three are self-contained
-enough to land in the same sprint; Theme C is the heavyweight item.
+**Goal:** Complete the Jinja2 `app.yaml` rendering pipeline (Theme C — breaking refactor)
+and the compose/quadlet `image` search/replace block. `margot auth status` and
+authenticated `fetch`/`pull` are complete and have been removed from the active scope.
 
 ---
 
 ## Scope
-
-### Item 1 — `margot auth status` ✓ done
-
-Read-only command. No network calls, no mutations.
-
-**CLI:** `margot auth status`
-
-**Behaviour:**
-- Read `~/.config/margot/credentials.toml` (via `infra/credentials.py`).
-- Read oras-py credential store to detect registries that have credentials but no
-  margot expiry entry.
-- For each registry tracked in the margot file: display hostname, `expires_at`,
-  time remaining, and a status label (VALID / EXPIRING / EXPIRED).
-  - VALID: more than 1 hour remaining.
-  - EXPIRING: ≤ 1 hour remaining (mirrors the warning threshold in `check_credentials`).
-  - EXPIRED: `now >= expires_at`.
-- For each registry present only in the oras-py store: display hostname + "present but
-  expiry unknown".
-- If neither file has any entries: print a clear message ("No credentials tracked.") —
-  never an empty table.
-
-**Output:** rich table (hostname | expires_at | remaining | status).
-
-**Files touched:**
-- `src/margot/infra/credentials.py` — add `list_tracked()` → `list[tuple[str, datetime]]`,
-  and `list_oras_registries()` → `list[str]` (reads oras-py Docker config).
-- `src/margot/services/auth.py` — add `auth_status()` → structured result type.
-- `src/margot/commands/auth.py` — add `status` subcommand, render the table.
-- `tests/unit/test_credentials.py` — extend with `list_tracked` / `list_oras_registries`.
-- `tests/integration/test_auth_service.py` — `auth_status()` with various file states.
-- `tests/e2e/test_auth_cli.py` — `status` subcommand: no creds, tracked, expiring, expired.
-
----
-
-### Item 2 — Authenticated `fetch` and `pull` — ✅ DONE
-
-> Implemented on `feat/update-fetch-pull`, commit `2e5074a`
-> (`feat(auth): authenticate fetch and pull via stored OCI credentials`).
-> `domain/uri.extract_hostname`, `infra/oci.OrasClient(hostname=...)`, and the
-> `check_credentials` wiring in `services/fetch.py` / `services/pull.py` are all in
-> place, with unit/integration/e2e coverage. No CLI flags were added — auth stays
-> transparent. Do not re-implement; extend in place if requirements change.
-
-Wire the existing `check_credentials` guard and oras-py auth into the two anonymous-only
-services.
-
-**Current state:** `services/fetch.py` and `services/pull.py` create `OrasClient()`
-with no auth. The `check_credentials` guard only runs before push.
-
-**Changes:**
-
-`infra/oci.py`:
-- Add `OrasClient(hostname: str | None = None)` optional parameter. When `hostname` is
-  supplied, call `self.auth.load_configs(self.get_container(...))` on construction so
-  stored credentials (if any) are loaded automatically.
-
-`services/fetch.py` — `fetch_manifest(uri)`:
-- Parse hostname from URI (reuse `domain/uri.py`).
-- Call `check_credentials(hostname)` before creating the client.
-- Pass `hostname` to `OrasClient(hostname)`.
-
-`services/pull.py` — `pull_artifact(uri, ...)`:
-- Same pattern: parse hostname, `check_credentials`, pass to `OrasClient`.
-
-No new CLI flags needed. Auth is transparent: if credentials exist in the oras-py
-store they are used; if not, the request proceeds anonymously (same as today).
-
-**Files touched:**
-- `src/margot/infra/oci.py` — optional hostname param on `__init__`.
-- `src/margot/services/fetch.py` — add credential check + hostname threading.
-- `src/margot/services/pull.py` — same.
-- `tests/unit/test_infra_oci.py` — OrasClient with hostname.
-- `tests/integration/test_fetch_service.py` — expired creds → error; valid creds → pass-through.
-- `tests/integration/test_pull_service.py` — same.
-
----
 
 ### Item 3 — Breaking refactor: `app.yaml` Jinja2 rendering
 
@@ -301,14 +225,13 @@ quadlet:
 
 ## Definition of done
 
-- [ ] All three items implemented.
+- [ ] Remaining Item 3 implemented.
 - [ ] `uv run pytest` passes with no failures.
 - [ ] No `# TODO` markers left from this sprint's work.
 - [ ] All new code follows `code-conventions.md` (console output, imports, TODO format).
-- [ ] `ROADMAP.md` updated: Sprint 5 items moved to Completed Sprints table; backlog
-  entries struck or removed.
-- [ ] Commit: `feat(sprint-5): auth status, authenticated fetch/pull, Jinja2 app.yaml rendering`
-  (or split into logical commits matching the three items).
+- [ ] `ROADMAP.md` updated: Sprint 5 moved to Completed Sprints table; backlog entries
+  struck or removed.
+- [ ] Commit: `feat(sprint-5): Jinja2 app.yaml rendering and image substitution`
 
 ---
 
