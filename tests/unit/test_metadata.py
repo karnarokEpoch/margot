@@ -336,21 +336,38 @@ annotations:
 
         assert result.annotations == {}
 
-    def test_component_missing_directory_raises_error(self, tmp_path: Path) -> None:
-        """Should raise ValueError when component is missing directory."""
+    def test_component_missing_directory_defaults_to_component_name(self, tmp_path: Path) -> None:
+        """Should default an omitted component directory to its component name."""
         yaml_content = """
 apiVersion: v1
 id: testapp
 name: test-app
 description: Test application
-margo:
+quadlet:
   version: 1.0.0
 """
         yaml_file = tmp_path / "margo.yaml"
         yaml_file.write_text(yaml_content)
 
-        with raises(ValueError, match="component missing required field 'directory'"):
-            load_margo_yaml(str(yaml_file))
+        result = load_margo_yaml(str(yaml_file))
+
+        assert result.quadlet is not None
+        assert result.quadlet.directory == "quadlet"
+
+    def test_component_errors_identify_component(self, tmp_path: Path) -> None:
+        """Should identify the malformed component in every component parser error."""
+        for component_yaml, message in (
+            ("margo: []\n", r"'margo' component must be a mapping"),
+            ("compose:\n  variants: invalid\n", r"'compose' variants must be a list"),
+            ("quadlet:\n  variants:\n    - invalid\n", r"'quadlet' variant item must be a mapping"),
+        ):
+            yaml_file = tmp_path / f"{message[:5]}.yaml"
+            yaml_file.write_text(
+                "apiVersion: v1\nid: testapp\nname: test-app\ndescription: Test application\n" + component_yaml
+            )
+
+            with raises(ValueError, match=message):
+                load_margo_yaml(str(yaml_file))
 
     def test_variant_missing_name_raises_error(self, tmp_path: Path) -> None:
         """Should raise ValueError when variant is missing name."""
@@ -367,7 +384,7 @@ compose:
         yaml_file = tmp_path / "margo.yaml"
         yaml_file.write_text(yaml_content)
 
-        with raises(ValueError, match="variant missing required field 'name' or 'version'"):
+        with raises(ValueError, match=r"'compose' variant missing required field 'name' or 'version'"):
             load_margo_yaml(str(yaml_file))
 
     def test_variant_missing_version_raises_error(self, tmp_path: Path) -> None:
@@ -385,7 +402,7 @@ compose:
         yaml_file = tmp_path / "margo.yaml"
         yaml_file.write_text(yaml_content)
 
-        with raises(ValueError, match="variant missing required field 'name' or 'version'"):
+        with raises(ValueError, match=r"'compose' variant missing required field 'name' or 'version'"):
             load_margo_yaml(str(yaml_file))
 
     def test_multiple_components(self, tmp_path: Path) -> None:
@@ -545,7 +562,7 @@ description: Test application
                 f"apiVersion: v1\nid: myapp\nname: test\ndescription: test\ncompose:\n"
                 f"  directory: compose\n  variants:\n    - name: {name}\n      version: 1.0.0\n"
             )
-            with raises(ValueError, match="collides with reserved field name"):
+            with raises(ValueError, match=rf"'compose' variant name '{name}' collides with reserved field name"):
                 load_margo_yaml(str(yaml_file))
 
     def test_variant_component_and_image_configuration(self, tmp_path: Path) -> None:

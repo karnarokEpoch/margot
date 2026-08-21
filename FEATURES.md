@@ -143,7 +143,7 @@ quadlet:
 - `version` — optional. Manifest/package version. Exposed as `manifest.version` in `app.yaml.jinja` templates.
 - `appVersion` — optional. Version of the deployed application (like Helm's `appVersion`). Not validated as SemVer. Exposed as `manifest.appVersion` in templates (empty string if absent). Useful for passing as a parameter default (e.g. `image.tag`).
 - `description` — required. Used in OCI description annotation.
-- `margo.directory` — required. Default: `margo`.
+- `margo.directory` — optional. Defaults to the component type name (`margo`, `compose`, `quadlet`). Override when your source directory has a different name.
 - `margo.version`, `compose.version`, `quadlet.version` — required per component if that component is built. Used as the tag when no variants are declared.
 - `repository` at component level — optional; overrides global `repository` from `margot.yaml` tool config (or CLI flag / env var).
 - `variants` — list of `{name, version[, component, image]}` objects. Required if variants exist; `--variant all` expands to this list. `--variant NAME` selects one entry by name.

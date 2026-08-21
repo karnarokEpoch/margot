@@ -345,6 +345,25 @@ class TestBuildCompose:
 class TestBuildQuadlet:
     """Tests for building quadlet component."""
 
+    def test_build_quadlet_uses_default_directory_when_omitted(self, tmp_path: Path) -> None:
+        """Should build from the default quadlet directory when it is omitted from margo.yaml."""
+        (tmp_path / "margo.yaml").write_text(
+            "apiVersion: v1\nid: testapp\nname: testapp\ndescription: Test application\nquadlet:\n"
+            "  version: 1.0.0\n"
+        )
+        quadlet_dir = tmp_path / "quadlet"
+        quadlet_dir.mkdir()
+        (quadlet_dir / "app.container").write_text("[Container]\nImage=test:1.0.0\n")
+
+        targets = build.build(
+            PackageType.QUADLET,
+            project_dir=str(tmp_path),
+            build_dir=str(tmp_path / ".dist"),
+        )
+
+        assert len(targets) == 1
+        assert (Path(targets[0].output_dir) / "testapp-1.0.0.tgz").exists()
+
     def test_build_quadlet_all_variants(self, fake_project: Path) -> None:
         """Should build all quadlet variants."""
         build_dir = fake_project / ".dist"

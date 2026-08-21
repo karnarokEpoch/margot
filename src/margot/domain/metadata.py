@@ -92,9 +92,9 @@ def load_margo_yaml(path: str) -> MargoYaml:
         description=raw["description"],
         app_version=raw.get("appVersion"),
         annotations=raw.get("annotations", {}) or {},
-        margo=_parse_component(raw.get("margo")),
-        compose=_parse_component(raw.get("compose")),
-        quadlet=_parse_component(raw.get("quadlet")),
+        margo=_parse_component(raw.get("margo"), "margo"),
+        compose=_parse_component(raw.get("compose"), "compose"),
+        quadlet=_parse_component(raw.get("quadlet"), "quadlet"),
         version=raw.get("version"),
         author=raw.get("author") or [],
         organization=raw.get("organization") or [],
@@ -117,26 +117,31 @@ def _parse_image(image_data: object) -> ImageConfig | None:
     return ImageConfig(search=search, replace=replace)
 
 
-def _parse_component(component_data: object) -> ComponentConfig | None:
-    """Parse a component block (margo, compose, or quadlet)."""
+def _parse_component(component_data: object, component_name: str) -> ComponentConfig | None:
+    """Parse a named component block."""
     if component_data is None:
         return None
 
     if not isinstance(component_data, dict):
-        raise ValueError("margo.yaml is not valid YAML: component must be a mapping")  # noqa: TRY004
-    if "directory" not in component_data:
-        raise ValueError("margo.yaml is not valid YAML: component missing required field 'directory'")
+        raise ValueError(  # noqa: TRY004
+            f"margo.yaml is not valid YAML: '{component_name}' component must be a mapping"
+        )
 
+    directory: str = component_data.get("directory") or component_name
     variants_data = component_data.get("variants") or []
     if not isinstance(variants_data, list):
-        raise ValueError("margo.yaml is not valid YAML: variants must be a list")  # noqa: TRY004
+        raise ValueError(f"margo.yaml is not valid YAML: '{component_name}' variants must be a list")  # noqa: TRY004
 
     variants: list[VariantConfig] = []
     for variant_item in variants_data:
         if not isinstance(variant_item, dict):
-            raise ValueError("margo.yaml is not valid YAML: variant item must be a mapping")  # noqa: TRY004
+            raise ValueError(  # noqa: TRY004
+                f"margo.yaml is not valid YAML: '{component_name}' variant item must be a mapping"
+            )
         if "name" not in variant_item or "version" not in variant_item:
-            raise ValueError("margo.yaml is not valid YAML: variant missing required field 'name' or 'version'")
+            raise ValueError(
+                f"margo.yaml is not valid YAML: '{component_name}' variant missing required field 'name' or 'version'"
+            )
         variants.append(
             VariantConfig(
                 name=variant_item["name"],
@@ -148,10 +153,10 @@ def _parse_component(component_data: object) -> ComponentConfig | None:
 
     for variant in variants:
         if variant.name in _RESERVED_VARIANT_NAMES:
-            raise ValueError(f"Variant name '{variant.name}' collides with reserved field name")
+            raise ValueError(f"'{component_name}' variant name '{variant.name}' collides with reserved field name")
 
     return ComponentConfig(
-        directory=component_data["directory"],
+        directory=directory,
         version=component_data.get("version"),
         repository=component_data.get("repository"),
         variants=tuple(variants),
