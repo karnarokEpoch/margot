@@ -110,6 +110,7 @@ class TestBuildMargo:
         # Verify output directory exists
         output_dir = Path(target.output_dir)
         assert output_dir.exists()
+        assert target.artifact_path == target.output_dir
         assert (output_dir / "app.yaml").exists()
 
     def test_build_margo_with_version_override(self, fake_project: Path) -> None:
@@ -284,6 +285,7 @@ class TestBuildCompose:
         # Verify tarballs exist
         for target in targets:
             output_path = Path(target.output_dir) / f"testapp-{target.version}.tgz"
+            assert target.artifact_path == str(output_path)
             assert output_path.exists()
 
     def test_build_compose_single_variant(self, fake_project: Path) -> None:

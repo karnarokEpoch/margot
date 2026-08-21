@@ -135,7 +135,7 @@ def _build_margo(
         raise ValueError("No app.yaml or app.yaml.jinja found in margo source directory.")
 
     console.info(f"Margo built: {output_dir}")
-    return BuildTarget(PackageType.MARGO, None, version, source_dir, output_dir)
+    return BuildTarget(PackageType.MARGO, None, version, source_dir, output_dir, output_dir)
 
 
 def _build_compose_or_quadlet(  # noqa: PLR0913
@@ -194,7 +194,7 @@ def _build_flat_component(  # noqa: PLR0913
         console.info(f"{component_name} built: {output_path}")
     finally:
         rmtree(tmp_parent, ignore_errors=True)
-    return [BuildTarget(component_type, None, version, source_dir, output_dir)]
+    return [BuildTarget(component_type, None, version, source_dir, output_dir, output_path)]
 
 
 def _build_variant_component(  # noqa: PLR0913
@@ -236,5 +236,5 @@ def _build_variant_component(  # noqa: PLR0913
             console.info(f"{component_name} variant '{current_variant.name}' built: {output_path}")
         finally:
             rmtree(tmp_parent, ignore_errors=True)
-        targets.append(BuildTarget(component_type, current_variant.name, version, source_dir, output_dir))
+        targets.append(BuildTarget(component_type, current_variant.name, version, source_dir, output_dir, output_path))
     return targets

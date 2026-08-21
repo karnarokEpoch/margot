@@ -218,6 +218,7 @@ def _push_margo(
         version=version,
         source_dir=str(margo_dir),
         output_dir=str(margo_dir),
+        artifact_path=str(margo_dir),
     )
 
 
@@ -300,6 +301,7 @@ def _push_flat_component(  # noqa: PLR0913
             version=version,
             source_dir=str(archive_path),
             output_dir=str(archive_path.parent),
+            artifact_path=str(archive_path),
         )
     ]
 
@@ -367,6 +369,7 @@ def _push_variant_component(  # noqa: PLR0913
                 version=version,
                 source_dir=str(archive_path),
                 output_dir=str(archive_path.parent),
+                artifact_path=str(archive_path),
             )
         )
 

@@ -64,12 +64,14 @@ class TestBuildTarget:
             version="1.0.0",
             source_dir="/src",
             output_dir="/out",
+            artifact_path="/out/artifact",
         )
         assert target.package_type == PackageType.MARGO
         assert target.variant_name == "my_variant"
         assert target.version == "1.0.0"
         assert target.source_dir == "/src"
         assert target.output_dir == "/out"
+        assert target.artifact_path == "/out/artifact"
 
     def test_build_target_with_none_variant(self) -> None:
         """BuildTarget should accept variant_name=None."""
@@ -79,6 +81,7 @@ class TestBuildTarget:
             version="2.1.0",
             source_dir="/src",
             output_dir="/out",
+            artifact_path="/out/component.tgz",
         )
         assert target.variant_name is None
         assert target.package_type == PackageType.COMPOSE
@@ -91,6 +94,7 @@ class TestBuildTarget:
             version="0.1.0",
             source_dir="/src",
             output_dir="/out",
+            artifact_path="/out/component.tgz",
         )
         try:
             target.package_type = PackageType.MARGO  # type: ignore[assignment]

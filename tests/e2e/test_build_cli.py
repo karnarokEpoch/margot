@@ -116,7 +116,7 @@ class TestBuildCLI:
         assert result.exit_code == 0
         built_count = plain.count("Built")
         assert built_count == 1, f"Expected 1 'Built' line, got {built_count}"
-        assert "margo" not in plain.lower() or "Built:" in plain
+        assert f"Built: {cli_project / '.dist' / '1.0.0' / 'margo'}" in plain.replace("\n", "")
 
     def test_build_type_compose_only(self, cli_project: Path) -> None:
         """Should build all compose variants and exit 0."""
@@ -126,6 +126,8 @@ class TestBuildCLI:
         assert result.exit_code == 0
         built_count = plain.count("Built")
         assert built_count == 2, f"Expected 2 'Built' lines for compose variants, got {built_count}"
+        assert f"Built (default): {cli_project / '.dist' / '1.0.0' / 'testapp-1.0.0.tgz'}" in plain.replace("\n", "")
+        assert f"Built (simple): {cli_project / '.dist' / '1.0.0_simple' / 'testapp-1.0.0_simple.tgz'}" in plain.replace("\n", "")
 
     def test_build_type_quadlet_only(self, cli_project: Path) -> None:
         """Should build all quadlet variants and exit 0."""
@@ -135,6 +137,7 @@ class TestBuildCLI:
         assert result.exit_code == 0
         built_count = plain.count("Built")
         assert built_count == 1, f"Expected 1 'Built' line for quadlet variant, got {built_count}"
+        assert f"Built (default): {cli_project / '.dist' / '1.0.0' / 'testapp-1.0.0.tgz'}" in plain.replace("\n", "")
 
     def test_build_variant_simple(self, cli_project: Path) -> None:
         """Should build only the specified compose variant."""

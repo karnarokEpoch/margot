@@ -57,6 +57,7 @@ class TestPushCLI:
                     version="1.0.0",
                     source_dir=".",
                     output_dir=".dist/1.0.0/margo",
+                    artifact_path=".dist/1.0.0/margo",
                 ),
             ],
         )
@@ -80,6 +81,7 @@ class TestPushCLI:
                     version="1.0.0",
                     source_dir=".",
                     output_dir=".dist/1.0.0/margo",
+                    artifact_path=".dist/1.0.0/margo",
                 ),
             ],
         )
@@ -109,6 +111,7 @@ class TestPushCLI:
                     version="1.0.0_simple",
                     source_dir=".",
                     output_dir=".dist/1.0.0_simple",
+                    artifact_path=".dist/1.0.0_simple/testapp-1.0.0_simple.tgz",
                 ),
             ],
         )
@@ -138,6 +141,7 @@ class TestPushCLI:
                     version="1.0.0",
                     source_dir=".",
                     output_dir=".dist/1.0.0/margo",
+                    artifact_path=".dist/1.0.0/margo",
                 ),
             ],
         )
