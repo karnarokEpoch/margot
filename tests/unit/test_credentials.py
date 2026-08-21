@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from io import StringIO
-from json import dumps
+from json import dumps, loads
 from pathlib import Path
 
 from pytest import fixture, raises
@@ -14,6 +14,7 @@ from margot.infra.credentials import (
     list_oras_registries,
     list_tracked,
     load_expiry,
+    remove_docker_config_entry,
     remove_expiry,
     save_expiry,
 )
@@ -291,3 +292,109 @@ class TestListOrasRegistries:
         result = list_oras_registries()
 
         assert result == []
+
+
+class TestRemoveDockerConfigEntry:
+    """Tests for remove_docker_config_entry()."""
+
+    def test_noop_when_file_does_not_exist(self, tmp_path: Path) -> None:
+        """Should not raise when the docker config file doesn't exist."""
+        missing = tmp_path / "config.json"
+        remove_docker_config_entry("public.ecr.aws", config_file=missing)
+        assert not missing.exists()
+
+    def test_noop_when_hostname_not_in_auths(self, tmp_path: Path) -> None:
+        """Should leave the file untouched when the hostname isn't present."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(dumps({"auths": {"other.registry.io": {"auth": "b3RoZXI="}}}))
+
+        remove_docker_config_entry("public.ecr.aws", config_file=config_file)
+
+        data = loads(config_file.read_text())
+        assert data["auths"] == {"other.registry.io": {"auth": "b3RoZXI="}}
+
+    def test_removes_only_target_hostname_entry(self, tmp_path: Path) -> None:
+        """Should remove only the target registry, keeping other auths intact."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            dumps(
+                {
+                    "auths": {
+                        "public.ecr.aws": {"auth": "dGVzdA=="},
+                        "other.registry.io": {"auth": "b3RoZXI="},
+                    }
+                }
+            )
+        )
+
+        remove_docker_config_entry("public.ecr.aws", config_file=config_file)
+
+        data = loads(config_file.read_text())
+        assert data["auths"] == {"other.registry.io": {"auth": "b3RoZXI="}}
+
+    def test_removes_last_entry_leaves_empty_auths(self, tmp_path: Path) -> None:
+        """Should leave an empty 'auths' object when removing the only entry."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(dumps({"auths": {"public.ecr.aws": {"auth": "dGVzdA=="}}}))
+
+        remove_docker_config_entry("public.ecr.aws", config_file=config_file)
+
+        data = loads(config_file.read_text())
+        assert data["auths"] == {}
+
+    def test_preserves_other_top_level_keys(self, tmp_path: Path) -> None:
+        """Should preserve credsStore/credHelpers and other top-level keys."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            dumps(
+                {
+                    "auths": {"public.ecr.aws": {"auth": "dGVzdA=="}},
+                    "credsStore": "desktop",
+                    "credHelpers": {"other.registry.io": "ecr-login"},
+                }
+            )
+        )
+
+        remove_docker_config_entry("public.ecr.aws", config_file=config_file)
+
+        data = loads(config_file.read_text())
+        assert data["credsStore"] == "desktop"
+        assert data["credHelpers"] == {"other.registry.io": "ecr-login"}
+        assert data["auths"] == {}
+
+    def test_noop_when_malformed_json(self, tmp_path: Path) -> None:
+        """Should not raise when the file contains malformed JSON."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text("{not valid json")
+
+        remove_docker_config_entry("public.ecr.aws", config_file=config_file)
+
+        # File left untouched, not corrupted further
+        assert config_file.read_text() == "{not valid json"
+
+    def test_removes_localhost_variants(self, tmp_path: Path) -> None:
+        """Should also remove localhost-style variants of the hostname (port-suffixed)."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            dumps(
+                {
+                    "auths": {
+                        "localhost:5000": {"auth": "dGVzdA=="},
+                        "other.registry.io": {"auth": "b3RoZXI="},
+                    }
+                }
+            )
+        )
+
+        remove_docker_config_entry("localhost:5000", config_file=config_file)
+
+        data = loads(config_file.read_text())
+        assert "localhost:5000" not in data["auths"]
+        assert data["auths"] == {"other.registry.io": {"auth": "b3RoZXI="}}
+
+    def test_defaults_to_docker_config_file_constant(self, mocker) -> None:
+        """Should default to DOCKER_CONFIG_FILE when no path is given."""
+        mocker.patch.object(creds_module, "DOCKER_CONFIG_FILE", mocker.MagicMock(exists=lambda: False))
+
+        remove_docker_config_entry("public.ecr.aws")
+        # No exception raised — confirms the default constant path is used

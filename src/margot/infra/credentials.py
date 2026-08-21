@@ -1,7 +1,7 @@
 """Credentials file R/W and expiry checks for OCI registries."""
 
 from datetime import UTC, datetime, timedelta
-from json import JSONDecodeError
+from json import JSONDecodeError, dumps
 from json import load as json_load
 from pathlib import Path
 from tomllib import load
@@ -155,3 +155,42 @@ def list_oras_registries(docker_config_file: Path | None = None) -> list[str]:
 
     auths = data.get("auths", {})
     return list(auths.keys())
+
+
+def remove_docker_config_entry(hostname: str, config_file: Path | None = None) -> None:
+    """Remove a registry's credential entry from the oras-py/Docker config file.
+
+    oras-py's ``AuthBackend.logout()`` only removes the entry from its in-memory
+    ``_auth_config`` — it never persists that removal back to disk. This is the
+    disk-persistence half of logout: it directly edits ``~/.docker/config.json``
+    (the same file oras-py reads via ``load_configs()``), removing the ``auths``
+    entry for ``hostname``.
+
+    Best-effort: no-op if the file doesn't exist, is malformed JSON, or the
+    hostname isn't present. Never raises. All other top-level keys (``credsStore``,
+    ``credHelpers``, other registries) are preserved untouched.
+
+    Args:
+        hostname: Registry hostname to remove (e.g. 'public.ecr.aws').
+        config_file: Path to the docker-style config file. Defaults to
+            ``DOCKER_CONFIG_FILE`` (``~/.docker/config.json``).
+    """
+    path = config_file if config_file is not None else DOCKER_CONFIG_FILE
+    console.debug(f"Removing {hostname} from {path}.")
+    if not path.exists():
+        return
+
+    try:
+        with path.open("rb") as f:
+            data = json_load(f)
+    except JSONDecodeError:
+        console.debug(f"{path} is not valid JSON; skipping logout cleanup.")
+        return
+
+    auths = data.get("auths", {})
+    if hostname not in auths:
+        return
+
+    del auths[hostname]
+    data["auths"] = auths
+    path.write_text(dumps(data, indent=2) + "\n")

@@ -142,9 +142,19 @@ class TestOrasClient:
         """logout() should delegate to the underlying client with correct kwargs."""
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
         mock_logout = mocker.patch("margot.infra.oci.OrasClientLib.logout")
+        mocker.patch("margot.infra.oci.credentials.remove_docker_config_entry")
         client = OrasClient()
         client.logout(hostname="public.ecr.aws")
         mock_logout.assert_called_once_with(hostname="public.ecr.aws")
+
+    def test_logout_removes_docker_config_entry(self, mocker: Any) -> None:
+        """logout() should persist removal to the on-disk docker config file."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mocker.patch("margot.infra.oci.OrasClientLib.logout")
+        mock_remove = mocker.patch("margot.infra.oci.credentials.remove_docker_config_entry")
+        client = OrasClient()
+        client.logout(hostname="public.ecr.aws")
+        mock_remove.assert_called_once_with("public.ecr.aws")
 
 
 class TestOciAdapterDebugLogging:
