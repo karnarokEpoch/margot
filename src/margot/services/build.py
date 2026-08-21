@@ -4,8 +4,10 @@ from pathlib import Path
 from shutil import rmtree
 from tempfile import mkdtemp
 
+from jinja2 import Environment, StrictUndefined, UndefinedError
+
 from margot import console
-from margot.domain.metadata import ComponentConfig, MargoYaml, load_margo_yaml
+from margot.domain.metadata import ComponentConfig, MargoYaml, build_jinja2_context, load_margo_yaml
 from margot.domain.models import BuildTarget, PackageType
 from margot.domain.tags import validate_oci_tag, validate_semver
 from margot.infra.filesystem import copy_tree, make_tarball, substitute_placeholders
@@ -19,50 +21,23 @@ def build(
     version_override: str | None = None,
     variant: str | None = None,
 ) -> list[BuildTarget]:
-    """
-    Build artifacts from margo.yaml for the specified package type(s).
-
-    Steps:
-    1. Load margo.yaml from project_dir.
-    2. Resolve build targets based on package_type.
-    3. For each target, call appropriate builder helper.
-    4. Return list of BuildTarget describing what was built.
-
-    Args:
-        package_type: PackageType.MARGO, COMPOSE, QUADLET, or ALL.
-        project_dir: Directory containing margo.yaml (default ".").
-        build_dir: Output root directory (default ".dist").
-        version_override: Override all component versions (optional).
-        variant: For COMPOSE/QUADLET, build specific variant only (optional).
-
-    Returns:
-        List of BuildTarget objects representing built artifacts.
-
-    Raises:
-        ValueError: If margo.yaml not found, invalid, or build fails.
-    """
-    # Step 1: Load margo.yaml
+    """Build artifacts from margo.yaml for the specified package type(s)."""
     margo_yaml_path = str(Path(project_dir) / "margo.yaml")
     meta = load_margo_yaml(margo_yaml_path)
     console.info(f"Loaded margo.yaml: {margo_yaml_path}")
-
-    # Build placeholder map once (used by all builders)
     placeholders = _build_placeholder_map(meta, version_override)
-
-    # Step 2 & 3: Resolve and build targets
-    targets: list[BuildTarget] = []
 
     if package_type == PackageType.ALL:
         targets = _build_all(meta, project_dir, build_dir, version_override, placeholders)
     elif package_type == PackageType.MARGO:
-        targets.append(_build_margo(meta, project_dir, build_dir, version_override, placeholders))
+        targets = [_build_margo(meta, project_dir, build_dir, version_override)]
     elif package_type == PackageType.COMPOSE:
-        targets.extend(
-            _build_compose_or_quadlet(meta, project_dir, build_dir, version_override, variant, PackageType.COMPOSE, placeholders)
+        targets = _build_compose_or_quadlet(
+            meta, project_dir, build_dir, version_override, variant, PackageType.COMPOSE, placeholders
         )
     elif package_type == PackageType.QUADLET:
-        targets.extend(
-            _build_compose_or_quadlet(meta, project_dir, build_dir, version_override, variant, PackageType.QUADLET, placeholders)
+        targets = _build_compose_or_quadlet(
+            meta, project_dir, build_dir, version_override, variant, PackageType.QUADLET, placeholders
         )
     else:
         raise ValueError(f"Unsupported package_type: {package_type}")  # pragma: no cover
@@ -80,54 +55,29 @@ def _build_all(
 ) -> list[BuildTarget]:
     """Build all components, skipping any not defined in margo.yaml."""
     targets: list[BuildTarget] = []
-
     try:
-        targets.append(_build_margo(meta, project_dir, build_dir, version_override, placeholders))
+        targets.append(_build_margo(meta, project_dir, build_dir, version_override))
     except ValueError as e:
         if "not defined in margo.yaml" in str(e):
             console.info("Skipping margo: not defined in margo.yaml")
         else:
             raise
 
-    try:
-        targets.extend(
-            _build_compose_or_quadlet(
-                meta, project_dir, build_dir, version_override, None, PackageType.COMPOSE, placeholders
+    for component_type in (PackageType.COMPOSE, PackageType.QUADLET):
+        try:
+            targets.extend(
+                _build_compose_or_quadlet(meta, project_dir, build_dir, version_override, None, component_type, placeholders)
             )
-        )
-    except ValueError as e:
-        if "not defined in margo.yaml" in str(e):
-            console.info("Skipping compose: not defined in margo.yaml")
-        else:
-            raise
-
-    try:
-        targets.extend(
-            _build_compose_or_quadlet(
-                meta, project_dir, build_dir, version_override, None, PackageType.QUADLET, placeholders
-            )
-        )
-    except ValueError as e:
-        if "not defined in margo.yaml" in str(e):
-            console.info("Skipping quadlet: not defined in margo.yaml")
-        else:
-            raise
-
+        except ValueError as e:
+            if f"{component_type.value} component not defined in margo.yaml" in str(e):
+                console.info(f"Skipping {component_type.value}: not defined in margo.yaml")
+            else:
+                raise
     return targets
 
 
 def _build_placeholder_map(meta: MargoYaml, version_override: str | None) -> dict[str, str]:
-    """
-    Build the substitution placeholder dict from component versions.
-
-    Args:
-        meta: Parsed MargoYaml.
-        version_override: Override all versions with this value (optional).
-
-    Returns:
-        Dict mapping placeholder strings to replacement values.
-    """
-    # Resolve component versions
+    """Build the supported compose/quadlet placeholder substitutions."""
     margo_version = version_override or (meta.margo.version if meta.margo else "") or ""
     compose_version = (
         version_override or (meta.compose.version or (meta.compose.variants[0].version if meta.compose.variants else ""))
@@ -139,7 +89,6 @@ def _build_placeholder_map(meta: MargoYaml, version_override: str | None) -> dic
         if meta.quadlet
         else ""
     )
-
     return {
         "<app_tag>": meta.app_version or "",
         "<margo_tag>": margo_version,
@@ -154,55 +103,39 @@ def _build_margo(
     project_dir: str,
     build_dir: str,
     version_override: str | None,
-    placeholders: dict[str, str],
 ) -> BuildTarget:
-    """
-    Build margo component.
-
-    Args:
-        meta: Parsed MargoYaml.
-        project_dir: Project root directory.
-        build_dir: Output root directory.
-        version_override: Override version (optional).
-        placeholders: Substitution map.
-
-    Returns:
-        BuildTarget representing the built margo artifact.
-
-    Raises:
-        ValueError: If margo component not defined or version invalid.
-    """
+    """Build the margo component, rendering an optional app.yaml.jinja descriptor."""
     if meta.margo is None:
         raise ValueError("margo component not defined in margo.yaml")
 
-    # Resolve version
     version = version_override or meta.margo.version
     if version is None:
         raise ValueError("margo version not specified and no version_override provided")
-
-    # Validate version
     validate_oci_tag(version)
     validate_semver(version)
     console.info(f"Building margo: version {version}")
 
-    # Resolve directories
     source_dir = str(Path(project_dir) / meta.margo.directory)
     output_dir = str(Path(build_dir) / version / "margo")
-
-    # Copy source tree to output
     copy_tree(source_dir, output_dir)
 
-    # Substitute placeholders
-    substitute_placeholders(output_dir, placeholders)
-    console.info(f"Margo built: {output_dir}")
+    jinja_file = Path(output_dir) / "app.yaml.jinja"
+    static_file = Path(output_dir) / "app.yaml"
+    if jinja_file.exists() and static_file.exists():
+        raise ValueError("Both app.yaml.jinja and app.yaml found in margo source directory — use one or the other, not both.")
+    if jinja_file.exists():
+        try:
+            environment = Environment(undefined=StrictUndefined)  # noqa: S701
+            rendered = environment.from_string(jinja_file.read_text(encoding="utf-8")).render(build_jinja2_context(meta))
+        except UndefinedError as e:
+            raise ValueError(f"Unresolved Jinja2 variable in app.yaml.jinja: {e}") from e
+        static_file.write_text(rendered, encoding="utf-8")
+        jinja_file.unlink()
+    elif not static_file.exists():
+        raise ValueError("No app.yaml or app.yaml.jinja found in margo source directory.")
 
-    return BuildTarget(
-        package_type=PackageType.MARGO,
-        variant_name=None,
-        version=version,
-        source_dir=source_dir,
-        output_dir=output_dir,
-    )
+    console.info(f"Margo built: {output_dir}")
+    return BuildTarget(PackageType.MARGO, None, version, source_dir, output_dir)
 
 
 def _build_compose_or_quadlet(  # noqa: PLR0913
@@ -214,39 +147,14 @@ def _build_compose_or_quadlet(  # noqa: PLR0913
     component_type: PackageType,
     placeholders: dict[str, str],
 ) -> list[BuildTarget]:
-    """
-    Build compose or quadlet component(s).
-
-    Handles both flat layout (no variants) and variant-based layouts.
-
-    Args:
-        meta: Parsed MargoYaml.
-        project_dir: Project root directory.
-        build_dir: Output root directory.
-        version_override: Override version (optional).
-        variant: Specific variant to build (optional, None = all).
-        component_type: PackageType.COMPOSE or PackageType.QUADLET.
-        placeholders: Substitution map.
-
-    Returns:
-        List of BuildTarget objects for built artifacts.
-
-    Raises:
-        ValueError: If component not defined, variant not found, or version invalid.
-    """
-    # Get the component
+    """Build compose or quadlet component(s), supporting flat and variant layouts."""
     component = meta.compose if component_type == PackageType.COMPOSE else meta.quadlet
     if component is None:
-        component_name = component_type.value
-        raise ValueError(f"{component_name} component not defined in margo.yaml")
-
+        raise ValueError(f"{component_type.value} component not defined in margo.yaml")
     if not component.variants:
-        # Flat layout (no variants)
         return _build_flat_component(
             meta, component, project_dir, build_dir, version_override, variant, component_type, placeholders
         )
-
-    # Variant layout
     return _build_variant_component(
         meta, component, project_dir, build_dir, version_override, variant, component_type, placeholders
     )
@@ -262,16 +170,13 @@ def _build_flat_component(  # noqa: PLR0913
     component_type: PackageType,
     placeholders: dict[str, str],
 ) -> list[BuildTarget]:
-    """Build component with flat layout (no variants)."""
+    """Build a component with a flat layout."""
     component_name = component_type.value
-
     if variant is not None:
         raise ValueError(f"no variants declared in margo.yaml; --variant not supported for {component_name}")
-
     version = version_override or component.version
     if version is None:
         raise ValueError(f"{component_name} version not specified and no version_override provided")
-
     validate_oci_tag(version)
     validate_semver(version)
     console.info(f"Building {component_name}: version {version}")
@@ -279,27 +184,17 @@ def _build_flat_component(  # noqa: PLR0913
     source_dir = str(Path(project_dir) / component.directory)
     output_dir = str(Path(build_dir) / version)
     output_path = str(Path(output_dir) / f"{meta.name}-{version}.tgz")
-
-    # Build using temp directory
+    image_pair = (component.image.search, component.image.replace) if component.image else None
     tmp_parent = mkdtemp()
     tmp_dir = str(Path(tmp_parent) / "content")
     try:
         copy_tree(source_dir, tmp_dir)
-        substitute_placeholders(tmp_dir, placeholders)
+        substitute_placeholders(tmp_dir, placeholders, image_config=image_pair)
         make_tarball(tmp_dir, output_path)
         console.info(f"{component_name} built: {output_path}")
     finally:
         rmtree(tmp_parent, ignore_errors=True)
-
-    return [
-        BuildTarget(
-            package_type=component_type,
-            variant_name=None,
-            version=version,
-            source_dir=source_dir,
-            output_dir=output_dir,
-        )
-    ]
+    return [BuildTarget(component_type, None, version, source_dir, output_dir)]
 
 
 def _build_variant_component(  # noqa: PLR0913
@@ -312,51 +207,34 @@ def _build_variant_component(  # noqa: PLR0913
     component_type: PackageType,
     placeholders: dict[str, str],
 ) -> list[BuildTarget]:
-    """Build component with variant layout."""
+    """Build one or all variants of a component."""
     component_name = component_type.value
-    targets: list[BuildTarget] = []
-
-    # Determine which variants to build
     if variant is None:
-        # Build all variants
-        variants_to_build = list(component.variants)
+        variants_to_build = component.variants
     else:
-        # Find specific variant
-        matching = [v for v in component.variants if v.name == variant]
-        if not matching:
+        variants_to_build = tuple(item for item in component.variants if item.name == variant)
+        if not variants_to_build:
             raise ValueError(f"variant '{variant}' not declared in margo.yaml")
-        variants_to_build = matching
 
-    for v in variants_to_build:
-        version = version_override or v.version
-
+    targets: list[BuildTarget] = []
+    for current_variant in variants_to_build:
+        version = version_override or current_variant.version
         validate_oci_tag(version)
         validate_semver(version)
-        console.info(f"Building {component_name} variant '{v.name}': version {version}")
-
-        source_dir = str(Path(project_dir) / component.directory / v.name)
+        console.info(f"Building {component_name} variant '{current_variant.name}': version {version}")
+        source_dir = str(Path(project_dir) / component.directory / current_variant.name)
         output_dir = str(Path(build_dir) / version)
         output_path = str(Path(output_dir) / f"{meta.name}-{version}.tgz")
-
-        # Build using temp directory
+        effective_image = current_variant.image if current_variant.image is not None else component.image
+        image_pair = (effective_image.search, effective_image.replace) if effective_image else None
         tmp_parent = mkdtemp()
         tmp_dir = str(Path(tmp_parent) / "content")
         try:
             copy_tree(source_dir, tmp_dir)
-            substitute_placeholders(tmp_dir, placeholders)
+            substitute_placeholders(tmp_dir, placeholders, image_config=image_pair)
             make_tarball(tmp_dir, output_path)
-            console.info(f"{component_name} variant '{v.name}' built: {output_path}")
+            console.info(f"{component_name} variant '{current_variant.name}' built: {output_path}")
         finally:
             rmtree(tmp_parent, ignore_errors=True)
-
-        targets.append(
-            BuildTarget(
-                package_type=component_type,
-                variant_name=v.name,
-                version=version,
-                source_dir=source_dir,
-                output_dir=output_dir,
-            )
-        )
-
+        targets.append(BuildTarget(component_type, current_variant.name, version, source_dir, output_dir))
     return targets

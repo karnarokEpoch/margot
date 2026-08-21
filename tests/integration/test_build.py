@@ -38,6 +38,7 @@ def fake_project(tmp_path: Path) -> Path:
     # Create margo.yaml
     margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -61,7 +62,9 @@ quadlet:
     # Create margo component
     margo_dir = tmp_path / "margo"
     margo_dir.mkdir()
-    (margo_dir / "app.yaml").write_text("image: myapp\ncompose_tag: <compose_tag>\n")
+    (margo_dir / "app.yaml.jinja").write_text(
+        "image: {{ manifest.appVersion }}\ncompose_tag: {{ manifest.compose.variants[0].tag }}\n"
+    )
 
     # Create compose component with variants
     compose_dir = tmp_path / "compose"
@@ -123,28 +126,19 @@ class TestBuildMargo:
         assert targets[0].version == "2.0.0"
         assert (Path(targets[0].output_dir) / "app.yaml").exists()
 
-    def test_build_margo_substitutes_placeholders(self, fake_project: Path) -> None:
-        """Should substitute <compose_tag> and <app_tag> placeholders in app.yaml."""
+    def test_build_margo_renders_jinja_template(self, fake_project: Path) -> None:
+        """Should render app.yaml.jinja and exclude its source from the build output."""
         build_dir = fake_project / ".dist"
-        targets = build.build(
-            PackageType.MARGO,
-            project_dir=str(fake_project),
-            build_dir=str(build_dir),
-        )
+        targets = build.build(PackageType.MARGO, project_dir=str(fake_project), build_dir=str(build_dir))
 
-        app_yaml = Path(targets[0].output_dir) / "app.yaml"
-        content = app_yaml.read_text()
-        # <compose_tag> should be substituted with margo version
-        # In our fixture, compose has no version (only variants), so compose_version = variants[0].version
-        assert "<compose_tag>" not in content  # Placeholder should be replaced
-        assert "compose_tag: 1.0.0" in content
-        # <app_tag> should be substituted — fixture has no appVersion so value is ""
-        assert "<app_tag>" not in content
+        output_dir = Path(targets[0].output_dir)
+        assert (output_dir / "app.yaml").read_text() == "image: \ncompose_tag: 1.0.0"
+        assert not (output_dir / "app.yaml.jinja").exists()
 
     def test_build_margo_raises_when_margo_undefined(self, tmp_path: Path) -> None:
         """Should raise ValueError when margo component not defined."""
         # Create minimal margo.yaml without margo component
-        (tmp_path / "margo.yaml").write_text("apiVersion: v1\nname: test\ndescription: test\n")
+        (tmp_path / "margo.yaml").write_text("apiVersion: v1\nid: testapp\nname: test\ndescription: test\n")
 
         build_dir = tmp_path / ".dist"
         with raises(ValueError, match="margo component not defined"):
@@ -176,10 +170,11 @@ class TestBuildMargo:
                 version_override="invalid@version",
             )
 
-    def test_build_margo_substitutes_app_tag_with_app_version(self, tmp_path: Path) -> None:
-        """Should substitute <app_tag> with appVersion from margo.yaml."""
+    def test_build_margo_renders_app_version(self, tmp_path: Path) -> None:
+        """Should render appVersion from margo.yaml in app.yaml.jinja."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 appVersion: "2.5.0"
@@ -191,7 +186,7 @@ margo:
 
         margo_dir = tmp_path / "margo"
         margo_dir.mkdir()
-        (margo_dir / "app.yaml").write_text("app: <app_tag>\n")
+        (margo_dir / "app.yaml.jinja").write_text("app: {{ manifest.appVersion }}\n")
 
         build_dir = tmp_path / ".dist"
         targets = build.build(
@@ -200,14 +195,13 @@ margo:
             build_dir=str(build_dir),
         )
 
-        app_yaml = Path(targets[0].output_dir) / "app.yaml"
-        content = app_yaml.read_text()
-        assert content == "app: 2.5.0\n"
+        assert (Path(targets[0].output_dir) / "app.yaml").read_text() == "app: 2.5.0"
 
     def test_build_placeholder_map_excludes_margo_version(self) -> None:
         """_build_placeholder_map should not contain <margo_version> key; <app_tag> equals app_version."""
         meta = MargoYaml(
             api_version="v1",
+            id="testapp",
             name="test-app",
             description="Test",
             app_version="3.1.0",
@@ -227,6 +221,7 @@ margo:
         """version_override should apply to defined components, not undefined ones."""
         meta = MargoYaml(
             api_version="v1",
+            id="testapp",
             name="test-app",
             description="Test",
             app_version=None,
@@ -246,6 +241,7 @@ margo:
         """version_override should not populate compose/quadlet tags when those components are undefined."""
         meta = MargoYaml(
             api_version="v1",
+            id="testapp",
             name="test-app",
             description="Test",
             app_version=None,
@@ -335,7 +331,7 @@ class TestBuildCompose:
 
     def test_build_compose_raises_when_undefined(self, tmp_path: Path) -> None:
         """Should raise ValueError when compose component not defined."""
-        (tmp_path / "margo.yaml").write_text("apiVersion: v1\nname: test\ndescription: test\n")
+        (tmp_path / "margo.yaml").write_text("apiVersion: v1\nid: testapp\nname: test\ndescription: test\n")
 
         build_dir = tmp_path / ".dist"
         with raises(ValueError, match="compose component not defined"):
@@ -439,6 +435,7 @@ class TestBuildErrors:
         # Create flat compose (no variants)
         margo_yaml = """\
 apiVersion: v1
+id: testapp
 name: test
 description: test
 compose:
@@ -495,6 +492,7 @@ class TestBuildAllSkipsMissing:
         """Should skip compose when not defined; return 1 MARGO + 1 QUADLET."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -532,6 +530,7 @@ quadlet:
         """Should skip quadlet when not defined; return 1 MARGO + 2 COMPOSE."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -572,6 +571,7 @@ compose:
         """Should return only 1 MARGO when compose and quadlet are not defined."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -660,6 +660,7 @@ class TestBuildAllReRaise:
         # Use a project with margo + compose defined (so they succeed) and quadlet that raises
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -710,6 +711,7 @@ class TestBuildAllSkipsQuadlet:
         """Should skip quadlet when not defined; return margo + compose targets."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -747,6 +749,7 @@ class TestBuildMargoVersionNone:
         """Should raise ValueError when margo version is None and no override."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -773,6 +776,7 @@ class TestBuildFlatCompose:
         """Should build flat compose (no variants) and return a single BuildTarget."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 compose:
@@ -804,6 +808,7 @@ compose:
         """Should raise ValueError when flat compose version is None."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 compose:
@@ -830,6 +835,7 @@ class TestBuildAllSkipsMargo:
         """Should skip margo when not defined; return only compose targets."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 compose:
@@ -851,3 +857,70 @@ compose:
         package_types = [t.package_type for t in targets]
         assert PackageType.MARGO not in package_types
         assert PackageType.COMPOSE in package_types
+
+    def test_margo_descriptor_resolution_errors_and_static_copy(self, tmp_path: Path) -> None:
+        """Static descriptors copy unchanged while missing, duplicate, and undefined templates fail."""
+
+        def write_project(app_files: dict[str, str]) -> Path:
+            project = tmp_path / str(len(list(tmp_path.iterdir())))
+            project.mkdir()
+            (project / "margo.yaml").write_text(
+                "apiVersion: v1\nid: testapp\nname: testapp\ndescription: test\nmargo:\n  directory: margo\n  version: 1.0.0\n"
+            )
+            source = project / "margo"
+            source.mkdir()
+            for name, content in app_files.items():
+                (source / name).write_text(content)
+            return project
+
+        static_project = write_project({"app.yaml": "literal: <app_tag>\n"})
+        target = build.build(PackageType.MARGO, project_dir=str(static_project), build_dir=str(static_project / ".dist"))[0]
+        assert (Path(target.output_dir) / "app.yaml").read_text() == "literal: <app_tag>\n"
+
+        duplicate_project = write_project({"app.yaml": "a", "app.yaml.jinja": "b"})
+        with raises(ValueError, match=r"Both app\.yaml\.jinja and app\.yaml"):
+            build.build(PackageType.MARGO, project_dir=str(duplicate_project), build_dir=str(duplicate_project / ".dist"))
+
+        missing_project = write_project({})
+        with raises(ValueError, match=r"No app\.yaml or app\.yaml\.jinja"):
+            build.build(PackageType.MARGO, project_dir=str(missing_project), build_dir=str(missing_project / ".dist"))
+
+        undefined_project = write_project({"app.yaml.jinja": "value: {{ manifest.undefined_var }}"})
+        with raises(ValueError, match="Unresolved Jinja2 variable"):
+            build.build(PackageType.MARGO, project_dir=str(undefined_project), build_dir=str(undefined_project / ".dist"))
+
+    def test_compose_image_configuration_and_variant_override(self, tmp_path: Path) -> None:
+        """Component image substitutions apply unless an individual variant overrides them."""
+        (tmp_path / "margo.yaml").write_text(
+            "apiVersion: v1\nid: testapp\nname: testapp\ndescription: test\nappVersion: 2.0.0\ncompose:\n"
+            "  directory: compose\n  image:\n    search: app:dev\n    replace: registry/app:<app_tag>\n  variants:\n"
+            "    - name: default\n      version: 1.0.0\n    - name: gpu\n      version: 1.0.0_gpu\n"
+            "      image:\n        search: gpu:dev\n        replace: registry/gpu:<app_tag>\n"
+        )
+        for variant, image in (("default", "app:dev"), ("gpu", "gpu:dev")):
+            source = tmp_path / "compose" / variant
+            source.mkdir(parents=True)
+            (source / "compose.yaml").write_text(f"image: {image}\n")
+        targets = build.build(PackageType.COMPOSE, project_dir=str(tmp_path), build_dir=str(tmp_path / ".dist"))
+        contents = {}
+        for target in targets:
+            with tarfile.open(Path(target.output_dir) / f"testapp-{target.version}.tgz", "r:gz") as archive:
+                contents[target.variant_name] = archive.extractfile("compose.yaml").read().decode()
+        assert contents["default"] == "image: registry/app:2.0.0\n"
+        assert contents["gpu"] == "image: registry/gpu:2.0.0\n"
+
+    def test_compose_without_image_is_unchanged_and_unmatched_image_warns(
+        self, tmp_path: Path, capture_console: tuple[StringIO, StringIO]
+    ) -> None:
+        """No image block is a no-op, and an unmatched configured literal warns without failing."""
+        (tmp_path / "margo.yaml").write_text(
+            "apiVersion: v1\nid: testapp\nname: testapp\ndescription: test\ncompose:\n  directory: compose\n"
+            "  version: 1.0.0\n  image:\n    search: absent:dev\n    replace: registry/app:1.0.0\n"
+        )
+        source = tmp_path / "compose"
+        source.mkdir()
+        (source / "compose.yaml").write_text("image: unchanged:dev\n")
+        targets = build.build(PackageType.COMPOSE, project_dir=str(tmp_path), build_dir=str(tmp_path / ".dist"))
+        with tarfile.open(Path(targets[0].output_dir) / "testapp-1.0.0.tgz", "r:gz") as archive:
+            assert archive.extractfile("compose.yaml").read().decode() == "image: unchanged:dev\n"
+        assert "Image search string 'absent:dev' not found" in capture_console[1].getvalue()

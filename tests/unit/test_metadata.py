@@ -4,7 +4,14 @@ from pathlib import Path
 
 from pytest import raises
 
-from margot.domain.metadata import ComponentConfig, MargoYaml, VariantConfig, load_margo_yaml
+from margot.domain.metadata import (
+    ComponentConfig,
+    ImageConfig,
+    MargoYaml,
+    VariantConfig,
+    build_jinja2_context,
+    load_margo_yaml,
+)
 
 
 class TestVariantConfig:
@@ -77,6 +84,7 @@ class TestMargoYaml:
         """Should create MargoYaml with required fields and empty annotations."""
         margo_yaml = MargoYaml(
             api_version="v1",
+            id="testapp",
             name="test-app",
             description="Test application",
             app_version=None,
@@ -95,6 +103,7 @@ class TestMargoYaml:
         """Should be immutable after creation."""
         margo_yaml = MargoYaml(
             api_version="v1",
+            id="testapp",
             name="test-app",
             description="Test application",
             app_version=None,
@@ -114,6 +123,7 @@ class TestLoadMargoYaml:
         """Should parse a fully populated margo.yaml with all components, variants, and annotations."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: A test application
 annotations:
@@ -168,6 +178,7 @@ quadlet:
         """Should parse minimal valid yaml with only required fields and one component."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: minimal-app
 description: Minimal application
 margo:
@@ -212,6 +223,7 @@ description: Test application
         """Should raise ValueError when name is missing."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 description: Test application
 """
         yaml_file = tmp_path / "margo.yaml"
@@ -224,6 +236,7 @@ description: Test application
         """Should raise ValueError when description is missing."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 """
         yaml_file = tmp_path / "margo.yaml"
@@ -236,6 +249,7 @@ name: test-app
         """Should raise ValueError when YAML is malformed."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
   invalid: indent:
     broken yaml
@@ -250,6 +264,7 @@ name: test-app
         """Should return empty dict when annotations are absent."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 """
@@ -264,6 +279,7 @@ description: Test application
         """Should return empty tuple when component has no variants."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 margo:
@@ -282,6 +298,7 @@ margo:
         """Should return tuple of VariantConfig when component has variants."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 compose:
@@ -307,6 +324,7 @@ compose:
         """Should convert null annotations to empty dict."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 annotations:
@@ -322,6 +340,7 @@ annotations:
         """Should raise ValueError when component is missing directory."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 margo:
@@ -337,6 +356,7 @@ margo:
         """Should raise ValueError when variant is missing name."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 compose:
@@ -354,6 +374,7 @@ compose:
         """Should raise ValueError when variant is missing version."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 compose:
@@ -371,6 +392,7 @@ compose:
         """Should parse all three optional components when present."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 margo:
@@ -399,6 +421,7 @@ quadlet:
         """Should parse repository override when provided."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 margo:
@@ -418,6 +441,7 @@ margo:
         """Should have repository=None when not provided."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 margo:
@@ -444,6 +468,7 @@ margo:
         """Should preserve underscores in variant version strings."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 compose:
@@ -464,6 +489,7 @@ compose:
         """Should parse appVersion field into app_version when present."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 appVersion: "1.2.3"
@@ -479,6 +505,7 @@ appVersion: "1.2.3"
         """Should set app_version to None when appVersion is absent from margo.yaml."""
         yaml_content = """
 apiVersion: v1
+id: testapp
 name: test-app
 description: Test application
 """
@@ -488,3 +515,110 @@ description: Test application
         meta = load_margo_yaml(str(yaml_file))
 
         assert meta.app_version is None
+
+    def test_missing_id_raises_error(self, tmp_path: Path) -> None:
+        """The stable application id is mandatory."""
+        yaml_file = tmp_path / "margo.yaml"
+        yaml_file.write_text("api" + "Version: v1\nname: test\ndescription: test\n")
+        with raises(ValueError, match="missing required field: id"):
+            load_margo_yaml(str(yaml_file))
+
+    def test_parses_id_and_top_level_version(self, tmp_path: Path) -> None:
+        """The template-facing top-level fields retain their declared values."""
+        yaml_file = tmp_path / "margo.yaml"
+        yaml_file.write_text("apiVersion: v1\nid: myapp\nname: test\ndescription: test\nversion: 1.0.0\n")
+        meta = load_margo_yaml(str(yaml_file))
+        assert meta.id == "myapp"
+        assert meta.version == "1.0.0"
+
+    def test_top_level_version_absent_is_none(self, tmp_path: Path) -> None:
+        """Absent top-level version remains distinct from an empty template value."""
+        yaml_file = tmp_path / "margo.yaml"
+        yaml_file.write_text("apiVersion: v1\nid: myapp\nname: test\ndescription: test\n")
+        assert load_margo_yaml(str(yaml_file)).version is None
+
+    def test_reserved_variant_names_raise_error(self, tmp_path: Path) -> None:
+        """Names that would overwrite component context keys are rejected."""
+        for name in ("version", "component"):
+            yaml_file = tmp_path / f"{name}.yaml"
+            yaml_file.write_text(
+                f"apiVersion: v1\nid: myapp\nname: test\ndescription: test\ncompose:\n"
+                f"  directory: compose\n  variants:\n    - name: {name}\n      version: 1.0.0\n"
+            )
+            with raises(ValueError, match="collides with reserved field name"):
+                load_margo_yaml(str(yaml_file))
+
+    def test_variant_component_and_image_configuration(self, tmp_path: Path) -> None:
+        """Variant component names and image replacement overrides are parsed."""
+        yaml_file = tmp_path / "margo.yaml"
+        yaml_file.write_text(
+            "apiVersion: v1\nid: myapp\nname: test\ndescription: test\ncompose:\n"
+            "  directory: compose\n  image:\n    search: app:dev\n    replace: registry/app:<app_tag>\n"
+            "  variants:\n    - name: normal\n      version: 1.0.0+gpu\n      component: custom-component\n"
+            "      image:\n        search: gpu:dev\n        replace: registry/gpu:<app_tag>\n"
+        )
+        component = load_margo_yaml(str(yaml_file)).compose
+        assert component is not None
+        assert component.image == ImageConfig("app:dev", "registry/app:<app_tag>")
+        assert component.variants[0].component == "custom-component"
+        assert component.variants[0].image == ImageConfig("gpu:dev", "registry/gpu:<app_tag>")
+
+    def test_variant_component_defaults_to_none(self, tmp_path: Path) -> None:
+        """Component is optional on a declared variant."""
+        yaml_file = tmp_path / "margo.yaml"
+        yaml_file.write_text(
+            "apiVersion: v1\nid: myapp\nname: test\ndescription: test\ncompose:\n"
+            "  directory: compose\n  variants:\n    - name: normal\n      version: 1.0.0\n"
+        )
+        component = load_margo_yaml(str(yaml_file)).compose
+        assert component is not None
+        assert component.variants[0].component is None
+
+    def test_image_config_requires_non_empty_search_and_replace(self, tmp_path: Path) -> None:
+        """Both component and variant image blocks require usable literal strings."""
+        for location, image in (
+            ("  image:\n    replace: target\n", "search"),
+            ("  image:\n    search: source\n", "replace"),
+            ("  image:\n    search: ''\n    replace: target\n", "search"),
+            ("  variants:\n    - name: normal\n      version: 1.0.0\n      image:\n        replace: target\n", "search"),
+            ("  variants:\n    - name: normal\n      version: 1.0.0\n      image:\n        search: source\n", "replace"),
+            (
+                "  variants:\n    - name: normal\n      version: 1.0.0\n      image:\n"
+                "        search: ''\n        replace: target\n",
+                "search",
+            ),
+        ):
+            yaml_file = tmp_path / f"bad-{image}.yaml"
+            yaml_file.write_text(
+                "apiVersion: v1\nid: myapp\nname: test\ndescription: test\ncompose:\n  directory: compose\n" + location
+            )
+            with raises(ValueError, match=f"image {image}"):
+                load_margo_yaml(str(yaml_file))
+
+    def test_build_jinja2_context_has_variants_and_direct_access(self) -> None:
+        """The context provides uniform flat/variant and direct template access."""
+        meta = MargoYaml(
+            api_version="v1",
+            id="myapp",
+            name="display-name",
+            description="Test",
+            app_version=None,
+            annotations={},
+            margo=ComponentConfig("margo", "1.0.0+build", "registry/margo", ()),
+            compose=ComponentConfig(
+                "compose",
+                None,
+                "registry/compose",
+                (VariantConfig("gpu", "2.0.0+cuda"),),
+            ),
+            quadlet=None,
+        )
+        manifest = build_jinja2_context(meta)["manifest"]
+        assert manifest["id"] == "myapp"
+        assert manifest["appVersion"] == ""
+        assert manifest["margo"]["tag"] == "1.0.0_build"
+        assert manifest["margo"]["ref"] == "registry/margo:1.0.0_build"
+        assert manifest["margo"]["variants"][0]["component"] == "myapp-margo-display-name"
+        assert manifest["compose"]["variants"][0]["tag"] == "2.0.0_cuda"
+        assert manifest["compose"]["gpu"] == manifest["compose"]["variants"][0]
+        assert manifest["compose"]["gpu"]["component"] == "myapp-compose-gpu"

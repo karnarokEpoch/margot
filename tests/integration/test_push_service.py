@@ -29,6 +29,7 @@ def fake_push_project(tmp_path: Path) -> Path:
     # Create margo.yaml with repository fields
     margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -128,6 +129,7 @@ class TestPushComposeFlat:
         """Should call OrasClient.push_compose with correct archive path for flat layout."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 compose:
@@ -262,6 +264,7 @@ class TestPushErrors:
         """Should raise ValueError when built artifact does not exist."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -299,6 +302,7 @@ margo:
         """Should raise ValueError for invalid semver version before any push."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -326,6 +330,7 @@ margo:
         """Should raise ValueError when no registry/repository can be resolved."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -381,6 +386,7 @@ class TestPushAllReRaise:
         # Project with margo + compose defined (so they succeed), quadlet raises
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -432,6 +438,7 @@ class TestPushResolveRegistryRepository:
         """Should raise when --registry given but no --repository and no component repository."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -457,6 +464,7 @@ margo:
         """Should raise when --repository given but no --registry and no component repository."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -484,6 +492,7 @@ margo:
         """Should use CLI registry + component repository path when only --registry given."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -517,6 +526,7 @@ margo:
         """Should use component registry + CLI repository when only --repository given."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -552,6 +562,7 @@ class TestPushParseComponentRepository:
         """Should raise ValueError when component repository has no slash."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -581,6 +592,7 @@ class TestPushMargoVersionNone:
         """Should raise ValueError when margo version is None."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -606,6 +618,7 @@ class TestPushFlatComponentErrors:
         """Should raise ValueError when variant arg used with flat compose layout."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 compose:
@@ -629,6 +642,7 @@ compose:
         """Should raise ValueError when flat compose version is None."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 compose:
@@ -654,6 +668,7 @@ class TestPushFlatComponentCredentials:
         """Should call credentials.check_credentials for flat compose push."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 compose:
@@ -706,6 +721,7 @@ class TestPushQuadletComponent:
         """Should push flat quadlet component successfully."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 quadlet:
@@ -741,6 +757,7 @@ class TestPushAllSkipsMargo:
         """Should skip margo when not defined; return only compose/quadlet targets."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 compose:
@@ -775,6 +792,7 @@ class TestPushAllSkipsCompose:
         """Should skip compose when not defined; return margo + quadlet targets."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 margo:
@@ -816,6 +834,7 @@ class TestPushFlatComponentMissingArtifact:
         """Should raise ValueError when flat compose archive does not exist."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 compose:
@@ -855,6 +874,7 @@ class TestPushVariantComponentErrors:
         """Should raise ValueError when variant archive does not exist."""
         margo_yaml_content = """\
 apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
 compose:
