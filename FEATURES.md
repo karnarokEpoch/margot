@@ -82,8 +82,9 @@ Replaces the old `publish_metadata.json`. Read by `margot build` and `margot pus
 
 ```yaml
 apiVersion: v1                     # margot config schema version (not Margo spec version)
-name: myapp                        # application name (used in tarball filenames, OCI annotations)
-version: "1.0.0"                   # manifest/package version (required)
+id: myapp                          # stable machine identifier for the application (required)
+name: myapp                        # human-readable application name (used in tarball filenames, OCI annotations)
+version: "1.0.0"                   # manifest/package version (optional, exposed in Jinja2 context)
 appVersion: "2.3.1"               # version of the deployed application (optional, like Helm's appVersion)
 description: "Human-readable description of the application"
 annotations:                       # arbitrary key/value pairs, optional
@@ -96,7 +97,7 @@ organization:                      # optional list
     site: https://example.com
 
 margo:
-  directory: margo                 # path to the margo artifact source dir (contains app.yaml + resources/)
+  directory: margo                 # path to the margo artifact source dir (contains app.yaml[.jinja] + resources/)
   version: 1.0.0                   # OCI tag for the margo artifact (must be valid OCI tag; SemVer recommended)
   repository: public.ecr.aws/g2n4p2m7/margo   # OCI repository for this component (overrides global)
 
@@ -105,27 +106,28 @@ compose:
   version: 1.0.0                   # OCI tag for the compose artifact(s) — used only when no variants
   repository: public.ecr.aws/g2n4p2m7/margo   # optional override; falls back to global repository
   image:                            # optional — dev-local image ref swap, applied at build time
-    search: "localhost/myapp:dev"             # literal string as it appears in compose.yaml (must be runnable locally as-is)
-    replace: "public.ecr.aws/g2n4p2m7/myapp:{{ manifest.appVersion }}"   # Jinja2 template, rendered from manifest context
+    search: "myapp:dev"             # literal string as it appears in compose.yaml (must be runnable locally as-is)
+    replace: "public.ecr.aws/g2n4p2m7/myapp:<app_tag>"   # target ref; may reuse placeholder tokens
   variants:
     - name: default                # reserved name — maps to compose/default/ subdir
       version: 1.0.0
+      component: myapp-compose-default   # optional stable component name; defaults to {id}-compose-{name}
       # no image override here — inherits the component-level image block above
     - name: simple                 # maps to compose/simple/
       version: 1.0.0_simple        # OCI tag for this variant ('_' encodes '+' per Margo OCI spec)
     - name: addon-mosquitto        # maps to compose/addon-mosquitto/
       version: 1.0.0_addon-mosquitto
       image:                        # per-variant override — replaces the component-level image block, not merged
-        search: "localhost/mosquitto:dev"
-        replace: "public.ecr.aws/g2n4p2m7/mosquitto:{{ manifest.appVersion }}"
+        search: "mosquitto:dev"
+        replace: "public.ecr.aws/g2n4p2m7/mosquitto:<app_tag>"
 
 quadlet:
   directory: quadlet               # path to the quadlet source dir
   version: 1.0.0
   repository: public.ecr.aws/g2n4p2m7/margo
   image:
-    search: "localhost/myapp:dev"
-    replace: "public.ecr.aws/g2n4p2m7/myapp:{{ manifest.appVersion }}"
+    search: "myapp:dev"
+    replace: "public.ecr.aws/g2n4p2m7/myapp:<app_tag>"
   variants:
     - name: default                # reserved name — maps to quadlet/default/ subdir
       version: 1.0.0
@@ -136,29 +138,30 @@ quadlet:
 **Field rules:**
 
 - `apiVersion` — required. Currently `v1`.
-- `name` — required. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation.
-- `version` — required. Manifest/package version. Exposed as `app.version` in templates.
-- `appVersion` — optional. Version of the deployed application (like Helm's `appVersion`). Not validated as SemVer. Exposed as `app.appVersion` in templates. Useful for passing as a parameter default (e.g. `image.tag`).
+- `id` — required. Stable machine identifier for the application. Used as the base for derived component name defaults (e.g. `{id}-compose-{variant}`). Must not change across releases. Exposed as `manifest.id` in `app.yaml.jinja` templates.
+- `name` — required. Human-readable application name. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation. Exposed as `manifest.name` in templates.
+- `version` — optional. Manifest/package version. Exposed as `manifest.version` in `app.yaml.jinja` templates.
+- `appVersion` — optional. Version of the deployed application (like Helm's `appVersion`). Not validated as SemVer. Exposed as `manifest.appVersion` in templates (empty string if absent). Useful for passing as a parameter default (e.g. `image.tag`).
 - `description` — required. Used in OCI description annotation.
 - `margo.directory` — required. Default: `margo`.
 - `margo.version`, `compose.version`, `quadlet.version` — required per component if that component is built. Used as the tag when no variants are declared.
 - `repository` at component level — optional; overrides global `repository` from `margot.yaml` tool config (or CLI flag / env var).
-- `variants` — list of `{name, version}` objects. Required if variants exist; `--variant all` expands to this list. `--variant NAME` selects one entry by name.
+- `variants` — list of `{name, version[, component, image]}` objects. Required if variants exist; `--variant all` expands to this list. `--variant NAME` selects one entry by name.
   - `name: default` is a **reserved name** but maps to `<component.directory>/default/` — a real subdir, not the component root.
   - All variant names (including `default`) map to `<component.directory>/<name>/`.
   - When `variants` is present, `compose.version` / `quadlet.version` is ignored — each variant carries its own `version`.
+  - `component` — optional per-variant stable component name. Defaults to `{id}-{type}-{name}` (e.g. `myapp-compose-default`). Developer-owned: margot computes the default but never overwrites an explicitly set value. Exposed as `manifest.compose.<name>.component` in `app.yaml.jinja` templates.
+  - Variant names that collide with reserved field names (`directory`, `repository`, `variants`, `version`, `tag`, `ref`, `component`) are rejected at parse time with a clear error.
 - `image` (compose/quadlet only) — optional `{search, replace}` block for swapping a
   dev-local container image reference for the environment-appropriate one at build time.
   - `search` — a literal string (not a regex), exactly as it appears in the component's
     source text file(s) (e.g. `localhost/myapp:dev`). The source file must be a real, runnable
     artifact as checked in — developers run it locally against this dev image before
     `margot build` ever touches it.
-  - `replace` — a **Jinja2 template string**, rendered with the same manifest context used
-    for `app.yaml.jinja` (see Template context below), scoped to the enclosing component/
-    variant (e.g. `{{ manifest.appVersion }}`, `{{ manifest.compose.repository }}`,
-    `{{ manifest.compose.default.tag }}`). Rendered once at build time, after all other
-    manifest fields are resolved — so bumping `appVersion` (or any other manifest field)
-    alone updates every `image.replace` result with no separate edit to the `image` block.
+  - `replace` — the target string. May reuse the same `<..._tag>` placeholder tokens
+    available to compose/quadlet substitution (e.g. `<app_tag>`). Resolved at the same
+    time as other placeholders. No Jinja2 syntax here — Jinja2 is reserved for
+    `app.yaml.jinja` only.
   - May be declared at the component level and/or per-variant. A variant's `image` block
     **fully overrides** (does not merge with) the component-level one.
   - Optional — a component/variant with no `image` block gets no image substitution.
@@ -166,9 +169,6 @@ quadlet:
     warning, not a hard failure — same posture as other unresolved placeholders.
   - Undefined Jinja variable in `replace` → hard error at build time (fail fast, same as
     an invalid template in `app.yaml.jinja`), not a silent empty string.
-  - Not available for `margo` — `margo/app.yaml` is only ever rendered once at
-    build/publish time and is never run directly, so it uses `app.yaml.jinja` directly
-    instead (see `margo` Package Type below), not a runnable-file search/replace.
 - Version strings with `_` are stored as-is in the OCI tag. The `_` encodes `+` (SemVer build metadata separator) per the Margo OCI distribution spec, since `+` is not a valid OCI tag character.
 
 **Missing `margo.yaml`** → clear error: `"margo.yaml not found in current directory. Run margot init or create it manually."` (exit 1).
@@ -183,7 +183,8 @@ A Margo application project that margot operates on has this structure:
 <project-root>/
 ├── margo.yaml                     # project descriptor (required)
 ├── margo/                         # margo artifact source (path set by margo.directory)
-│   ├── app.yaml                   # Margo app descriptor with placeholders (required)
+│   ├── app.yaml                   # Margo app descriptor — static (use one or the other, not both)
+│   ├── app.yaml.jinja             # Margo app descriptor — Jinja2 template (rendered to app.yaml at build time)
 │   └── resources/                 # optional supporting files
 │       ├── icon.png
 │       ├── license.txt
@@ -237,12 +238,41 @@ during the tree copy step. One file per source dir; applies to that dir only.
   - `resources/license.txt` → `application/vnd.margo.app.license.v1+plain`
   - `resources/release-notes.md` → `application/vnd.margo.app.releaseNotes.v1+markdown`
   - `resources/description.md` → `application/vnd.margo.app.descriptionFile.v1+markdown`
-- Build step: copy source → temp dir, then substitute placeholders in `app.yaml`:
-  - `<app_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`, `<margo_tag>`
-  - `<app_tag>` → `appVersion` top-level field (empty string if absent)
-  - `<margo_tag>` → `margo.version`
-  - `<compose_tag>` → `compose.version` (or first variant's version if variants declared)
-  - `<quadlet_tag>` → `quadlet.version` (or first variant's version if variants declared)
+- Build step: copy source → output dir, then render `app.yaml`:
+  - File resolution (checked in order):
+    1. Both `app.yaml.jinja` and `app.yaml` present → **hard error** (fail build, clear message).
+    2. `app.yaml.jinja` present → render with Jinja2 `StrictUndefined`, write as `app.yaml` in output. The `.jinja` source is **not** copied to the output.
+    3. `app.yaml.jinja` absent → copy `app.yaml` verbatim. No substitution.
+  - Jinja2 template context (read-only, derived from `margo.yaml`):
+
+    ```
+    manifest.id
+    manifest.name
+    manifest.version
+    manifest.appVersion          # empty string if absent
+    manifest.description
+    manifest.annotations         # dict
+    manifest.author              # list
+    manifest.organization        # list
+
+    manifest.margo.version
+    manifest.margo.tag           # version with '+' replaced by '_'
+    manifest.margo.ref           # repository:tag
+    manifest.margo.repository
+    manifest.margo.directory
+
+    manifest.compose.directory
+    manifest.compose.repository
+    manifest.compose.variants    # ordered list of variant objects (see below)
+    manifest.compose.<name>      # direct access by variant name
+
+    manifest.quadlet.*           # same shape as compose
+    ```
+
+  - Variant object fields: `name`, `version`, `tag` (OCI-safe, `+`→`_`), `ref` (`repository:tag`), `repository`, `component`.
+  - Flat components (no `variants` declared) expose a single synthetic variant entry in `variants` so templates iterate uniformly.
+  - `component` default: `{id}-{type}-{name}` (e.g. `myapp-compose-default`). Never overwritten if explicitly set in `margo.yaml`.
+  - Unresolved Jinja2 variables cause a hard build failure (`StrictUndefined`).
 
 ### `compose`
 
@@ -289,12 +319,10 @@ margot build [--type margo|compose|quadlet|all] [--version VERSION]
 
 1. Read `margo.yaml` from CWD for versions, directories, and repository
 2. Copy source `margo.directory` → `<build_dir>/<margo.version>/margo/` (pure Python, no rsync)
-3. Substitute placeholders in `app.yaml` (pure Python string replace, no sed):
-   - `<app_tag>`, `<compose_tag>`, `<quadlet_tag>`, `<helm_chart_tag>`, `<margo_tag>`
-   - `<app_tag>` → `appVersion` top-level field (empty string if absent)
-   - `<margo_tag>` → `margo.version`
-   - `<compose_tag>` → `compose.version` (or first variant's version if variants declared)
-   - `<quadlet_tag>` → `quadlet.version` (or first variant's version if variants declared)
+3. Render `app.yaml`:
+   - Both `app.yaml.jinja` and `app.yaml` present → hard error (exit 1).
+   - `app.yaml.jinja` present → render with Jinja2 `StrictUndefined`, write output as `app.yaml`. The `.jinja` source is not included in output.
+   - `app.yaml.jinja` absent → copy `app.yaml` verbatim. No substitution.
 
 **compose / quadlet:**
 
