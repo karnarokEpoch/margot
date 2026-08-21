@@ -53,6 +53,7 @@ class MargoYaml:
     version: str | None = None
     author: list = field(default_factory=list)
     organization: list = field(default_factory=list)
+    repository: str | None = None  # global OCI repository base, used as fallback when component has no repository
 
 
 def load_margo_yaml(path: str) -> MargoYaml:
@@ -98,6 +99,7 @@ def load_margo_yaml(path: str) -> MargoYaml:
         version=raw.get("version"),
         author=raw.get("author") or [],
         organization=raw.get("organization") or [],
+        repository=raw.get("repository"),
     )
 
 

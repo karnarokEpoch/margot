@@ -639,3 +639,60 @@ description: Test application
         assert manifest["compose"]["variants"][0]["tag"] == "2.0.0_cuda"
         assert manifest["compose"]["gpu"] == manifest["compose"]["variants"][0]
         assert manifest["compose"]["gpu"]["component"] == "myapp-compose-gpu"
+
+    def test_top_level_repository_parsed(self, tmp_path: Path) -> None:
+        """Should retain the root repository for component fallback."""
+        yaml_file = tmp_path / "margo.yaml"
+        yaml_file.write_text(
+            "apiVersion: v1\nid: myapp\nname: test\ndescription: test\n"
+            "repository: public.ecr.aws/example/app\nquadlet:\n  directory: quadlet\n"
+        )
+
+        meta = load_margo_yaml(str(yaml_file))
+
+        assert meta.repository == "public.ecr.aws/example/app"
+
+    def test_top_level_repository_absent_is_none(self, tmp_path: Path) -> None:
+        """Should distinguish an absent root repository from an empty value."""
+        yaml_file = tmp_path / "margo.yaml"
+        yaml_file.write_text("apiVersion: v1\nid: myapp\nname: test\ndescription: test\n")
+
+        meta = load_margo_yaml(str(yaml_file))
+
+        assert meta.repository is None
+
+    def test_build_jinja2_context_uses_global_repository_for_component(self) -> None:
+        """Should use the global repository when a component has no override."""
+        meta = MargoYaml(
+            api_version="v1",
+            id="myapp",
+            name="test",
+            description="Test",
+            app_version=None,
+            annotations={},
+            margo=None,
+            compose=None,
+            quadlet=ComponentConfig("quadlet", "1.0.0", None, ()),
+        )
+
+        manifest = build_jinja2_context(meta, global_repository="public.ecr.aws/example/app")["manifest"]
+
+        assert manifest["quadlet"]["repository"] == "public.ecr.aws/example/app"
+
+    def test_build_jinja2_context_component_repository_overrides_global(self) -> None:
+        """Should prefer a component repository over the global fallback."""
+        meta = MargoYaml(
+            api_version="v1",
+            id="myapp",
+            name="test",
+            description="Test",
+            app_version=None,
+            annotations={},
+            margo=None,
+            compose=None,
+            quadlet=ComponentConfig("quadlet", "1.0.0", "public.ecr.aws/example/quadlet", ()),
+        )
+
+        manifest = build_jinja2_context(meta, global_repository="public.ecr.aws/example/app")["manifest"]
+
+        assert manifest["quadlet"]["repository"] == "public.ecr.aws/example/quadlet"

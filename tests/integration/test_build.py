@@ -945,3 +945,37 @@ compose:
         with tarfile.open(Path(targets[0].output_dir) / "testapp-1.0.0.tgz", "r:gz") as archive:
             assert archive.extractfile("compose.yaml").read().decode() == "image: unchanged:dev\n"
         assert "Image search string 'absent:dev' not found" in capture_console[1].getvalue()
+
+
+class TestBuildMargoRepositoryRendering:
+    """Tests for repository values in Margo Jinja templates."""
+
+    def test_build_margo_renders_top_level_repository(self, tmp_path: Path) -> None:
+        """Should render the root repository for a component without an override."""
+        (tmp_path / "margo.yaml").write_text(
+            "apiVersion: v1\nid: testapp\nname: testapp\ndescription: Test application\n"
+            "repository: public.ecr.aws/test/repo\nmargo:\n  directory: margo\n  version: 1.0.0\n"
+            "quadlet:\n  directory: quadlet\n  version: 1.0.0\n"
+        )
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml.jinja").write_text("repository: {{ manifest.quadlet.repository }}\n")
+
+        target = build.build(PackageType.MARGO, project_dir=str(tmp_path), build_dir=str(tmp_path / ".dist"))[0]
+
+        assert "repository: public.ecr.aws/test/repo" in (Path(target.output_dir) / "app.yaml").read_text()
+
+    def test_build_margo_component_repository_overrides_top_level(self, tmp_path: Path) -> None:
+        """Should render a component repository in preference to the root repository."""
+        (tmp_path / "margo.yaml").write_text(
+            "apiVersion: v1\nid: testapp\nname: testapp\ndescription: Test application\n"
+            "repository: public.ecr.aws/test/repo\nmargo:\n  directory: margo\n  version: 1.0.0\n"
+            "quadlet:\n  directory: quadlet\n  version: 1.0.0\n  repository: public.ecr.aws/test/quadlet\n"
+        )
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml.jinja").write_text("repository: {{ manifest.quadlet.repository }}\n")
+
+        target = build.build(PackageType.MARGO, project_dir=str(tmp_path), build_dir=str(tmp_path / ".dist"))[0]
+
+        assert "repository: public.ecr.aws/test/quadlet" in (Path(target.output_dir) / "app.yaml").read_text()

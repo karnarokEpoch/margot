@@ -126,7 +126,9 @@ def _build_margo(
     if jinja_file.exists():
         try:
             environment = Environment(undefined=StrictUndefined)  # noqa: S701
-            rendered = environment.from_string(jinja_file.read_text(encoding="utf-8")).render(build_jinja2_context(meta))
+            rendered = environment.from_string(jinja_file.read_text(encoding="utf-8")).render(
+                build_jinja2_context(meta, global_repository=meta.repository)
+            )
         except UndefinedError as e:
             raise ValueError(f"Unresolved Jinja2 variable in app.yaml.jinja: {e}") from e
         static_file.write_text(rendered, encoding="utf-8")
