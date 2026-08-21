@@ -13,21 +13,16 @@ sequencing; FEATURES.md is updated as items land (see backlog).
 
 ### Sprint 5 — Jinja2 build refactor + auth polish
 
-**Goal:** Ship the Jinja2 `app.yaml` rendering pipeline (breaking refactor), `margot auth
-status`, authenticated `fetch`/`pull`, and the `image` search/replace block for
-compose/quadlet dev-local image swapping.
+**Goal:** Complete the Jinja2 `app.yaml` rendering pipeline (breaking refactor) and the
+`image` search/replace block for compose/quadlet dev-local image swapping.
 
-**Full plan:** see [`.kiro/sprints/sprint-5.md`](.kiro/sprints/sprint-5.md) — all three
-items (`auth status`, authenticated fetch/pull, Jinja2 `app.yaml` refactor including the
-`image` search/replace design), file lists, and definition of done. Implementation order:
-Items 1 (`auth status`) and 2 (authenticated fetch/pull) run in parallel worktrees — they
-touch disjoint files (`infra/credentials.py`/`services/auth.py`/`commands/auth.py` vs.
-`infra/oci.py`/`services/fetch.py`/`services/pull.py`). Item 3 (Jinja2 refactor + `image`
-block) starts once both are merged.
+**Full plan:** see [`.kiro/sprints/sprint-5.md`](.kiro/sprints/sprint-5.md) for the
+remaining Item 3 Jinja2 refactor, including the `image` search/replace design, file list,
+and definition of done.
 
-**Status:** Item 2 (authenticated `fetch`/`pull`) is ✅ **done** — see
-[`.kiro/sprints/sprint-5.md`](.kiro/sprints/sprint-5.md#item-2--authenticated-fetch-and-pull--done)
-for the commit reference. Items 1 and 3 remain open; sprint is not yet complete.
+**Status:** Items 1 (`margot auth status`) and 2 (authenticated `fetch`/`pull`) are
+complete. Only Item 3, the Jinja2 `app.yaml` refactor and `image` block, remains open;
+Sprint 5 is not yet complete.
 
 Key locked decisions:
 
