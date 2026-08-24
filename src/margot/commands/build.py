@@ -76,9 +76,9 @@ def build_cmd(
         if all_targets:
             for target in all_targets:
                 if target.variant_name:
-                    console.success(f"Built ({target.variant_name}): {target.output_dir}")
+                    console.success(f"Built ({target.variant_name}): {target.artifact_path}")
                 else:
-                    console.success(f"Built: {target.output_dir}")
+                    console.success(f"Built: {target.artifact_path}")
         else:
             console.warning("Nothing was built.")
 

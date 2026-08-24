@@ -1,7 +1,8 @@
 """Auth domain helpers: pure functions for credential token parsing."""
 
 from base64 import b64decode
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from json import loads
 
 
@@ -33,3 +34,48 @@ def parse_token_expiry(password: str) -> datetime | None:
         return datetime.fromtimestamp(float(expiration), tz=UTC)
     except Exception:  # noqa: BLE001
         return None
+
+
+def classify_expiry(expires_at: datetime, now: datetime | None = None) -> str:
+    """Classify a registry's credential expiry status.
+
+    Mirrors the 1-hour warning threshold used in infra/credentials.py check_credentials.
+
+    Returns:
+        "EXPIRED" if now >= expires_at.
+        "EXPIRING" if now >= expires_at - 1 hour.
+        "VALID" otherwise.
+    """
+    if now is None:
+        now = datetime.now(tz=UTC)
+
+    if now >= expires_at:
+        return "EXPIRED"
+
+    if now >= expires_at - timedelta(hours=1):
+        return "EXPIRING"
+
+    return "VALID"
+
+
+@dataclass(frozen=True)
+class TrackedRegistryStatus:
+    """Expiry status for a single registry tracked in margot's credentials file."""
+
+    hostname: str
+    expires_at: datetime
+    remaining: timedelta
+    status: str
+
+
+@dataclass(frozen=True)
+class AuthStatusResult:
+    """Structured result of the auth status check.
+
+    tracked: registries tracked in margot's credentials file, with computed status.
+    oras_only: registries present in the oras-py credential store but not tracked
+        by margot (expiry unknown).
+    """
+
+    tracked: list[TrackedRegistryStatus]
+    oras_only: list[str]

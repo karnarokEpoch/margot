@@ -11,6 +11,7 @@ from oras.defaults import annotation_title
 from oras.oci import ManifestConfig, NewLayer, NewManifest
 
 from margot import console
+from margot.infra import credentials
 
 
 class _OrasLogHandler(Handler):
@@ -47,9 +48,18 @@ class OrasClient(OrasClientLib):
     Provides pull() for bulk layer download and download_blob() for individual blob retrieval.
     """
 
-    def __init__(self) -> None:
-        """Initialize OrasClient for anonymous registry access."""
+    def __init__(self, hostname: str | None = None) -> None:
+        """Initialize OrasClient for registry access.
+
+        Args:
+            hostname: Registry hostname (e.g. 'public.ecr.aws'). When provided,
+                stored credentials for that host are loaded automatically so
+                subsequent operations use them. When omitted, the client is
+                anonymous-only (no credential loading).
+        """
         super().__init__()
+        if hostname is not None:
+            self.auth.load_configs(self.get_container(hostname))
         _configure_oras_logger()
 
     def get_manifest(self, uri: str) -> dict[str, Any]:
@@ -129,11 +139,18 @@ class OrasClient(OrasClientLib):
         """
         Remove stored credentials for registry.
 
+        oras-py's logout() only clears its in-memory auth state — it never
+        persists the removal to ~/.docker/config.json (see
+        oras.auth.base.AuthBackend.logout()). We call it for correctness within
+        this process, then explicitly strip the on-disk entry ourselves so a
+        subsequent `margot auth login` doesn't see stale credentials.
+
         Args:
             hostname: Registry hostname.
         """
         console.debug(f"Logout: {hostname}")
         super().logout(hostname=hostname)
+        credentials.remove_docker_config_entry(hostname)
 
     def push_margo(  # noqa: PLR0913
         self,

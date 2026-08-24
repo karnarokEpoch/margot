@@ -36,6 +36,29 @@ def extract_tag(uri: str) -> str:
     return uri[uri.rfind(":") + 1 :]
 
 
+def extract_hostname(uri: str) -> str:
+    """
+    Extract the registry hostname from an OCI URI.
+
+    Returns everything before the first '/' in the URI.
+
+    Args:
+        uri: A validated OCI reference string (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0).
+
+    Returns:
+        The registry hostname (e.g. 'public.ecr.aws').
+
+    Raises:
+        ValueError: If uri is empty or has no '/' separator with a non-empty hostname.
+    """
+    if not uri:
+        raise ValueError("URI must not be empty")
+    sep = uri.find("/")
+    if sep in (-1, 0):
+        raise ValueError("URI must contain a hostname separated by '/' (e.g. registry/repo:tag)")
+    return uri[:sep]
+
+
 def validate_semver_tag(tag: str) -> bool:
     """
     Return True if tag is a valid SemVer string, False otherwise.

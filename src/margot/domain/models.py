@@ -46,3 +46,4 @@ class BuildTarget:
     version: str  # OCI tag as stored (may contain '_')
     source_dir: str  # resolved source directory (absolute or relative)
     output_dir: str  # resolved output directory
+    artifact_path: str  # primary artifact: margo directory or compose/quadlet .tgz file

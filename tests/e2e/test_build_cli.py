@@ -32,11 +32,10 @@ def cli_project(tmp_path: Path, monkeypatch: Any) -> Path:
     # Create margo.yaml
     margo_yaml = tmp_path / "margo.yaml"
     margo_yaml.write_text("""apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
+version: 1.0.0
 compose:
   directory: compose
   variants:
@@ -115,7 +114,7 @@ class TestBuildCLI:
         assert result.exit_code == 0
         built_count = plain.count("Built")
         assert built_count == 1, f"Expected 1 'Built' line, got {built_count}"
-        assert "margo" not in plain.lower() or "Built:" in plain
+        assert f"Built: {cli_project / '.dist' / '1.0.0' / 'margo'}" in plain.replace("\n", "")
 
     def test_build_type_compose_only(self, cli_project: Path) -> None:
         """Should build all compose variants and exit 0."""
@@ -125,6 +124,8 @@ class TestBuildCLI:
         assert result.exit_code == 0
         built_count = plain.count("Built")
         assert built_count == 2, f"Expected 2 'Built' lines for compose variants, got {built_count}"
+        assert f"Built (default): {cli_project / '.dist' / '1.0.0' / 'testapp-1.0.0.tgz'}" in plain.replace("\n", "")
+        assert f"Built (simple): {cli_project / '.dist' / '1.0.0_simple' / 'testapp-1.0.0_simple.tgz'}" in plain.replace("\n", "")
 
     def test_build_type_quadlet_only(self, cli_project: Path) -> None:
         """Should build all quadlet variants and exit 0."""
@@ -134,6 +135,7 @@ class TestBuildCLI:
         assert result.exit_code == 0
         built_count = plain.count("Built")
         assert built_count == 1, f"Expected 1 'Built' line for quadlet variant, got {built_count}"
+        assert f"Built (default): {cli_project / '.dist' / '1.0.0' / 'testapp-1.0.0.tgz'}" in plain.replace("\n", "")
 
     def test_build_variant_simple(self, cli_project: Path) -> None:
         """Should build only the specified compose variant."""
@@ -242,11 +244,10 @@ def cli_project_partial(tmp_path: Path, monkeypatch: Any) -> Path:
 
     margo_yaml = tmp_path / "margo.yaml"
     margo_yaml.write_text("""apiVersion: v1
+id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
+version: 1.0.0
 quadlet:
   directory: quadlet
   variants:
@@ -349,3 +350,20 @@ class TestBuildMultiType:
         assert result.exit_code == 0
         built_lines = [line for line in plain.splitlines() if "Built" in line]
         assert len(built_lines) == 1, f"Expected 1 'Built' line after dedup, got {len(built_lines)}"
+
+    def test_build_jinja_descriptor_path(self, cli_project: Path) -> None:
+        """The CLI renders app.yaml.jinja into the margo output."""
+        (cli_project / "margo" / "app.yaml").unlink()
+        (cli_project / "margo" / "app.yaml.jinja").write_text("name: {{ manifest.name }}\n")
+        result = runner.invoke(app, ["build", "--type", "margo", "--build-dir", str(cli_project / ".dist")])
+        assert result.exit_code == 0
+        output = cli_project / ".dist" / "1.0.0" / "margo"
+        assert (output / "app.yaml").read_text() == "name: testapp"
+        assert not (output / "app.yaml.jinja").exists()
+
+    def test_build_static_descriptor_path(self, cli_project: Path) -> None:
+        """The CLI copies a static app.yaml verbatim."""
+        (cli_project / "margo" / "app.yaml").write_text("name: unchanged-<app_tag>\n")
+        result = runner.invoke(app, ["build", "--type", "margo", "--build-dir", str(cli_project / ".dist")])
+        assert result.exit_code == 0
+        assert (cli_project / ".dist" / "1.0.0" / "margo" / "app.yaml").read_text() == "name: unchanged-<app_tag>\n"

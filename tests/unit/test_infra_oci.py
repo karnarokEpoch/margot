@@ -23,6 +23,25 @@ class TestOrasClient:
         client = OrasClient()
         assert client is not None
 
+    def test_oras_client_init_without_hostname_does_not_load_configs(self, mocker: Any) -> None:
+        """Constructing without a hostname should not call auth.load_configs."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_auth = mocker.MagicMock()
+        mocker.patch.object(OrasClient, "auth", mock_auth, create=True)
+        OrasClient()
+        mock_auth.load_configs.assert_not_called()
+
+    def test_oras_client_init_with_hostname_loads_configs(self, mocker: Any) -> None:
+        """Constructing with a hostname should trigger credential loading for that host."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_auth = mocker.MagicMock()
+        mocker.patch.object(OrasClient, "auth", mock_auth, create=True)
+        mock_container = mocker.MagicMock()
+        mock_get_container = mocker.patch.object(OrasClient, "get_container", return_value=mock_container)
+        OrasClient(hostname="public.ecr.aws")
+        mock_get_container.assert_called_once_with("public.ecr.aws")
+        mock_auth.load_configs.assert_called_once_with(mock_container)
+
     def test_oras_client_has_get_manifest(self, mocker: Any) -> None:
         """Should have get_manifest method."""
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
@@ -123,9 +142,19 @@ class TestOrasClient:
         """logout() should delegate to the underlying client with correct kwargs."""
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
         mock_logout = mocker.patch("margot.infra.oci.OrasClientLib.logout")
+        mocker.patch("margot.infra.oci.credentials.remove_docker_config_entry")
         client = OrasClient()
         client.logout(hostname="public.ecr.aws")
         mock_logout.assert_called_once_with(hostname="public.ecr.aws")
+
+    def test_logout_removes_docker_config_entry(self, mocker: Any) -> None:
+        """logout() should persist removal to the on-disk docker config file."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mocker.patch("margot.infra.oci.OrasClientLib.logout")
+        mock_remove = mocker.patch("margot.infra.oci.credentials.remove_docker_config_entry")
+        client = OrasClient()
+        client.logout(hostname="public.ecr.aws")
+        mock_remove.assert_called_once_with("public.ecr.aws")
 
 
 class TestOciAdapterDebugLogging:

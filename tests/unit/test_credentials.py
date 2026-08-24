@@ -2,14 +2,19 @@
 
 from datetime import UTC, datetime, timedelta
 from io import StringIO
+from json import dumps, loads
 from pathlib import Path
 
 from pytest import fixture, raises
 
+from margot.infra import credentials as creds_module
 from margot.infra.credentials import (
     CredentialsExpiredError,
     check_credentials,
+    list_oras_registries,
+    list_tracked,
     load_expiry,
+    remove_docker_config_entry,
     remove_expiry,
     save_expiry,
 )
@@ -140,9 +145,9 @@ class TestCheckCredentials:
         with raises(CredentialsExpiredError, match="expired"):
             check_credentials("public.ecr.aws", credentials_file=creds_file)
 
-    def test_emits_warning_when_within_5_minutes(self, creds_file: Path, capture_console: tuple[StringIO, StringIO]) -> None:
-        """Should emit a console warning when within 5 minutes of expiry."""
-        near_expiry = datetime.now(tz=UTC) + timedelta(minutes=3)
+    def test_emits_warning_when_within_1_hour(self, creds_file: Path, capture_console: tuple[StringIO, StringIO]) -> None:
+        """Should emit a console warning when within 1 hour of expiry."""
+        near_expiry = datetime.now(tz=UTC) + timedelta(minutes=30)
         save_expiry("public.ecr.aws", near_expiry, credentials_file=creds_file)
 
         _out, err = capture_console
@@ -151,11 +156,245 @@ class TestCheckCredentials:
         err_text = err.getvalue()
         assert "warning:" in err_text
         assert "public.ecr.aws" in err_text
-        assert "minutes" in err_text
+        assert "hour" in err_text
 
     def test_returns_silently_when_expiry_in_future(self, creds_file: Path) -> None:
-        """Should not raise or warn when expiry is more than 5 minutes away."""
+        """Should not raise or warn when expiry is more than 1 hour away."""
         future = datetime.now(tz=UTC) + timedelta(hours=6)
         save_expiry("public.ecr.aws", future, credentials_file=creds_file)
 
         check_credentials("public.ecr.aws", credentials_file=creds_file)
+
+    def test_emits_warning_at_exactly_1_hour_boundary(
+        self, creds_file: Path, capture_console: tuple[StringIO, StringIO]
+    ) -> None:
+        """Should emit a console warning when exactly 1 hour away from expiry."""
+        boundary_expiry = datetime.now(tz=UTC) + timedelta(hours=1)
+        save_expiry("public.ecr.aws", boundary_expiry, credentials_file=creds_file)
+
+        _out, err = capture_console
+        check_credentials("public.ecr.aws", credentials_file=creds_file)
+
+        err_text = err.getvalue()
+        assert "warning:" in err_text
+        assert "hour" in err_text
+
+    def test_returns_silently_when_expiry_just_over_1_hour(
+        self, creds_file: Path, capture_console: tuple[StringIO, StringIO]
+    ) -> None:
+        """Should not warn when expiry is just over 1 hour away."""
+        just_over = datetime.now(tz=UTC) + timedelta(hours=1, seconds=5)
+        save_expiry("public.ecr.aws", just_over, credentials_file=creds_file)
+
+        _out, err = capture_console
+        check_credentials("public.ecr.aws", credentials_file=creds_file)
+
+        assert err.getvalue() == ""
+
+
+class TestListTracked:
+    """Tests for list_tracked()."""
+
+    def test_returns_empty_list_when_file_does_not_exist(self, creds_file: Path) -> None:
+        """Should return [] when credentials file does not exist."""
+        assert list_tracked(credentials_file=creds_file) == []
+
+    def test_returns_empty_list_when_no_registries(self, creds_file: Path) -> None:
+        """Should return [] when the file exists but has no registries."""
+        creds_file.parent.mkdir(parents=True, exist_ok=True)
+        creds_file.write_text("")
+
+        assert list_tracked(credentials_file=creds_file) == []
+
+    def test_returns_all_tracked_registries(self, creds_file: Path) -> None:
+        """Should return (hostname, expires_at) for every tracked registry."""
+        creds_file.parent.mkdir(parents=True, exist_ok=True)
+        content = (
+            '[registries."public.ecr.aws"]\nexpires_at = "2026-06-26T23:00:00Z"\n\n'
+            '[registries."other.registry.io"]\nexpires_at = "2026-07-01T12:00:00Z"\n'
+        )
+        creds_file.write_text(content)
+
+        result = list_tracked(credentials_file=creds_file)
+
+        assert set(result) == {
+            ("public.ecr.aws", datetime(2026, 6, 26, 23, 0, 0, tzinfo=UTC)),
+            ("other.registry.io", datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)),
+        }
+
+    def test_skips_entry_without_expires_at(self, creds_file: Path) -> None:
+        """Should skip registries that have no expires_at field."""
+        creds_file.parent.mkdir(parents=True, exist_ok=True)
+        content = (
+            '[registries."public.ecr.aws"]\nexpires_at = "2026-06-26T23:00:00Z"\n\n'
+            '[registries."no-expiry.registry.io"]\n'
+        )
+        creds_file.write_text(content)
+
+        result = list_tracked(credentials_file=creds_file)
+
+        assert result == [("public.ecr.aws", datetime(2026, 6, 26, 23, 0, 0, tzinfo=UTC))]
+
+
+class TestListOrasRegistries:
+    """Tests for list_oras_registries()."""
+
+    def test_returns_empty_list_when_file_does_not_exist(self, tmp_path: Path) -> None:
+        """Should return [] when docker config file does not exist."""
+        missing = tmp_path / "config.json"
+        assert list_oras_registries(docker_config_file=missing) == []
+
+    def test_returns_empty_list_when_no_auths_key(self, tmp_path: Path) -> None:
+        """Should return [] when the file has no 'auths' key."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(dumps({}))
+
+        assert list_oras_registries(docker_config_file=config_file) == []
+
+    def test_returns_empty_list_when_auths_empty(self, tmp_path: Path) -> None:
+        """Should return [] when 'auths' is present but empty."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(dumps({"auths": {}}))
+
+        assert list_oras_registries(docker_config_file=config_file) == []
+
+    def test_returns_hostnames_from_auths(self, tmp_path: Path) -> None:
+        """Should return the list of hostnames present in 'auths'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            dumps(
+                {
+                    "auths": {
+                        "public.ecr.aws": {"auth": "dGVzdA=="},
+                        "other.registry.io": {"auth": "b3RoZXI="},
+                    }
+                }
+            )
+        )
+
+        result = list_oras_registries(docker_config_file=config_file)
+
+        assert set(result) == {"public.ecr.aws", "other.registry.io"}
+
+    def test_returns_empty_list_on_malformed_json(self, tmp_path: Path) -> None:
+        """Should return [] without raising when the file has malformed JSON."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text("{not valid json")
+
+        result = list_oras_registries(docker_config_file=config_file)
+
+        assert result == []
+
+    def test_defaults_to_docker_config_file_constant(self, mocker) -> None:
+        """Should default to DOCKER_CONFIG_FILE when no path is given."""
+        mocker.patch.object(creds_module, "DOCKER_CONFIG_FILE", mocker.MagicMock(exists=lambda: False))
+
+        result = list_oras_registries()
+
+        assert result == []
+
+
+class TestRemoveDockerConfigEntry:
+    """Tests for remove_docker_config_entry()."""
+
+    def test_noop_when_file_does_not_exist(self, tmp_path: Path) -> None:
+        """Should not raise when the docker config file doesn't exist."""
+        missing = tmp_path / "config.json"
+        remove_docker_config_entry("public.ecr.aws", config_file=missing)
+        assert not missing.exists()
+
+    def test_noop_when_hostname_not_in_auths(self, tmp_path: Path) -> None:
+        """Should leave the file untouched when the hostname isn't present."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(dumps({"auths": {"other.registry.io": {"auth": "b3RoZXI="}}}))
+
+        remove_docker_config_entry("public.ecr.aws", config_file=config_file)
+
+        data = loads(config_file.read_text())
+        assert data["auths"] == {"other.registry.io": {"auth": "b3RoZXI="}}
+
+    def test_removes_only_target_hostname_entry(self, tmp_path: Path) -> None:
+        """Should remove only the target registry, keeping other auths intact."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            dumps(
+                {
+                    "auths": {
+                        "public.ecr.aws": {"auth": "dGVzdA=="},
+                        "other.registry.io": {"auth": "b3RoZXI="},
+                    }
+                }
+            )
+        )
+
+        remove_docker_config_entry("public.ecr.aws", config_file=config_file)
+
+        data = loads(config_file.read_text())
+        assert data["auths"] == {"other.registry.io": {"auth": "b3RoZXI="}}
+
+    def test_removes_last_entry_leaves_empty_auths(self, tmp_path: Path) -> None:
+        """Should leave an empty 'auths' object when removing the only entry."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(dumps({"auths": {"public.ecr.aws": {"auth": "dGVzdA=="}}}))
+
+        remove_docker_config_entry("public.ecr.aws", config_file=config_file)
+
+        data = loads(config_file.read_text())
+        assert data["auths"] == {}
+
+    def test_preserves_other_top_level_keys(self, tmp_path: Path) -> None:
+        """Should preserve credsStore/credHelpers and other top-level keys."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            dumps(
+                {
+                    "auths": {"public.ecr.aws": {"auth": "dGVzdA=="}},
+                    "credsStore": "desktop",
+                    "credHelpers": {"other.registry.io": "ecr-login"},
+                }
+            )
+        )
+
+        remove_docker_config_entry("public.ecr.aws", config_file=config_file)
+
+        data = loads(config_file.read_text())
+        assert data["credsStore"] == "desktop"
+        assert data["credHelpers"] == {"other.registry.io": "ecr-login"}
+        assert data["auths"] == {}
+
+    def test_noop_when_malformed_json(self, tmp_path: Path) -> None:
+        """Should not raise when the file contains malformed JSON."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text("{not valid json")
+
+        remove_docker_config_entry("public.ecr.aws", config_file=config_file)
+
+        # File left untouched, not corrupted further
+        assert config_file.read_text() == "{not valid json"
+
+    def test_removes_localhost_variants(self, tmp_path: Path) -> None:
+        """Should also remove localhost-style variants of the hostname (port-suffixed)."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            dumps(
+                {
+                    "auths": {
+                        "localhost:5000": {"auth": "dGVzdA=="},
+                        "other.registry.io": {"auth": "b3RoZXI="},
+                    }
+                }
+            )
+        )
+
+        remove_docker_config_entry("localhost:5000", config_file=config_file)
+
+        data = loads(config_file.read_text())
+        assert "localhost:5000" not in data["auths"]
+        assert data["auths"] == {"other.registry.io": {"auth": "b3RoZXI="}}
+
+    def test_defaults_to_docker_config_file_constant(self, mocker) -> None:
+        """Should default to DOCKER_CONFIG_FILE when no path is given."""
+        mocker.patch.object(creds_module, "DOCKER_CONFIG_FILE", mocker.MagicMock(exists=lambda: False))
+
+        remove_docker_config_entry("public.ecr.aws")
+        # No exception raised — confirms the default constant path is used

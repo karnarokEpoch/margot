@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 from margot import console
-from margot.domain.auth import parse_token_expiry
+from margot.domain.auth import AuthStatusResult, TrackedRegistryStatus, classify_expiry, parse_token_expiry
 from margot.infra import credentials as creds_infra
 from margot.infra import oci
 
@@ -59,3 +59,35 @@ def logout(registry: str) -> None:
     client.logout(hostname=registry)
     creds_infra.remove_expiry(registry)
     console.info("Logout complete.")
+
+
+def auth_status() -> AuthStatusResult:
+    """Report credential status for all tracked and detected OCI registries.
+
+    Steps:
+    1. Read margot's tracked registries (with expiry) from the credentials file.
+    2. Read registries known to the oras-py/Docker credential store.
+    3. Classify each tracked registry as VALID/EXPIRING/EXPIRED.
+    4. Registries present only in the oras-py store (not margot-tracked) are
+       reported separately, with expiry unknown.
+    """
+    console.info("Checking credential status for tracked registries.")
+    tracked_raw = creds_infra.list_tracked()
+    oras_hosts = creds_infra.list_oras_registries()
+
+    now = datetime.now(tz=UTC)
+    tracked = [
+        TrackedRegistryStatus(
+            hostname=hostname,
+            expires_at=expires_at,
+            remaining=expires_at - now,
+            status=classify_expiry(expires_at, now=now),
+        )
+        for hostname, expires_at in tracked_raw
+    ]
+
+    tracked_hostnames = {t.hostname for t in tracked}
+    oras_only = [hostname for hostname in oras_hosts if hostname not in tracked_hostnames]
+
+    console.info("Credential status check complete.")
+    return AuthStatusResult(tracked=tracked, oras_only=oras_only)

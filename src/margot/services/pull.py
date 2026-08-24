@@ -12,7 +12,7 @@ from margot.domain.models import (
     artifact_type_to_package_type,
 )
 from margot.domain.uri import extract_tag, validate_semver_tag
-from margot.infra import oci
+from margot.infra import credentials, oci
 
 _PAYLOAD_MEDIA_TYPES: dict[PackageType, str] = {
     PackageType.COMPOSE: COMPOSE_LAYER_MEDIA_TYPE,
@@ -92,6 +92,7 @@ def pull_artifact(
         ValueError: If tag is not valid SemVer and force=False.
         ValueError: If compose/quadlet artifact has no matching layers.
         ValueError: If artifact type is unknown and force=False.
+        CredentialsExpiredError: If credentials for the registry have expired.
         Exception: If pull or manifest fetch fails.
     """
     uri_domain.validate_uri(uri)
@@ -105,7 +106,11 @@ def pull_artifact(
     Path(outdir).mkdir(parents=True, exist_ok=True)
     console.info(f"Output directory ready: {outdir}")
 
-    client = oci.OrasClient()
+    hostname = uri_domain.extract_hostname(uri)
+    console.info(f"Checking credentials for {hostname}")
+    credentials.check_credentials(hostname)
+
+    client = oci.OrasClient(hostname=hostname)
     manifest: dict[str, Any] = client.get_manifest(uri)
     console.info("Manifest fetched.")
 

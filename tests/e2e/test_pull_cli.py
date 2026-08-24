@@ -67,6 +67,7 @@ class TestPullCLI:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -82,6 +83,7 @@ class TestPullCLI:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--output", outdir])
@@ -94,6 +96,7 @@ class TestPullCLI:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.side_effect = Exception("Registry unavailable")
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -128,6 +131,7 @@ class TestPullCLIForce:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:latest", "--force"])
@@ -166,6 +170,7 @@ class TestPullCLIForce:
             return outfile
 
         mock_client.download_blob.side_effect = _fake_download
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(
@@ -207,6 +212,7 @@ class TestPullCLIForce:
             return outfile
 
         mock_client.download_blob.side_effect = _fake_download
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(
@@ -234,6 +240,7 @@ class TestPullCLIForce:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force", "--output", outdir])
@@ -257,6 +264,7 @@ class TestPullCLIForce:
         }
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = unknown_manifest
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -276,6 +284,7 @@ class TestPullCLIVerbosity:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["--verbose", "pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -294,6 +303,7 @@ class TestPullCLIVerbosity:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["-v", "pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -331,6 +341,7 @@ class TestPullCLIVerbosity:
             return outfile
 
         mock_client.download_blob.side_effect = _fake_download
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["--debug", "pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--output", str(tmp_path)])
@@ -369,6 +380,7 @@ class TestPullCLIVerbosity:
             return outfile
 
         mock_client.download_blob.side_effect = _fake_download
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["-d", "pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--output", str(tmp_path)])
@@ -384,6 +396,7 @@ class TestPullCLIVerbosity:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -398,6 +411,7 @@ class TestPullCLIVerbosity:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(app, ["--verbose", "pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
@@ -421,6 +435,7 @@ class TestPullCLIVerbosity:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
         mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
         result = runner.invoke(
