@@ -461,32 +461,58 @@ No table, no filtering — display whatever the registry returns.
 
 ### `margot verify`
 
-Validate the margo application description and optionally check published artifacts.
+Validate the Margo **application description** (`app.yaml`, or `app.yaml.jinja` when the
+project templates it) against the upstream Margo spec LinkML schema, and optionally
+against margot's curated recommended schema.
+
+`margo.yaml` is not validated by this command — it is margot's build anchor, not a Margo
+spec document.
 
 ```
-margot verify [--manifest PATH] [--schema PATH]
-                [--remote] [--version VERSION]
-                [--registry REG] [--repository REPO]
+margot verify [--project-dir PATH] [--manifest PATH]
+              [--schema PATH] [--recommended-schema PATH]
+              [--recommend] [--strict] [--deep]
 ```
 
-**Local validation (always runs):**
+**Manifest resolution:**
 
-1. Load `margo.yaml` (default: `margo/margo.yaml` or configurable)
-2. Load LinkML schema (default: `margo-spec.yaml` alongside manifest)
-3. Validate with `linkml.validator` using:
+1. `--manifest` if given — may point at an `app.yaml` or an `app.yaml.jinja`.
+2. Otherwise `margo.yaml` is loaded from `--project-dir` (default `.`) and its
+   `directory` field is searched for `app.yaml.jinja`, then `app.yaml`. Both present is an
+   error; neither present is an error.
+3. A `.jinja` descriptor is rendered to a **temporary file** with the same context and
+   `StrictUndefined` behavior `build` uses, and the rendered file is what gets validated.
+   `verify` never reads `<build_dir>` and never requires a prior `build`.
+
+**Schema A — upstream Margo spec (always runs):**
+
+1. Vendored at `src/margot/schemas/application-description.linkml.yaml`, pinned to an
+   upstream commit (the spec is still draft). Overridable with `--schema`.
+2. Validate with `linkml.validator` using:
    - `JsonschemaValidationPlugin(closed=True)` — no unexpected fields
    - `RecommendedSlotsPlugin()` — warns on missing recommended fields
    - `MaximumCardinalityPlugin` — enforce cardinality constraints
-4. Format errors using the existing `format_validation_error` pattern
-5. Exit code 0 = valid, 1 = validation errors
+3. Any error fails the run (exit 1).
+4. The pinned draft commit is always printed, so results are never mistaken for
+   validation against a stable spec.
 
-**Remote check (`--remote` flag):**
+**Schema B — margot recommended (`--recommend`):**
 
-- Call `oras manifest fetch` for each referenced component tag in the manifest
-- Verify each referenced OCI tag is reachable and has the expected artifact type
-- Report any 404 / wrong type as errors
+- Vendored at `src/margot/schemas/margo-recommended.linkml.yaml`, overridable with
+  `--recommended-schema`. Not loaded or run at all without `--recommend`.
+- Default: a lint pass — findings are reported, exit code unaffected.
+- With `--strict`: a contract — any finding fails the run (exit 1).
+- When both schemas run, findings are printed under separate labeled sections.
 
-**Output:** rich table of results per check (PASS / WARN / FAIL with details).
+**Output:** plain CI-check-style pass/fail lines by default. `--deep` adds rich tables for
+findings plus Application / Deployment profiles / Parameters panels rendered from the
+parsed descriptor (parameters are joined with `configuration.schema` via
+`configuration.sections[].settings[]` to show data types and constraints).
+
+Exit codes: 0 = passed, 1 = any error.
+
+**Remote artifact reachability (`--remote`)** is backlog, not implemented — see
+`ROADMAP.md`.
 
 ---
 
@@ -509,6 +535,7 @@ margot/
         ├── domain/                  # pure logic — zero I/O, zero framework imports
         │   ├── tags.py              # semver validation
         │   ├── metadata.py          # margo.yaml dataclasses + parser
+        │   ├── validation.py        # ValidationFinding, VerifyResult, --deep display models
         │   └── models.py            # PackageType enum, BuildTarget, etc.
         │
         ├── services/                # business logic — orchestrates domain + infra
@@ -516,13 +543,18 @@ margot/
         │   ├── push.py              # push flow (credential check → oci.push)
         │   ├── pull.py
         │   ├── fetch.py
-        │   ├── verify.py            # linkml validation + optional remote check
+        │   ├── verify.py            # descriptor resolution + linkml validation
         │   └── auth.py              # login/logout orchestration
         │
         ├── infra/                   # I/O adapters — no business logic
         │   ├── oci.py               # oras-py wrapper (push/pull/fetch/login/logout)
         │   ├── credentials.py       # ~/.config/margot/credentials.toml R/W
-        │   └── filesystem.py        # tree copy, placeholder substitution, tar helpers
+        │   ├── templating.py        # app.yaml.jinja rendering (shared by build + verify)
+        │   └── filesystem.py        # tree copy, placeholder substitution, tar, yaml, temp files
+        │
+        ├── schemas/                 # vendored LinkML schemas (data, not code)
+        │   ├── application-description.linkml.yaml   # upstream Margo spec, pinned commit
+        │   └── margo-recommended.linkml.yaml         # margot curated recommendations
         │
         ├── commands/                # CLI layer — parse args, call service, render output
         │   ├── build.py
@@ -533,8 +565,8 @@ margot/
         │   └── auth.py              # margot auth {login,logout,status}
         │
         └── validation/              # linkml-specific, called by services/verify.py
-            ├── linkml_runner.py
-            ├── error_formatter.py
+            ├── linkml_runner.py     # only module allowed to import linkml
+            ├── error_formatter.py   # findings → plain strings / row tuples
             └── max_cardinality.py
 ```
 
@@ -542,11 +574,11 @@ margot/
 
 | Layer | Rule | Imports |
 |---|---|---|
-| `commands/` | Parse args, call one service, render output. No logic. | `services/`, `config` |
+| `commands/` | Parse args, call one service, render output. No logic, no I/O. | `services/`, `config` |
 | `services/` | Orchestrate the feature flow. No CLI, no rich output. | `domain/`, `infra/`, `validation/` |
 | `domain/` | Pure functions and dataclasses. Raise `ValueError` on bad input. | stdlib only |
-| `infra/` | All I/O (filesystem, OCI, ECR, credentials file). | `domain/`, stdlib, third-party |
-| `validation/` | LinkML runner and formatters. | `domain/`, `infra/` |
+| `infra/` | All I/O (filesystem, OCI, ECR, credentials file, templating). | `domain/`, stdlib, third-party |
+| `validation/` | LinkML runner and formatters. Returns data, never `rich` objects. | `domain/`, `infra/` |
 
 ---
 
