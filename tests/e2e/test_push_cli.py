@@ -164,14 +164,14 @@ class TestPushCLI:
         """Should exit 1 with error message when service raises ValueError."""
         mocker.patch(
             "margot.commands.push.push_service.push",
-            side_effect=ValueError("margo component not defined in margo.yaml"),
+            side_effect=ValueError("Built margo artifact not found"),
         )
 
         result = runner.invoke(app, ["push", "--type", "margo"])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
         assert result.exit_code == 1
-        assert "margo component not defined" in plain
+        assert "Built margo artifact not found" in plain
 
     def test_push_service_exception_exits_1(self, mocker: Any) -> None:
         """Should exit 1 with 'Push failed' when service raises unexpected exception."""

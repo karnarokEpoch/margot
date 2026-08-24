@@ -21,7 +21,7 @@ class VariantConfig:
     """Configuration for a single variant."""
 
     name: str
-    version: str  # OCI tag as stored (may contain '_')
+    version: str | None = None  # OCI tag as stored (may contain '_')
     component: str | None = None
     image: ImageConfig | None = None
 
@@ -46,11 +46,11 @@ class MargoYaml:
     name: str
     description: str
     app_version: str | None  # appVersion field (optional, not validated)
+    version: str
     annotations: dict[str, str]  # optional, default empty dict
-    margo: ComponentConfig | None
     compose: ComponentConfig | None
     quadlet: ComponentConfig | None
-    version: str | None = None
+    directory: str = "margo"
     author: list = field(default_factory=list)
     organization: list = field(default_factory=list)
     repository: str | None = None  # global OCI repository base, used as fallback when component has no repository
@@ -81,22 +81,23 @@ def load_margo_yaml(path: str) -> MargoYaml:
     if not isinstance(raw, dict):
         raise ValueError("margo.yaml is not valid YAML: expected mapping at root")  # noqa: TRY004
 
-    required_fields = ["apiVersion", "id", "name", "description"]
+    required_fields = ["apiVersion", "id", "name", "description", "version"]
     for required_field in required_fields:
         if required_field not in raw:
             raise ValueError(f"margo.yaml missing required field: {required_field}")
 
+    directory = raw.get("directory") or "margo"
     return MargoYaml(
         api_version=raw["apiVersion"],
         id=raw["id"],
         name=raw["name"],
         description=raw["description"],
+        version=raw["version"],
         app_version=raw.get("appVersion"),
         annotations=raw.get("annotations", {}) or {},
-        margo=_parse_component(raw.get("margo"), "margo"),
         compose=_parse_component(raw.get("compose"), "compose"),
         quadlet=_parse_component(raw.get("quadlet"), "quadlet"),
-        version=raw.get("version"),
+        directory=directory,
         author=raw.get("author") or [],
         organization=raw.get("organization") or [],
         repository=raw.get("repository"),
@@ -140,14 +141,12 @@ def _parse_component(component_data: object, component_name: str) -> ComponentCo
             raise ValueError(  # noqa: TRY004
                 f"margo.yaml is not valid YAML: '{component_name}' variant item must be a mapping"
             )
-        if "name" not in variant_item or "version" not in variant_item:
-            raise ValueError(
-                f"margo.yaml is not valid YAML: '{component_name}' variant missing required field 'name' or 'version'"
-            )
+        if "name" not in variant_item:
+            raise ValueError(f"margo.yaml is not valid YAML: '{component_name}' variant missing required field 'name'")
         variants.append(
             VariantConfig(
                 name=variant_item["name"],
-                version=variant_item["version"],
+                version=variant_item.get("version"),
                 component=variant_item.get("component"),
                 image=_parse_image(variant_item.get("image")),
             )
@@ -171,19 +170,17 @@ def build_jinja2_context(meta: MargoYaml, global_repository: str | None = None) 
     manifest: dict[str, object] = {
         "id": meta.id,
         "name": meta.name,
-        "version": meta.version or "",
+        "version": meta.version,
         "appVersion": meta.app_version or "",
         "description": meta.description,
+        "directory": meta.directory,
+        "repository": meta.repository or global_repository or "",
         "annotations": meta.annotations,
         "author": meta.author,
         "organization": meta.organization,
     }
 
-    for component_type, component in (
-        ("margo", meta.margo),
-        ("compose", meta.compose),
-        ("quadlet", meta.quadlet),
-    ):
+    for component_type, component in (("compose", meta.compose), ("quadlet", meta.quadlet)):
         manifest[component_type] = _build_component_context(meta, component_type, component, global_repository)
 
     return {"manifest": manifest}
@@ -211,23 +208,28 @@ def _build_component_context(
         "variants": [],
     }
 
-    variants = component.variants if component_type != "margo" else ()
-    if not variants:
-        variants = (VariantConfig(name=meta.name, version=version),)
+    is_flat = not component.variants
+    variants = component.variants or (VariantConfig(name=meta.name, version=version),)
 
     variant_contexts: list[dict[str, str]] = []
     for variant in variants:
-        variant_tag = variant.version.replace("+", "_")
+        variant_version = variant.version or f"{version}+{component_type}-{variant.name}"
+        variant_tag = variant_version.replace("+", "_")
+        variant_component = variant.component or (
+            f"{meta.id}-{component_type}" if is_flat else f"{meta.id}-{component_type}-{variant.name}"
+        )
         variant_context = {
             "name": variant.name,
-            "version": variant.version,
+            "version": variant_version,
             "tag": variant_tag,
             "repository": repository,
             "ref": f"{repository}:{variant_tag}" if repository and variant_tag else "",
-            "component": variant.component or f"{meta.id}-{component_type}-{variant.name}",
+            "component": variant_component,
         }
         variant_contexts.append(variant_context)
         component_context[variant.name] = variant_context
 
     component_context["variants"] = variant_contexts
+    if is_flat:
+        component_context["component"] = f"{meta.id}-{component_type}"
     return component_context

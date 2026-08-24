@@ -7,7 +7,7 @@ from tempfile import mkdtemp
 from jinja2 import Environment, StrictUndefined, UndefinedError
 
 from margot import console
-from margot.domain.metadata import ComponentConfig, MargoYaml, build_jinja2_context, load_margo_yaml
+from margot.domain.metadata import ComponentConfig, ImageConfig, MargoYaml, build_jinja2_context, load_margo_yaml
 from margot.domain.models import BuildTarget, PackageType
 from margot.domain.tags import validate_oci_tag, validate_semver
 from margot.infra.filesystem import copy_tree, make_tarball, substitute_placeholders
@@ -53,15 +53,8 @@ def _build_all(
     version_override: str | None,
     placeholders: dict[str, str],
 ) -> list[BuildTarget]:
-    """Build all components, skipping any not defined in margo.yaml."""
-    targets: list[BuildTarget] = []
-    try:
-        targets.append(_build_margo(meta, project_dir, build_dir, version_override))
-    except ValueError as e:
-        if "not defined in margo.yaml" in str(e):
-            console.info("Skipping margo: not defined in margo.yaml")
-        else:
-            raise
+    """Build all defined components, always including the margo artifact."""
+    targets: list[BuildTarget] = [_build_margo(meta, project_dir, build_dir, version_override)]
 
     for component_type in (PackageType.COMPOSE, PackageType.QUADLET):
         try:
@@ -78,7 +71,7 @@ def _build_all(
 
 def _build_placeholder_map(meta: MargoYaml, version_override: str | None) -> dict[str, str]:
     """Build the supported compose/quadlet placeholder substitutions."""
-    margo_version = version_override or (meta.margo.version if meta.margo else "") or ""
+    margo_version = version_override or meta.version or ""
     compose_version = (
         version_override or (meta.compose.version or (meta.compose.variants[0].version if meta.compose.variants else ""))
         if meta.compose
@@ -105,17 +98,12 @@ def _build_margo(
     version_override: str | None,
 ) -> BuildTarget:
     """Build the margo component, rendering an optional app.yaml.jinja descriptor."""
-    if meta.margo is None:
-        raise ValueError("margo component not defined in margo.yaml")
-
-    version = version_override or meta.margo.version
-    if version is None:
-        raise ValueError("margo version not specified and no version_override provided")
+    version = version_override or meta.version
     validate_oci_tag(version)
     validate_semver(version)
     console.info(f"Building margo: version {version}")
 
-    source_dir = str(Path(project_dir) / meta.margo.directory)
+    source_dir = str(Path(project_dir) / meta.directory)
     output_dir = str(Path(build_dir) / version / "margo")
     copy_tree(source_dir, output_dir)
 
@@ -186,7 +174,7 @@ def _build_flat_component(  # noqa: PLR0913
     source_dir = str(Path(project_dir) / component.directory)
     output_dir = str(Path(build_dir) / version)
     output_path = str(Path(output_dir) / f"{meta.name}-{version}.tgz")
-    image_pair = (component.image.search, component.image.replace) if component.image else None
+    image_pair = _render_image_pair(meta, component.image)
     tmp_parent = mkdtemp()
     tmp_dir = str(Path(tmp_parent) / "content")
     try:
@@ -197,6 +185,19 @@ def _build_flat_component(  # noqa: PLR0913
     finally:
         rmtree(tmp_parent, ignore_errors=True)
     return [BuildTarget(component_type, None, version, source_dir, output_dir, output_path)]
+
+
+def _render_image_pair(meta: MargoYaml, image: ImageConfig | None) -> tuple[str, str] | None:
+    """Render an optional image replacement template with the manifest context."""
+    if image is None:
+        return None
+    try:
+        rendered_replace = Environment(undefined=StrictUndefined).from_string(image.replace).render(  # noqa: S701
+            build_jinja2_context(meta, global_repository=meta.repository)
+        )
+    except UndefinedError as e:
+        raise ValueError(f"Unresolved Jinja2 variable in image.replace: {e}") from e
+    return image.search, rendered_replace
 
 
 def _build_variant_component(  # noqa: PLR0913
@@ -221,6 +222,13 @@ def _build_variant_component(  # noqa: PLR0913
     targets: list[BuildTarget] = []
     for current_variant in variants_to_build:
         version = version_override or current_variant.version
+        if version is None:
+            if component.version is None:
+                raise ValueError(
+                    f"{component_name} base version is required when variant '{current_variant.name}' omits version"
+                )
+            version = f"{component.version}+{component_type.value}-{current_variant.name}"
+        version = version.replace("+", "_")
         validate_oci_tag(version)
         validate_semver(version)
         console.info(f"Building {component_name} variant '{current_variant.name}': version {version}")
@@ -228,7 +236,7 @@ def _build_variant_component(  # noqa: PLR0913
         output_dir = str(Path(build_dir) / version)
         output_path = str(Path(output_dir) / f"{meta.name}-{version}.tgz")
         effective_image = current_variant.image if current_variant.image is not None else component.image
-        image_pair = (effective_image.search, effective_image.replace) if effective_image else None
+        image_pair = _render_image_pair(meta, effective_image)
         tmp_parent = mkdtemp()
         tmp_dir = str(Path(tmp_parent) / "content")
         try:

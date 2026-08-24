@@ -32,10 +32,8 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
-  repository: public.ecr.aws/g2n4p2m7/margo-app
+version: 1.0.0
+repository: public.ecr.aws/g2n4p2m7/margo-app
 compose:
   directory: compose
   repository: public.ecr.aws/g2n4p2m7/margo-compose
@@ -132,6 +130,7 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
+version: 1.0.0
 compose:
   directory: compose
   version: 1.0.0
@@ -267,10 +266,8 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
-  repository: public.ecr.aws/g2n4p2m7/margo-app
+version: 1.0.0
+repository: public.ecr.aws/g2n4p2m7/margo-app
 """
         (tmp_path / "margo.yaml").write_text(margo_yaml_content)
         # No .dist directory — artifact does not exist
@@ -305,10 +302,8 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: not-semver
-  repository: public.ecr.aws/g2n4p2m7/margo-app
+version: not-semver
+repository: public.ecr.aws/g2n4p2m7/margo-app
 """
         (tmp_path / "margo.yaml").write_text(margo_yaml_content)
 
@@ -333,9 +328,7 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
+version: 1.0.0
 """
         (tmp_path / "margo.yaml").write_text(margo_yaml_content)
 
@@ -389,10 +382,8 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
-  repository: public.ecr.aws/g2n4p2m7/margo-app
+version: 1.0.0
+repository: public.ecr.aws/g2n4p2m7/margo-app
 compose:
   directory: compose
   version: 1.0.0
@@ -441,9 +432,7 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
+version: 1.0.0
 """
         (tmp_path / "margo.yaml").write_text(margo_yaml_content)
         dist = tmp_path / ".dist" / "1.0.0" / "margo"
@@ -467,9 +456,7 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
+version: 1.0.0
 """
         (tmp_path / "margo.yaml").write_text(margo_yaml_content)
         dist = tmp_path / ".dist" / "1.0.0" / "margo"
@@ -486,19 +473,15 @@ margo:
                 repository="org/repo",
             )
 
-    def test_push_with_cli_registry_and_component_repo_uses_component_path(
-        self, mocker: Any, tmp_path: Path
-    ) -> None:
+    def test_push_with_cli_registry_and_component_repo_uses_component_path(self, mocker: Any, tmp_path: Path) -> None:
         """Should use CLI registry + component repository path when only --registry given."""
         margo_yaml_content = """\
 apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
-  repository: public.ecr.aws/g2n4p2m7/margo-app
+version: 1.0.0
+repository: public.ecr.aws/g2n4p2m7/margo-app
 """
         (tmp_path / "margo.yaml").write_text(margo_yaml_content)
         dist = tmp_path / ".dist" / "1.0.0" / "margo"
@@ -520,19 +503,15 @@ margo:
         assert call_kwargs["registry"] == "custom.registry.io"
         assert call_kwargs["repository"] == "g2n4p2m7/margo-app"
 
-    def test_push_with_cli_repository_and_component_repo_uses_component_registry(
-        self, mocker: Any, tmp_path: Path
-    ) -> None:
+    def test_push_with_cli_repository_and_component_repo_uses_component_registry(self, mocker: Any, tmp_path: Path) -> None:
         """Should use component registry + CLI repository when only --repository given."""
         margo_yaml_content = """\
 apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
-  repository: public.ecr.aws/g2n4p2m7/margo-app
+version: 1.0.0
+repository: public.ecr.aws/g2n4p2m7/margo-app
 """
         (tmp_path / "margo.yaml").write_text(margo_yaml_content)
         dist = tmp_path / ".dist" / "1.0.0" / "margo"
@@ -565,10 +544,8 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
-  repository: noslash
+version: 1.0.0
+repository: noslash
 """
         (tmp_path / "margo.yaml").write_text(margo_yaml_content)
         dist = tmp_path / ".dist" / "1.0.0" / "margo"
@@ -578,32 +555,6 @@ margo:
         mocker.patch("margot.services.push.credentials.check_credentials")
 
         with raises(ValueError, match="Cannot parse"):
-            push.push(
-                PackageType.MARGO,
-                project_dir=str(tmp_path),
-                build_dir=str(tmp_path / ".dist"),
-            )
-
-
-class TestPushMargoVersionNone:
-    """Tests for _push_margo version None (line 178)."""
-
-    def test_push_margo_raises_when_version_not_specified(self, mocker: Any, tmp_path: Path) -> None:
-        """Should raise ValueError when margo version is None."""
-        margo_yaml_content = """\
-apiVersion: v1
-id: testapp
-name: testapp
-description: Test application
-margo:
-  directory: margo
-  repository: public.ecr.aws/g2n4p2m7/margo-app
-"""
-        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
-
-        mocker.patch("margot.services.push.credentials.check_credentials")
-
-        with raises(ValueError, match="version not specified"):
             push.push(
                 PackageType.MARGO,
                 project_dir=str(tmp_path),
@@ -621,6 +572,7 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
+version: 1.0.0
 compose:
   directory: compose
   version: 1.0.0
@@ -645,6 +597,7 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
+version: 1.0.0
 compose:
   directory: compose
   repository: public.ecr.aws/g2n4p2m7/margo-compose
@@ -671,6 +624,7 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
+version: 1.0.0
 compose:
   directory: compose
   version: 1.0.0
@@ -724,6 +678,7 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
+version: 1.0.0
 quadlet:
   directory: quadlet
   version: 1.0.0
@@ -750,41 +705,6 @@ quadlet:
         mock_client.push_quadlet.assert_called_once()
 
 
-class TestPushAllSkipsMargo:
-    """Test _push_all skipping margo when not defined."""
-
-    def test_push_all_skips_undefined_margo(self, mocker: Any, tmp_path: Path) -> None:
-        """Should skip margo when not defined; return only compose/quadlet targets."""
-        margo_yaml_content = """\
-apiVersion: v1
-id: testapp
-name: testapp
-description: Test application
-compose:
-  directory: compose
-  version: 1.0.0
-  repository: public.ecr.aws/g2n4p2m7/margo-compose
-"""
-        (tmp_path / "margo.yaml").write_text(margo_yaml_content)
-        dist = tmp_path / ".dist" / "1.0.0"
-        dist.mkdir(parents=True)
-        (dist / "testapp-1.0.0.tgz").write_bytes(b"fake")
-
-        mocker.patch("margot.services.push.credentials.check_credentials")
-        mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
-
-        targets = push.push(
-            PackageType.ALL,
-            project_dir=str(tmp_path),
-            build_dir=str(tmp_path / ".dist"),
-        )
-
-        package_types = [t.package_type for t in targets]
-        assert PackageType.MARGO not in package_types
-        assert PackageType.COMPOSE in package_types
-
-
 class TestPushAllSkipsCompose:
     """Test _push_all skipping compose when not defined (line 90)."""
 
@@ -795,10 +715,8 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
-  repository: public.ecr.aws/g2n4p2m7/margo-app
+version: 1.0.0
+repository: public.ecr.aws/g2n4p2m7/margo-app
 quadlet:
   directory: quadlet
   version: 1.0.0
@@ -837,6 +755,7 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
+version: 1.0.0
 compose:
   directory: compose
   version: 1.0.0
@@ -877,6 +796,7 @@ apiVersion: v1
 id: testapp
 name: testapp
 description: Test application
+version: 1.0.0
 compose:
   directory: compose
   repository: public.ecr.aws/g2n4p2m7/margo-compose

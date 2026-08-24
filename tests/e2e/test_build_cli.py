@@ -35,9 +35,7 @@ def cli_project(tmp_path: Path, monkeypatch: Any) -> Path:
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
+version: 1.0.0
 compose:
   directory: compose
   variants:
@@ -249,9 +247,7 @@ def cli_project_partial(tmp_path: Path, monkeypatch: Any) -> Path:
 id: testapp
 name: testapp
 description: Test application
-margo:
-  directory: margo
-  version: 1.0.0
+version: 1.0.0
 quadlet:
   directory: quadlet
   variants:
