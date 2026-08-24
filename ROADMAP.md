@@ -16,9 +16,8 @@ sequencing; FEATURES.md is updated as items land (see backlog).
 **Goal:** Ship a complete `margot verify` command: local-only LinkML validation of the
 Margo application description (`app.yaml`, or `app.yaml.jinja` rendered to a temp file)
 against the upstream Margo spec schema (always-on) and an opt-in (`--recommend`)
-margot-curated recommended schema, plus an opt-in (`--deep`) structured rich display of
-the full descriptor state. Default output (no flags) is plain CI-check-style pass/fail.
-Remote artifact reachability checking is descoped to the backlog (see Backlog → Remaining
+margot-curated recommended schema. Output is plain CI-check-style pass/fail. Remote
+artifact reachability checking is descoped to the backlog (see Backlog → Remaining
 commands above).
 
 **Prerequisite:** Sprint 5 is merged (✅ complete — see Completed Sprints below). `id`
@@ -26,12 +25,11 @@ field is in `margo.yaml`, `domain/metadata.py` is final, and the Jinja2 build pa
 stable.
 
 **Full plan:** see [`.kiro/sprints/sprint-6.md`](.kiro/sprints/sprint-6.md) — background
-on the two LinkML schemas, all five scope items (validation infra, vendored schemas,
-`services/verify.py`, parameter inspection display, CLI wiring), layering/output rules,
-definition of done, and locked decisions. Ships in **4 phases, one PR and one commit
-each**: (1) Schema A vendored + minimal `verify` command against it, (2) `--deep` display +
-full CLI flags, (3) author Schema B + wire `--recommend`, (4) polish/DoD closure. Key
-locked decisions:
+on the two LinkML schemas, all four scope items (validation infra, vendored schemas,
+`services/verify.py`, CLI wiring), layering/output rules, definition of done, and locked
+decisions. Ships in **3 phases, one PR and one commit each**: (1) Schema A vendored +
+`verify` command against it, (2) author Schema B + wire `--recommend`, (3) polish/DoD
+closure. Key locked decisions:
 
 * The command verifies the **application description** (`app.yaml` / `app.yaml.jinja`),
   not `margo.yaml`. Templated descriptors are rendered to a temp file with the same
@@ -43,20 +41,51 @@ locked decisions:
   contract with `--strict` (any finding exits 1).
 * `verify` is local-only this sprint — no `--remote`, no network calls. Remote
   reachability check is backlog (see above).
-* Default output is plain pass/fail (CI-check style). `--deep` enables the rich panel
-  display (Application / Deployment profiles / Parameters — no `quadlet` profile type
-  exists in the Margo spec).
+* Output is plain pass/fail lines only — no tables, no panels, no `--deep`. The structured
+  visual view became its own command, `margot describe` (Sprint 7).
 * Vendored Schema A file states its pinned commit and that the Margo spec is still
   draft; `verify` prints this by default so results aren't mistaken for a stable-spec check.
-* Parameters panel reads the top-level `parameters` map (confirmed against the upstream
-  schema, not `deploymentProfiles[].parameters`), joined with `configuration.schema` via
-  `configuration.sections[].settings[]` for constraints.
+* Descriptor resolution (find → render → load) ships as a standalone reusable function —
+  `describe` calls it unchanged in Sprint 7.
 * No example/golden `app.yaml` is shipped this sprint — users act on the warnings and
   errors `verify` reports.
 
 ---
 
-## Backlog / Stack (Sprint 7+)
+### Sprint 7 — `margot describe`
+
+**Goal:** Ship `margot describe`: a read-only, purely visual view of the Margo application
+description — rich panels, trees and tables organizing the raw descriptor for human
+review. The spirit of `kubectl describe`, rendered with boxes rather than flat text.
+
+**Prerequisite:** Sprint 6 merged — `describe` reuses its descriptor resolution function
+and `infra/templating.py` unchanged.
+
+**Full plan:** see [`.kiro/sprints/sprint-7.md`](.kiro/sprints/sprint-7.md). Key locked
+decisions:
+
+* Split out of `verify`'s original `--deep` flag: `verify` answers "is this shippable?"
+  (plain lines, exit code, CI), `describe` answers "what is in here?" (visual, exit 0).
+* No `--check` flag and no `linkml` in this command's path — `describe` never validates.
+* No `--json` / `--yaml` / plain-text mode. Visual output only.
+* Refuses rather than degrades: missing descriptor, both `app.yaml` and `app.yaml.jinja`
+  present, unresolved Jinja2 variable, unparseable YAML, or `kind` not
+  `ApplicationDescription` → exit 1 pointing at `margot verify`. No other edge-case
+  handling.
+* Past that gate it renders whatever the spec permits, faithfully — an orphan parameter, a
+  component with no `repository`, a profile with no components all show up as-is. Judging
+  them is `verify`'s job.
+* Rich `Panel` / `Columns` / `Tree` / `Table` blocks: identity, catalog, deployment
+  profiles (→ components → properties, no `quadlet` type exists in the Margo spec),
+  parameters (top-level `parameters` map joined with `configuration.schema` via
+  `configuration.sections[].settings[]`), configuration layout, and
+  `x-placeholder-extensions` when present. `--section` limits the output.
+* Coherence observations (orphan parameters, targets naming unknown components) are an
+  open idea, deliberately **not** designed this sprint.
+
+---
+
+## Backlog / Stack (Sprint 8+)
 
 Unordered within groups; sequencing decided at sprint planning.
 

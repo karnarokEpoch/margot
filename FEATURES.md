@@ -471,7 +471,7 @@ spec document.
 ```
 margot verify [--project-dir PATH] [--manifest PATH]
               [--schema PATH] [--recommended-schema PATH]
-              [--recommend] [--strict] [--deep]
+              [--recommend] [--strict]
 ```
 
 **Manifest resolution:**
@@ -504,15 +504,48 @@ margot verify [--project-dir PATH] [--manifest PATH]
 - With `--strict`: a contract — any finding fails the run (exit 1).
 - When both schemas run, findings are printed under separate labeled sections.
 
-**Output:** plain CI-check-style pass/fail lines by default. `--deep` adds rich tables for
-findings plus Application / Deployment profiles / Parameters panels rendered from the
-parsed descriptor (parameters are joined with `configuration.schema` via
-`configuration.sections[].settings[]` to show data types and constraints).
+**Output:** plain CI-check-style pass/fail lines, pipeable into CI logs. No tables, no
+panels — visual inspection of a descriptor is `margot describe`.
 
 Exit codes: 0 = passed, 1 = any error.
 
 **Remote artifact reachability (`--remote`)** is backlog, not implemented — see
 `ROADMAP.md`.
+
+---
+
+### `margot describe`
+
+Render the Margo application description as a structured, visual view: rich panels,
+trees and tables organizing the raw descriptor for human review. Read-only, no schema
+validation, no network.
+
+```
+margot describe [--project-dir PATH] [--manifest PATH]
+                [--section metadata|profiles|parameters|config|extensions]
+```
+
+**Descriptor resolution:** identical to `verify` — `--manifest`, else `margo.yaml`
+`directory` → `app.yaml.jinja` (rendered to a temp file) or `app.yaml`. Never reads
+`<build_dir>`, never requires a prior `build`.
+
+**Blocks rendered:** application identity (`id`, `kind`, `metadata.name`,
+`metadata.version`, `metadata.description`), catalog (`metadata.catalog`), deployment
+profiles as a tree (`deploymentProfiles[]` → `components[]` → `properties`) with
+`requiredResources`, parameters as a table (top-level `parameters` map joined with
+`configuration.schema` through `configuration.sections[].settings[]` for data type and
+constraints), the configuration layout as a tree, and `x-placeholder-extensions` when
+present. `--section` limits the output to selected blocks.
+
+The Margo spec permits plenty of odd-but-valid structures — a parameter no `Setting`
+refers to, a component without a `repository`, a profile with no components. `describe`
+renders them faithfully; judging them is `verify`'s job.
+
+**Not provided:** no `--json`, no `--yaml`, no plain-text mode. Visual output only.
+
+Exit codes: 0 always, except 1 when the descriptor cannot be loaded (missing, both
+`app.yaml` and `app.yaml.jinja` present, unresolved Jinja2 variable, unparseable YAML, or
+`kind` not `ApplicationDescription`) — in which case the error points at `margot verify`.
 
 ---
 
@@ -535,7 +568,8 @@ margot/
         ├── domain/                  # pure logic — zero I/O, zero framework imports
         │   ├── tags.py              # semver validation
         │   ├── metadata.py          # margo.yaml dataclasses + parser
-        │   ├── validation.py        # ValidationFinding, VerifyResult, --deep display models
+        │   ├── validation.py        # ValidationFinding, VerifyResult
+        │   ├── describe.py          # describe display models + parameter/schema join
         │   └── models.py            # PackageType enum, BuildTarget, etc.
         │
         ├── services/                # business logic — orchestrates domain + infra
@@ -544,12 +578,13 @@ margot/
         │   ├── pull.py
         │   ├── fetch.py
         │   ├── verify.py            # descriptor resolution + linkml validation
+        │   ├── describe.py          # descriptor resolution + display model build
         │   └── auth.py              # login/logout orchestration
         │
         ├── infra/                   # I/O adapters — no business logic
         │   ├── oci.py               # oras-py wrapper (push/pull/fetch/login/logout)
         │   ├── credentials.py       # ~/.config/margot/credentials.toml R/W
-        │   ├── templating.py        # app.yaml.jinja rendering (shared by build + verify)
+        │   ├── templating.py        # app.yaml.jinja rendering (shared by build/verify/describe)
         │   └── filesystem.py        # tree copy, placeholder substitution, tar, yaml, temp files
         │
         ├── schemas/                 # vendored LinkML schemas (data, not code)
@@ -561,7 +596,8 @@ margot/
         │   ├── push.py
         │   ├── pull.py
         │   ├── fetch.py
-        │   ├── verify.py
+        │   ├── verify.py            # plain pass/fail lines
+        │   ├── describe.py          # rich panels / trees / tables
         │   └── auth.py              # margot auth {login,logout,status}
         │
         └── validation/              # linkml-specific, called by services/verify.py
