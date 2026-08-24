@@ -8,7 +8,152 @@ authenticated `fetch`/`pull` are complete and have been removed from the active 
 
 ## Scope
 
-### Item 3 — Breaking refactor: `app.yaml` Jinja2 rendering
+### Item 1 — `margot auth status` ✓ done
+
+Read-only command. No network calls, no mutations.
+
+**CLI:** `margot auth status`
+
+**Behaviour:**
+
+- Read `~/.config/margot/credentials.toml` (via `infra/credentials.py`).
+- Read oras-py credential store to detect registries that have credentials but no
+  margot expiry entry.
+- For each registry tracked in the margot file: display hostname, `expires_at`,
+  time remaining, and a status label (VALID / EXPIRING / EXPIRED).
+  - VALID: more than 1 hour remaining.
+  - EXPIRING: ≤ 1 hour remaining (mirrors the warning threshold in `check_credentials`).
+  - EXPIRED: `now >= expires_at`.
+- For each registry present only in the oras-py store: display hostname + "present but
+  expiry unknown".
+- If neither file has any entries: print a clear message ("No credentials tracked.") —
+  never an empty table.
+
+**Output:** rich table (hostname | expires_at | remaining | status).
+
+**Files touched:**
+
+- `src/margot/infra/credentials.py` — add `list_tracked()` → `list[tuple[str, datetime]]`,
+  and `list_oras_registries()` → `list[str]` (reads oras-py Docker config).
+- `src/margot/services/auth.py` — add `auth_status()` → structured result type.
+- `src/margot/commands/auth.py` — add `status` subcommand, render the table.
+- `tests/unit/test_credentials.py` — extend with `list_tracked` / `list_oras_registries`.
+- `tests/integration/test_auth_service.py` — `auth_status()` with various file states.
+- `tests/e2e/test_auth_cli.py` — `status` subcommand: no creds, tracked, expiring, expired.
+
+---
+
+### Item 2 — Authenticated `fetch` and `pull` — ✅ DONE
+
+> Implemented on `feat/update-fetch-pull`, commit `2e5074a`
+> (`feat(auth): authenticate fetch and pull via stored OCI credentials`).
+> `domain/uri.extract_hostname`, `infra/oci.OrasClient(hostname=...)`, and the
+> `check_credentials` wiring in `services/fetch.py` / `services/pull.py` are all in
+> place, with unit/integration/e2e coverage. No CLI flags were added — auth stays
+> transparent. Do not re-implement; extend in place if requirements change.
+
+Wire the existing `check_credentials` guard and oras-py auth into the two anonymous-only
+services.
+
+**Current state:** `services/fetch.py` and `services/pull.py` create `OrasClient()`
+with no auth. The `check_credentials` guard only runs before push.
+
+**Changes:**
+
+`infra/oci.py`:
+
+- Add `OrasClient(hostname: str | None = None)` optional parameter. When `hostname` is
+  supplied, call `self.auth.load_configs(self.get_container(...))` on construction so
+  stored credentials (if any) are loaded automatically.
+
+`services/fetch.py` — `fetch_manifest(uri)`:
+
+- Parse hostname from URI (reuse `domain/uri.py`).
+- Call `check_credentials(hostname)` before creating the client.
+- Pass `hostname` to `OrasClient(hostname)`.
+
+`services/pull.py` — `pull_artifact(uri, ...)`:
+
+- Same pattern: parse hostname, `check_credentials`, pass to `OrasClient`.
+
+No new CLI flags needed. Auth is transparent: if credentials exist in the oras-py
+store they are used; if not, the request proceeds anonymously (same as today).
+
+**Files touched:**
+
+- `src/margot/infra/oci.py` — optional hostname param on `__init__`.
+- `src/margot/services/fetch.py` — add credential check + hostname threading.
+- `src/margot/services/pull.py` — same.
+- `tests/unit/test_infra_oci.py` — OrasClient with hostname.
+- `tests/integration/test_fetch_service.py` — expired creds → error; valid creds → pass-through.
+- `tests/integration/test_pull_service.py` — same.
+
+---
+
+### Item 3 — Breaking refactor: `app.yaml` Jinja2 rendering — ✅ DONE
+
+> Implemented on `feat/jinja-rendering`, commits `249ea30`, `763b660`, `3001a94`,
+> `d969ef0`, `11d3b11`. The design evolved during implementation — see
+> **What actually shipped** below, which supersedes the original plan in this section
+> where they differ (notably: no `margo:` block, top-level `version`/`directory` for
+> the margo artifact, and optional variant `version` with derivation). Do not
+> re-implement; extend in place if requirements change.
+
+**What actually shipped:**
+
+- `id` is a required top-level field in `margo.yaml`.
+- `version` is a required top-level field — it is both the margo artifact OCI tag and
+  `manifest.version` in templates. There is **no `margo:` block** — `directory`
+  (default `margo`) and `repository` (global default, overridable per component) are
+  top-level fields alongside `version`.
+- `app.yaml.jinja` / `app.yaml` file resolution in `_build_margo`: both present → hard
+  error; `.jinja` present → render with Jinja2 `StrictUndefined`, write as `app.yaml`,
+  `.jinja` source removed from output; neither present → hard error; only `app.yaml` →
+  copied verbatim, no substitution.
+- Jinja2 template context (`build_jinja2_context` in `domain/metadata.py`, pure
+  function, no Jinja2 import in `domain/`): `manifest.id`, `manifest.name`,
+  `manifest.version`, `manifest.appVersion`, `manifest.description`,
+  `manifest.directory`, `manifest.repository`, `manifest.annotations`,
+  `manifest.author`, `manifest.organization`, `manifest.compose.*`,
+  `manifest.quadlet.*`. No `manifest.margo` sub-object.
+- Variant `version` is **optional**. When omitted, derived as
+  `<component-version>+<type>-<variant-name>` (e.g. `2.1.0+compose-default` → OCI tag
+  `2.1.0_compose-default`). Derivation happens at context-build/build time, not parse
+  time — `VariantConfig.version` is stored as `str | None`.
+- Variant `component` default: `{id}-{type}-{name}` (e.g. `myapp-compose-default`).
+  Flat components (no `variants` declared) default to `{id}-{type}` (e.g.
+  `com-example-nginx-quadlet`) and expose `tag`/`ref`/`component` directly on the
+  component context, plus a single synthetic entry in `variants` for uniform iteration.
+- Variant names colliding with reserved field names (`directory`, `repository`,
+  `variants`, `version`, `tag`, `ref`, `component`) are rejected at parse time.
+- Old `<app_tag>`/`<margo_tag>`/`<compose_tag>`/`<quadlet_tag>`/`<helm_chart_tag>`
+  placeholder substitution is removed from the margo path entirely. It remains for
+  compose/quadlet text files.
+- `infra/filesystem.py` `substitute_placeholders` warns (does not fail) on any
+  `<..._tag>` pattern left unresolved in compose/quadlet source text.
+- `image: {search, replace}` block on `ComponentConfig` and `VariantConfig`
+  (`domain/metadata.py`). `search` is a literal string. `replace` is a **Jinja2
+  template string**, rendered in `services/build.py` with the same manifest context as
+  `app.yaml.jinja` (`StrictUndefined` — undefined variable is a hard build error) before
+  being handed to `infra/filesystem.py` as a plain resolved string (that module stays
+  Jinja2-agnostic). Variant-level `image` fully overrides (not merges) the
+  component-level one. Unmatched `search` string warns, does not fail.
+- Directory default fixed: component `directory` (compose/quadlet) defaults to the
+  component type name when absent, instead of raising an error.
+- Parse error messages now name the failing component (e.g.
+  `"'quadlet' variant missing required field 'name'"`).
+- Top-level `repository` in `margo.yaml` is parsed and threaded through to
+  `build_jinja2_context` as the fallback for components/variants with no repository
+  override of their own.
+- `BuildTarget` gained `artifact_path` — the actual artifact location (`.tgz` path for
+  compose/quadlet, the output directory for margo) — so `margot build` output shows a
+  meaningful path for every package type instead of a bare directory for margo.
+- `jinja2` added to `pyproject.toml` dependencies.
+- 501 tests passing, 97.15% coverage.
+
+---
+
+### Item 3 (original plan, superseded above) — Breaking refactor: `app.yaml` Jinja2 rendering
 
 This is the breaking change. Ships as a single commit (or two: non-breaking Jinja2 path
 first, then remove old placeholders — your call at implementation time).
@@ -26,6 +171,7 @@ application, used as a base for derived component name defaults in the Jinja2 co
 #### 3b. Jinja2 `app.yaml.jinja` rendering in `services/build.py`
 
 File resolution rules (in `_build_margo`):
+
 1. Both `app.yaml.jinja` and `app.yaml` present in source → **hard error** (fail build,
    clear message).
 2. `app.yaml.jinja` present → render with Jinja2 `StrictUndefined`, write output as
@@ -165,6 +311,7 @@ quadlet:
    `console.warning`, do not hard-fail. Mirrors the unresolved-placeholder warning in 3d.
 
 **`domain/metadata.py` changes:**
+
 - New `ImageConfig` dataclass: `search: str`, `replace: str`.
 - `ComponentConfig` gains `image: ImageConfig | None`.
 - `VariantConfig` gains `image: ImageConfig | None` (override, not merged, when present).
@@ -175,6 +322,7 @@ quadlet:
   using the same Jinja2 environment/context as `app.yaml.jinja` (Item 3b).
 
 **`infra/filesystem.py` / `services/build.py` changes:**
+
 - `services/build.py` renders each resolved `image.replace` template (Jinja2,
   `StrictUndefined`) using the manifest context *before* calling into the text
   substitution pass, then hands the fully-resolved `{search, replace}` pair (both plain
@@ -186,6 +334,7 @@ quadlet:
   `image` if present, else the component-level `image`, else none.
 
 **Files touched (additive to the list below):**
+
 - `src/margot/domain/metadata.py` — `ImageConfig`, `ComponentConfig.image`,
   `VariantConfig.image`, parsing + validation.
 - `src/margot/infra/filesystem.py` — extend substitution pass to include image
@@ -208,6 +357,7 @@ quadlet:
   manifest context.
 
 **Files touched:**
+
 - `pyproject.toml` — add `jinja2` dependency.
 - `src/margot/domain/metadata.py` — add `id` field; add variant name collision check;
   add `component` field to `VariantConfig`; build Jinja2 context helper.
@@ -225,13 +375,17 @@ quadlet:
 
 ## Definition of done
 
-- [ ] Remaining Item 3 implemented.
-- [ ] `uv run pytest` passes with no failures.
-- [ ] No `# TODO` markers left from this sprint's work.
-- [ ] All new code follows `code-conventions.md` (console output, imports, TODO format).
-- [ ] `ROADMAP.md` updated: Sprint 5 moved to Completed Sprints table; backlog entries
-  struck or removed.
-- [ ] Commit: `feat(sprint-5): Jinja2 app.yaml rendering and image substitution`
+- [x] All three items implemented.
+- [x] `uv run pytest` passes with no failures.
+- [x] No `# TODO` markers left from this sprint's work.
+- [x] All new code follows `code-conventions.md` (console output, imports, TODO format).
+- [x] `ROADMAP.md` updated: Sprint 5 items moved to Completed Sprints table; backlog
+  entries struck or removed.
+- [x] Commits: `a5b03b0` (auth status), `2e5074a` (authenticated fetch/pull), and
+  `249ea30`/`763b660`/`3001a94`/`d969ef0`/`11d3b11` (Jinja2 `app.yaml` refactor,
+  landed as five logical commits rather than one — directory default fix, artifact
+  path output, top-level repository fix, and the `margo:` block removal were each
+  found and fixed post-initial-implementation, in response to real-world testing).
 
 ---
 
@@ -243,3 +397,12 @@ quadlet:
   an explicit value. Stored in `VariantConfig` and surfaced in the template context.
 - **Flat components in Jinja2 context:** always exposed as a single synthetic variant
   entry in `variants` so templates iterate uniformly regardless of layout.
+- **No `margo:` block (decided post-implementation, during real-world testing):** the
+  margo artifact's `directory`, `version`, and `repository` are top-level `margo.yaml`
+  fields, not nested under a `margo:` key. `version` is required at the top level.
+  Discovered via dogfooding — the original plan's `margo:` block was never implemented
+  as a distinct concept in the docs site examples authored in parallel, and the docs
+  site examples are the correct design.
+- **Variant `version` optional (decided post-implementation):** omitting a variant's
+  `version` derives it as `<component-version>+<type>-<variant-name>`. Only `name` is
+  required per variant entry.

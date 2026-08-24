@@ -75,13 +75,7 @@ def _push_all(
     """Push all components, skipping any not defined in margo.yaml."""
     targets: list[BuildTarget] = []
 
-    try:
-        targets.append(_push_margo(meta, build_dir, registry, repository))
-    except ValueError as e:
-        if "not defined in margo.yaml" in str(e):
-            console.info("Skipping margo: not defined in margo.yaml")
-        else:
-            raise
+    targets.append(_push_margo(meta, build_dir, registry, repository))
 
     try:
         targets.extend(_push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.COMPOSE))
@@ -174,12 +168,7 @@ def _push_margo(
     cli_repository: str | None,
 ) -> BuildTarget:
     """Push margo component."""
-    if meta.margo is None:
-        raise ValueError("margo component not defined in margo.yaml")
-
-    version = meta.margo.version
-    if version is None:
-        raise ValueError("margo version not specified in margo.yaml")
+    version = meta.version
 
     # Validate version
     validate_oci_tag(version)
@@ -187,7 +176,7 @@ def _push_margo(
 
     # Resolve registry/repository
     resolved_registry, resolved_repository = _resolve_registry_repository(
-        meta.margo.repository, cli_registry, cli_repository
+        meta.repository, cli_registry, cli_repository
     )
 
     # Check credentials
@@ -218,6 +207,7 @@ def _push_margo(
         version=version,
         source_dir=str(margo_dir),
         output_dir=str(margo_dir),
+        artifact_path=str(margo_dir),
     )
 
 
@@ -300,6 +290,7 @@ def _push_flat_component(  # noqa: PLR0913
             version=version,
             source_dir=str(archive_path),
             output_dir=str(archive_path.parent),
+            artifact_path=str(archive_path),
         )
     ]
 
@@ -328,6 +319,13 @@ def _push_variant_component(  # noqa: PLR0913
 
     for v in variants_to_push:
         version = v.version
+        if version is None:
+            if component.version is None:
+                raise ValueError(
+                    f"{component_name} base version is required when variant '{v.name}' omits version"
+                )
+            version = f"{component.version}+{component_type.value}-{v.name}"
+        version = version.replace("+", "_")
 
         # Validate version
         validate_oci_tag(version)
@@ -367,6 +365,7 @@ def _push_variant_component(  # noqa: PLR0913
                 version=version,
                 source_dir=str(archive_path),
                 output_dir=str(archive_path.parent),
+                artifact_path=str(archive_path),
             )
         )
 

@@ -1,118 +1,97 @@
 """Pure-Python filesystem helpers for build operations."""
 
 from pathlib import Path
+import re
 from shutil import copytree, ignore_patterns, rmtree
 from tarfile import open as tar_open
 
 from margot import console
 
+SUPPORTED_TAG_PLACEHOLDERS = frozenset({"<app_tag>", "<margo_tag>", "<compose_tag>", "<quadlet_tag>", "<helm_chart_tag>"})
+
 
 def copy_tree(src: str, dst: str, *, ignore_file: str = ".rsyncignore") -> None:
-    """Copy directory tree from src to dst using shutil.copytree.
-
-    If dst already exists it is removed first, so the operation is idempotent.
-
-    Args:
-        src: Source directory path.
-        dst: Destination directory path. Removed and recreated if it already exists.
-        ignore_file: Name of ignore file in src (e.g. ".rsyncignore").
-                     If it exists, patterns are read and exclusions applied.
-    """
+    """Copy directory tree from src to dst using shutil.copytree."""
     src_path = Path(src)
     dst_path = Path(dst)
-
     console.debug(f"Copy tree: {src} → {dst}")
 
-    # Read ignore patterns if ignore file exists
     exclude_patterns: list[str] = []
     ignore_path = src_path / ignore_file
     if ignore_path.exists():
-        text = ignore_path.read_text()
-        for line in text.splitlines():
+        for line in ignore_path.read_text().splitlines():
             stripped = line.strip()
-            # Skip blank lines and comments
             if stripped and not stripped.startswith("#"):
                 exclude_patterns.append(stripped)
         console.debug(f"Loaded {len(exclude_patterns)} patterns from {ignore_file}")
-        # Always exclude the ignore file itself
         exclude_patterns.append(ignore_file)
 
-    # Create parent directories of dst if needed
     dst_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Remove existing destination if it already exists (idempotent rebuild)
     if dst_path.exists():
         rmtree(dst_path)
         console.debug(f"Removed existing output dir: {dst}")
-
-    # Prepare ignore callable
     ignore_func = ignore_patterns(*exclude_patterns) if exclude_patterns else None
-
-    # Copy tree (dst must not exist)
     copytree(src_path, dst_path, ignore=ignore_func, dirs_exist_ok=False)
 
 
-def substitute_placeholders(directory: str, placeholders: dict[str, str]) -> None:
-    """Recursively walk all text files in directory and replace placeholders.
+def substitute_placeholders(  # noqa: C901
+    directory: str,
+    placeholders: dict[str, str],
+    image_config: tuple[str, str] | None = None,
+) -> None:
+    """Replace supported tag tokens and one optional literal image string in text files.
 
-    Args:
-        directory: Root directory to walk.
-        placeholders: Dict of {placeholder_str: replacement_value}.
-
-    Skips:
-        - Directories and symlinks to directories.
-        - Binary files (UnicodeDecodeError on read).
-        - Files with no changes after substitution.
+    Supported tag tokens are ``<app_tag>``, ``<margo_tag>``, ``<compose_tag>``,
+    ``<quadlet_tag>``, and ``<helm_chart_tag>``. Unknown ``<..._tag>`` tokens
+    are retained and reported as warnings.
     """
     dir_path = Path(directory)
+    image_found = False
+    image_search = ""
+    image_replace = ""
+    if image_config is not None:
+        image_search, image_replace = image_config
+        for placeholder, value in placeholders.items():
+            image_replace = image_replace.replace(placeholder, value)
 
     for file_path in dir_path.rglob("*"):
-        # Skip non-files
         if not file_path.is_file():
             continue
-
-        # Try to read as UTF-8 text
         try:
             content = file_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            # Binary file, skip
             continue
 
-        # Apply all placeholders
         modified_content = content
         for placeholder, value in placeholders.items():
             modified_content = modified_content.replace(placeholder, value)
+        if image_config is not None and image_search in modified_content:
+            image_found = True
+            modified_content = modified_content.replace(image_search, image_replace)
 
-        # Write back only if changed
+        for unresolved in re.findall(r"<[a-zA-Z0-9_]+_tag>", modified_content):
+            if unresolved not in placeholders:
+                console.warning(f"Unresolved placeholder '{unresolved}' in {file_path}")
+
         if modified_content != content:
             file_path.write_text(modified_content, encoding="utf-8")
             console.debug(f"Substituted placeholders in {file_path}")
 
+    if image_config is not None and not image_found:
+        console.warning(f"Image search string '{image_config[0]}' not found in any source file in {directory}")
 
-def make_tarball(source_dir: str, output_path: str) -> None:
+
+def make_tarball(source_dir: str, output_path: str, root_name: str) -> None:
     """Create a gzip-compressed tarball of source_dir contents at output_path.
 
-    The tarball contains the flat contents of source_dir (not the directory itself as root).
-    For example: files at source_dir/compose.yaml appear as compose.yaml in the tarball.
-
-    Args:
-        source_dir: Source directory to tar.
-        output_path: Output tarball path (e.g. /path/to/build-1.0.0.tgz).
+    All entries are nested under a single top-level directory named `root_name`,
+    so extracting the tarball produces `<root_name>/<file>` rather than dumping
+    files directly into the extraction target.
     """
     source_path = Path(source_dir)
     output_file = Path(output_path)
-
     console.debug(f"Make tarball: {source_dir} → {output_path}")
-
-    # Create parent directories of output if needed
     output_file.parent.mkdir(parents=True, exist_ok=True)
-
-    # Create tarball with flat contents (arcname="." flattens the directory)
     with tar_open(output_file, "w:gz") as tar:
-        # Add all contents of source_dir directly (no parent wrapping)
         for item in source_path.iterdir():
-            tar.add(
-                item,
-                arcname=item.name,
-                recursive=True,
-            )
+            tar.add(item, arcname=f"{root_name}/{item.name}", recursive=True)
