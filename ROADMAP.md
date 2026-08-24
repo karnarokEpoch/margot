@@ -11,45 +11,6 @@ sequencing; FEATURES.md is updated as items land (see backlog).
 
 ## Planned Sprints
 
-### Sprint 5 — Jinja2 build refactor + auth polish
-
-**Goal:** Ship the Jinja2 `app.yaml` rendering pipeline (breaking refactor), `margot auth
-status`, authenticated `fetch`/`pull`, and the `image` search/replace block for
-compose/quadlet dev-local image swapping.
-
-**Full plan:** see [`.kiro/sprints/sprint-5.md`](.kiro/sprints/sprint-5.md) — all three
-items (`auth status`, authenticated fetch/pull, Jinja2 `app.yaml` refactor including the
-`image` search/replace design), file lists, and definition of done. Implementation order:
-Items 1 (`auth status`) and 2 (authenticated fetch/pull) run in parallel worktrees — they
-touch disjoint files (`infra/credentials.py`/`services/auth.py`/`commands/auth.py` vs.
-`infra/oci.py`/`services/fetch.py`/`services/pull.py`). Item 3 (Jinja2 refactor + `image`
-block) starts once both are merged.
-
-**Status:** Item 2 (authenticated `fetch`/`pull`) is ✅ **done** — see
-[`.kiro/sprints/sprint-5.md`](.kiro/sprints/sprint-5.md#item-2--authenticated-fetch-and-pull--done)
-for the commit reference. Items 1 and 3 remain open; sprint is not yet complete.
-
-Key locked decisions:
-
-- Breaking change, no deprecation window (margot is pre-1.0, unpublished): old
-  `<app_tag>`/`<margo_tag>`/`<compose_tag>`/`<quadlet_tag>`/`<helm_chart_tag>`
-  placeholders are removed from the `app.yaml` path; `app.yaml.jinja` (Jinja2,
-  `StrictUndefined`) replaces them. These placeholders remain for compose/quadlet text
-  files, where plain string replace is still the right model.
-- `id` becomes a required top-level field in `margo.yaml`.
-- New optional `image: {search, replace}` block per component/variant in `margo.yaml` —
-  `search` is a literal string (not regex) matched against compose/quadlet source text
-  files at build time; `replace` is a **Jinja2 template** rendered from the same manifest
-  context as `app.yaml.jinja` (`StrictUndefined` — undefined variable is a hard error).
-  Keeps the checked-in source a real, runnable file locally (with a real dev image ref)
-  while `build` swaps in the environment-appropriate ref, and keeps `image.replace` in
-  sync automatically when `appVersion` (or any other manifest field) is bumped — no
-  separate edit to the `image` block itself. Variant-level `image` fully overrides the
-  component-level one (not merged). Optional — components with no dev-local image to
-  swap declare nothing. Already reflected in `FEATURES.md`.
-
----
-
 ### Sprint 6 — `margot verify`
 
 **Goal:** Ship a complete `margot verify` command: local-only LinkML validation against
@@ -59,8 +20,9 @@ recommended schema, plus an opt-in (`--deep`) structured rich display of the ful
 artifact reachability checking is descoped to the backlog (see Backlog → Remaining
 commands above).
 
-**Prerequisite:** Sprint 5 must be merged. `id` field is in `margo.yaml`,
-`domain/metadata.py` is final, and the Jinja2 build path is stable.
+**Prerequisite:** Sprint 5 is merged (✅ complete — see Completed Sprints below). `id`
+field is in `margo.yaml`, `domain/metadata.py` is final, and the Jinja2 build path is
+stable.
 
 **Full plan:** see [`.kiro/sprints/sprint-6.md`](.kiro/sprints/sprint-6.md) — background
 on the two LinkML schemas, all five scope items (validation infra, vendored schemas,
@@ -143,3 +105,4 @@ Unordered within groups; sequencing decided at sprint planning.
 | Sprint 2 | `margot pull` — anonymous OCI artifact pull to disk, artifact type detection via `artifactType`, layer naming (title annotation → manifest-level fallback), `--force` override for unknown types, shared `domain/uri.py` | — |
 | Sprint 3 | `margot build` — local artifact build for margo/compose/quadlet package types, placeholder substitution (`<app_tag>` from `appVersion`, `<margo_tag>`, `<compose_tag>`, `<quadlet_tag>`), variant support, idempotent output dir, multi-type `-t` flag, `margo.yaml` project descriptor, dynaconf config layering, pure-Python filesystem ops | — |
 | Sprint 4 | `margot auth login` / `margot auth logout` + `margot push` — OCI registry authentication via oras-py (`margot auth` subcommand group), credential expiry tracking (`~/.config/margot/credentials.toml`), proactive expiry check before registry ops, push built artifacts (margo/compose/quadlet) with correct `artifactType`, media types, and OCI annotations, SemVer gate before push, multi-type + variant support mirroring build | — |
+| Sprint 5 | `margot auth status` (credential expiry table), authenticated `fetch`/`pull` (transparent oras-py credential use), and the Jinja2 `app.yaml.jinja` rendering refactor: `id`/`version` required top-level fields, no `margo:` block (top-level `directory`/`repository` for the margo artifact instead), optional variant `version` with `<base>+<type>-<name>` derivation, `image: {search, replace}` block for compose/quadlet dev-local image swapping (`replace` is a Jinja2 template rendered with `StrictUndefined`), unresolved-placeholder warnings, per-component error messages. See [`.kiro/sprints/sprint-5.md`](.kiro/sprints/sprint-5.md) for what shipped vs. the original plan. | — |
