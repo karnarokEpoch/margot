@@ -1,8 +1,8 @@
 # Sprint 5 — Jinja2 build refactor + auth polish
 
-**Goal:** Ship the Jinja2 `app.yaml` rendering pipeline (Theme C — breaking refactor),
-`margot auth status`, and authenticated `fetch`/`pull`. All three are self-contained
-enough to land in the same sprint; Theme C is the heavyweight item.
+**Goal:** Complete the Jinja2 `app.yaml` rendering pipeline (Theme C — breaking refactor)
+and the compose/quadlet `image` search/replace block. `margot auth status` and
+authenticated `fetch`/`pull` are complete and have been removed from the active scope.
 
 ---
 
@@ -15,6 +15,7 @@ Read-only command. No network calls, no mutations.
 **CLI:** `margot auth status`
 
 **Behaviour:**
+
 - Read `~/.config/margot/credentials.toml` (via `infra/credentials.py`).
 - Read oras-py credential store to detect registries that have credentials but no
   margot expiry entry.
@@ -31,6 +32,7 @@ Read-only command. No network calls, no mutations.
 **Output:** rich table (hostname | expires_at | remaining | status).
 
 **Files touched:**
+
 - `src/margot/infra/credentials.py` — add `list_tracked()` → `list[tuple[str, datetime]]`,
   and `list_oras_registries()` → `list[str]` (reads oras-py Docker config).
 - `src/margot/services/auth.py` — add `auth_status()` → structured result type.
@@ -59,22 +61,26 @@ with no auth. The `check_credentials` guard only runs before push.
 **Changes:**
 
 `infra/oci.py`:
+
 - Add `OrasClient(hostname: str | None = None)` optional parameter. When `hostname` is
   supplied, call `self.auth.load_configs(self.get_container(...))` on construction so
   stored credentials (if any) are loaded automatically.
 
 `services/fetch.py` — `fetch_manifest(uri)`:
+
 - Parse hostname from URI (reuse `domain/uri.py`).
 - Call `check_credentials(hostname)` before creating the client.
 - Pass `hostname` to `OrasClient(hostname)`.
 
 `services/pull.py` — `pull_artifact(uri, ...)`:
+
 - Same pattern: parse hostname, `check_credentials`, pass to `OrasClient`.
 
 No new CLI flags needed. Auth is transparent: if credentials exist in the oras-py
 store they are used; if not, the request proceeds anonymously (same as today).
 
 **Files touched:**
+
 - `src/margot/infra/oci.py` — optional hostname param on `__init__`.
 - `src/margot/services/fetch.py` — add credential check + hostname threading.
 - `src/margot/services/pull.py` — same.
@@ -165,6 +171,7 @@ application, used as a base for derived component name defaults in the Jinja2 co
 #### 3b. Jinja2 `app.yaml.jinja` rendering in `services/build.py`
 
 File resolution rules (in `_build_margo`):
+
 1. Both `app.yaml.jinja` and `app.yaml` present in source → **hard error** (fail build,
    clear message).
 2. `app.yaml.jinja` present → render with Jinja2 `StrictUndefined`, write output as
@@ -304,6 +311,7 @@ quadlet:
    `console.warning`, do not hard-fail. Mirrors the unresolved-placeholder warning in 3d.
 
 **`domain/metadata.py` changes:**
+
 - New `ImageConfig` dataclass: `search: str`, `replace: str`.
 - `ComponentConfig` gains `image: ImageConfig | None`.
 - `VariantConfig` gains `image: ImageConfig | None` (override, not merged, when present).
@@ -314,6 +322,7 @@ quadlet:
   using the same Jinja2 environment/context as `app.yaml.jinja` (Item 3b).
 
 **`infra/filesystem.py` / `services/build.py` changes:**
+
 - `services/build.py` renders each resolved `image.replace` template (Jinja2,
   `StrictUndefined`) using the manifest context *before* calling into the text
   substitution pass, then hands the fully-resolved `{search, replace}` pair (both plain
@@ -325,6 +334,7 @@ quadlet:
   `image` if present, else the component-level `image`, else none.
 
 **Files touched (additive to the list below):**
+
 - `src/margot/domain/metadata.py` — `ImageConfig`, `ComponentConfig.image`,
   `VariantConfig.image`, parsing + validation.
 - `src/margot/infra/filesystem.py` — extend substitution pass to include image
@@ -347,6 +357,7 @@ quadlet:
   manifest context.
 
 **Files touched:**
+
 - `pyproject.toml` — add `jinja2` dependency.
 - `src/margot/domain/metadata.py` — add `id` field; add variant name collision check;
   add `component` field to `VariantConfig`; build Jinja2 context helper.

@@ -39,6 +39,7 @@
       "autoAllowReadonly": true,
       "allowedCommands": [
         "diff.*",
+        "find . .*",
         "gh.*",
         "git.*",
         "grep.*",
