@@ -274,14 +274,14 @@ class TestMakeTarball:
         output_path = tmp_path / "output.tgz"
 
         # Execute
-        make_tarball(str(source_dir), str(output_path))
+        make_tarball(str(source_dir), str(output_path), "myapp")
 
         # Assert
         assert output_path.exists()
         assert output_path.suffix == ".tgz"
 
-    def test_make_tarball_flat_contents_no_parent_wrapping(self, tmp_path: Path, mock_console: MagicMock) -> None:
-        """Should contain flat contents (no parent dir wrapping)."""
+    def test_make_tarball_wraps_contents_in_root_name_directory(self, tmp_path: Path, mock_console: MagicMock) -> None:
+        """Should wrap all contents under a single top-level root_name directory."""
         # Setup
         source_dir = tmp_path / "source"
         source_dir.mkdir()
@@ -291,14 +291,15 @@ class TestMakeTarball:
         output_path = tmp_path / "build-1.0.0.tgz"
 
         # Execute
-        make_tarball(str(source_dir), str(output_path))
+        make_tarball(str(source_dir), str(output_path), "myapp")
 
-        # Assert - verify tarball contains files at root, not nested
+        # Assert - verify tarball contents are nested under myapp/, not at root
         with tarfile.open(output_path, "r:gz") as tar:
             names = tar.getnames()
-            assert "compose.yaml" in names
-            assert "config.json" in names
-            assert not any("source/" in name for name in names)
+            assert "myapp/compose.yaml" in names
+            assert "myapp/config.json" in names
+            assert "compose.yaml" not in names
+            assert "config.json" not in names
 
     def test_make_tarball_works_with_nested_subdirectories(self, tmp_path: Path, mock_console: MagicMock) -> None:
         """Should work with nested subdirectories inside source dir."""
@@ -313,13 +314,13 @@ class TestMakeTarball:
         output_path = tmp_path / "archive.tgz"
 
         # Execute
-        make_tarball(str(source_dir), str(output_path))
+        make_tarball(str(source_dir), str(output_path), "myapp")
 
         # Assert
         with tarfile.open(output_path, "r:gz") as tar:
             names = tar.getnames()
-            assert "file1.txt" in names
-            assert "subdir/file2.txt" in names
+            assert "myapp/file1.txt" in names
+            assert "myapp/subdir/file2.txt" in names
 
     def test_make_tarball_creates_parent_directories(self, tmp_path: Path, mock_console: MagicMock) -> None:
         """Should create parent directories of output_path if needed."""
@@ -331,7 +332,7 @@ class TestMakeTarball:
         output_path = tmp_path / "a" / "b" / "c" / "archive.tgz"
 
         # Execute
-        make_tarball(str(source_dir), str(output_path))
+        make_tarball(str(source_dir), str(output_path), "myapp")
 
         # Assert
         assert output_path.exists()
@@ -347,7 +348,7 @@ class TestMakeTarball:
         output_path = tmp_path / "archive.tgz"
 
         # Execute
-        make_tarball(str(source_dir), str(output_path))
+        make_tarball(str(source_dir), str(output_path), "myapp")
 
         # Assert
         calls = [call.args[0] for call in mock_console.call_args_list]

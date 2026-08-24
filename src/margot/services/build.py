@@ -180,7 +180,7 @@ def _build_flat_component(  # noqa: PLR0913
     try:
         copy_tree(source_dir, tmp_dir)
         substitute_placeholders(tmp_dir, placeholders, image_config=image_pair)
-        make_tarball(tmp_dir, output_path)
+        make_tarball(tmp_dir, output_path, meta.name)
         console.info(f"{component_name} built: {output_path}")
     finally:
         rmtree(tmp_parent, ignore_errors=True)
@@ -242,7 +242,7 @@ def _build_variant_component(  # noqa: PLR0913
         try:
             copy_tree(source_dir, tmp_dir)
             substitute_placeholders(tmp_dir, placeholders, image_config=image_pair)
-            make_tarball(tmp_dir, output_path)
+            make_tarball(tmp_dir, output_path, meta.name)
             console.info(f"{component_name} variant '{current_variant.name}' built: {output_path}")
         finally:
             rmtree(tmp_parent, ignore_errors=True)

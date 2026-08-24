@@ -277,8 +277,9 @@ during the tree copy step. One file per source dir; applies to that dir only.
   - `name: default` → use `<compose.directory>/default/`
   - Any other name → use `<compose.directory>/<name>/`
 - `.rsyncignore` respected if present in source dir
-
-### `quadlet`
+- Tarball structure: the `.tgz` contains a single top-level directory named after
+  `margo.yaml`'s top-level `name` field (`MargoYaml.name`), so extracting produces
+  `<name>/<file>` rather than dumping files directly into the extraction target.
 
 - Source: `quadlet/` directory (path set by `quadlet.directory` in `margo.yaml`)
 - Output: `.tgz` tarball, OCI artifact tagged with the variant's `version`
@@ -288,6 +289,8 @@ during the tree copy step. One file per source dir; applies to that dir only.
 - Build step: identical to compose
 - Variant source resolution: same rules as compose (default → root, named → subdir)
 - `.rsyncignore` respected if present in source dir
+- Tarball structure: same as compose — a single top-level `<name>/` directory
+  wraps the contents.
 
 ---
 

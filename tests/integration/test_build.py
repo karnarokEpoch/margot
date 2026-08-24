@@ -310,7 +310,7 @@ class TestBuildCompose:
         # Extract tarball and check content
         tarball_path = Path(targets[0].output_dir) / f"testapp-{targets[0].version}.tgz"
         with tarfile.open(tarball_path, "r:gz") as tar:
-            compose_yaml_content = tar.extractfile("compose.yaml").read().decode()
+            compose_yaml_content = tar.extractfile("testapp/compose.yaml").read().decode()
             # <margo_tag> should be replaced with margo version (1.0.0)
             assert "<margo_tag>" not in compose_yaml_content
             assert "margo: 1.0.0" in compose_yaml_content
@@ -876,7 +876,7 @@ class TestBuildRedesign:
         target = build.build(PackageType.COMPOSE, project_dir=str(tmp_path), build_dir=str(tmp_path / ".dist"))[0]
 
         with tarfile.open(target.artifact_path, "r:gz") as archive:
-            assert archive.extractfile("compose.yaml").read().decode() == "image: registry/app:2.5.0\n"
+            assert archive.extractfile("testapp/compose.yaml").read().decode() == "image: registry/app:2.5.0\n"
 
     def test_image_replace_undefined_variable_raises_value_error(self, tmp_path: Path) -> None:
         """An unresolved Jinja expression in image.replace fails the build clearly."""

@@ -81,12 +81,17 @@ def substitute_placeholders(  # noqa: C901
         console.warning(f"Image search string '{image_config[0]}' not found in any source file in {directory}")
 
 
-def make_tarball(source_dir: str, output_path: str) -> None:
-    """Create a gzip-compressed tarball of source_dir contents at output_path."""
+def make_tarball(source_dir: str, output_path: str, root_name: str) -> None:
+    """Create a gzip-compressed tarball of source_dir contents at output_path.
+
+    All entries are nested under a single top-level directory named `root_name`,
+    so extracting the tarball produces `<root_name>/<file>` rather than dumping
+    files directly into the extraction target.
+    """
     source_path = Path(source_dir)
     output_file = Path(output_path)
     console.debug(f"Make tarball: {source_dir} → {output_path}")
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with tar_open(output_file, "w:gz") as tar:
         for item in source_path.iterdir():
-            tar.add(item, arcname=item.name, recursive=True)
+            tar.add(item, arcname=f"{root_name}/{item.name}", recursive=True)
