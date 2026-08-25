@@ -80,6 +80,11 @@ def _output(result: Any) -> str:
     return _strip_ansi(result.stdout + (result.stderr or ""))
 
 
+def _lines(result: Any) -> list[str]:
+    """Return the non-empty output lines, plain and ANSI-free, for exact-output assertions."""
+    return [line.rstrip() for line in _output(result).splitlines() if line.strip()]
+
+
 @fixture
 def cli_project(tmp_path: Path, monkeypatch: Any) -> Path:
     """Create a project with margo.yaml and an empty margo source directory."""
@@ -93,7 +98,7 @@ class TestVerifyHelp:
     """E2E tests for verify command help output."""
 
     def test_verify_help(self) -> None:
-        """Should list the Phase 1 flags."""
+        """Should list the Phase 1 and Phase 2 flags."""
         result = runner.invoke(app, ["verify", "--help"])
         plain = _strip_ansi(result.stdout)
 
@@ -101,15 +106,15 @@ class TestVerifyHelp:
         assert "--project-dir" in plain
         assert "--manifest" in plain
         assert "--schema" in plain
+        assert "--recommend" in plain
+        assert "--recommended-schema" in plain
 
-    def test_verify_help_has_no_phase_two_flags(self) -> None:
-        """Should not advertise Schema B flags yet."""
+    def test_verify_help_has_no_strict_flag(self) -> None:
+        """Should not advertise --strict yet: Schema B is advisory in this phase."""
         result = runner.invoke(app, ["verify", "--help"])
         plain = _strip_ansi(result.stdout)
 
-        assert "--recommend" not in plain
         assert "--strict" not in plain
-        assert "--recommended-schema" not in plain
 
     def test_verify_is_registered_on_root_help(self) -> None:
         """Should appear in the root command list."""
@@ -228,14 +233,15 @@ class TestVerifyCLI:
         assert result.exit_code == 0
         assert "PASS" in plain
 
-    def test_recommend_flag_is_rejected(self, cli_project: Path) -> None:
-        """Should reject --recommend: Schema B is not wired in this phase."""
+    def test_strict_flag_is_rejected(self, cli_project: Path) -> None:
+        """Should reject --strict: Schema B is advisory, contract mode is not wired yet."""
         (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
 
-        result = runner.invoke(app, ["verify", "--recommend"])
+        result = runner.invoke(app, ["verify", "--recommend", "--strict"])
 
         assert result.exit_code != 0
         assert "PASS" not in _output(result)
+        assert "No such option: --strict" in _output(result).replace("\n", "")
 
     def test_error_message_regex_is_not_swallowed(self, cli_project: Path) -> None:
         """Should print bracketed regex patterns verbatim (rich markup escaped)."""
@@ -298,3 +304,162 @@ classes:
 
         assert result.exit_code == 1
         assert "Verify failed: boom" in plain
+
+
+# Schema A accepts this, Schema B has recommendations about it (no metadata.description,
+# no catalog.author, no descriptionFile, no releaseNotes).
+SPARSE_APP_YAML = VALID_APP_YAML.replace("  description: A sample application\n", "")
+
+# Satisfies every Schema B recommendation: VALID_APP_YAML leaves out descriptionFile,
+# releaseNotes and author, which the spec allows but Schema B recommends.
+COMPLIANT_APP_YAML = VALID_APP_YAML.replace(
+    "      icon: https://example.com/icon.png\n",
+    "      icon: https://example.com/icon.png\n      descriptionFile: README.md\n      releaseNotes: NOTES.md\n",
+).replace(
+    "    organization:\n",
+    "    author:\n      - name: Jane Doe\n        email: jane@example.com\n    organization:\n",
+)
+
+SCHEMA_A_SECTION = "── Schema A (Margo spec) ──"
+SCHEMA_B_SECTION = "── Schema B (recommended) ──"
+
+
+class TestVerifyRecommend:
+    """E2E tests for margot verify --recommend."""
+
+    def test_recommend_shows_both_labeled_sections(self, cli_project: Path) -> None:
+        """Should label each schema's findings under its own section."""
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        assert SCHEMA_A_SECTION in plain
+        assert SCHEMA_B_SECTION in plain
+        assert plain.index(SCHEMA_A_SECTION) < plain.index(SCHEMA_B_SECTION)
+
+    def test_recommend_reports_schema_b_findings_and_still_exits_0(self, cli_project: Path) -> None:
+        """Should print the recommended-slot warnings but keep the run green."""
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        assert "is recommended" in plain
+        assert "advisory, does not affect the exit code" in plain
+        assert "verify: PASS" in plain
+
+    def test_schema_b_errors_do_not_change_the_exit_code(self, cli_project: Path) -> None:
+        """Should exit 0 on a Schema B ERROR: nothing can fail a run through Schema B yet."""
+        descriptor = VALID_APP_YAML[: VALID_APP_YAML.index("    components:")] + "    components: []\n"
+        (cli_project / "margo" / "app.yaml").write_text(descriptor, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        assert "verify: PASS" in plain
+        assert "should be non-empty" in plain
+
+    def test_clean_descriptor_still_shows_the_schema_b_section(self, cli_project: Path) -> None:
+        """Should show an empty Schema B section, so "ran and clean" differs from "never ran"."""
+        (cli_project / "margo" / "app.yaml").write_text(COMPLIANT_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+
+        assert result.exit_code == 0
+        assert _lines(result) == [
+            "Validated against Margo spec (draft, commit 45f4359)",
+            SCHEMA_A_SECTION,
+            "Schema A (Margo spec): PASS — no findings",
+            SCHEMA_B_SECTION,
+            "Schema B (recommended): no findings — advisory, does not affect the exit code",
+            "verify: PASS",
+        ]
+
+    def test_schema_a_failure_still_prints_the_schema_b_section(self, cli_project: Path) -> None:
+        """Should print both sections before exiting 1 on a Schema A error."""
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        plain = _output(result)
+
+        assert result.exit_code == 1
+        assert SCHEMA_A_SECTION in plain
+        assert SCHEMA_B_SECTION in plain
+        assert "verify: FAIL" in plain
+
+    def test_recommended_schema_override_is_used(self, cli_project: Path) -> None:
+        """Should lint against --recommended-schema instead of the bundled Schema B."""
+        (cli_project / "margo" / "app.yaml").write_text(COMPLIANT_APP_YAML, encoding="utf-8")
+        schema = cli_project / "custom-recommended.linkml.yaml"
+        schema.write_text(
+            """
+id: https://example.org/custom-recommended
+name: custom_recommended
+prefixes:
+  linkml: https://w3id.org/linkml/
+  ex: https://example.org/custom-recommended/
+default_prefix: ex
+imports:
+  - linkml:types
+classes:
+  RecommendedApplicationDescription:
+    attributes:
+      somethingNiceToHave:
+        range: string
+        recommended: true
+""",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(app, ["verify", "--recommend", "--recommended-schema", str(schema)])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        assert "Slot 'somethingNiceToHave' is recommended" in plain
+        assert "verify: PASS" in plain
+
+
+class TestVerifyDefaultOutputIsUnchanged:
+    """The default (no --recommend) output must stay exactly what Phase 1 shipped."""
+
+    def test_clean_run_prints_only_the_phase_one_lines(self, cli_project: Path) -> None:
+        """Should print the draft-spec line and the Schema A verdict, nothing else."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify"])
+
+        assert result.exit_code == 0
+        assert _lines(result) == [
+            "Validated against Margo spec (draft, commit 45f4359)",
+            "Schema A (Margo spec): PASS — no findings",
+        ]
+
+    def test_no_schema_b_noise_without_recommend(self, cli_project: Path) -> None:
+        """Should mention neither Schema B nor any section separator."""
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        assert "Schema B" not in plain
+        assert "──" not in plain
+        assert "advisory" not in plain
+        assert "verify: PASS" not in plain
+
+    def test_failing_run_prints_only_the_phase_one_lines(self, cli_project: Path) -> None:
+        """Should keep the unsectioned failure output, with errors under console.fatal."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8")
+
+        result = runner.invoke(app, ["verify"])
+
+        assert result.exit_code == 1
+        assert _lines(result) == [
+            "Validated against Margo spec (draft, commit 45f4359)",
+            "Error: ERROR /metadata: 'version' is a required property",
+            "Schema A (Margo spec): FAIL — 1 error",
+        ]

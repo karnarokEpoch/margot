@@ -6,7 +6,7 @@ from typing import Any
 from pytest import fixture, raises
 
 from margot.domain.validation import Severity
-from margot.schemas import SCHEMA_A_COMMIT
+from margot.schemas import SCHEMA_A_COMMIT, SCHEMA_A_PATH, SCHEMA_B_PATH
 from margot.services import verify as verify_module
 from margot.services.verify import resolve_descriptor, verify
 
@@ -316,3 +316,144 @@ classes:
 
         assert result.passed is False
         assert any("'mandatoryThing' is a required property" in finding.message for finding in result.schema_a_results)
+
+
+# A descriptor Schema A accepts but Schema B has recommendations about: no
+# metadata.description, no catalog.author, no descriptionFile and no releaseNotes.
+SPARSE_APP_YAML = (
+    VALID_APP_YAML.replace("  description: A sample application\n", "")
+    .replace("      descriptionFile: README.md\n      releaseNotes: NOTES.md\n", "")
+    .replace("    author:\n      - name: Jane Doe\n        email: jane@example.com\n", "")
+)
+
+
+class TestRecommendedSchemaPass:
+    """Tests for the recommend=True second validation pass."""
+
+    def test_recommend_off_by_default(self, project: Path) -> None:
+        """Should leave schema_b_results empty when recommend is not requested."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project))
+
+        assert result.schema_a_results == []
+        assert result.schema_b_results == []
+
+    def test_recommend_off_does_not_run_schema_b(self, project: Path, mocker: Any) -> None:
+        """Should call the runner exactly once — Schema B must not be loaded at all."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+        spy = mocker.spy(verify_module, "run_validation")
+
+        verify(project_dir=str(project))
+
+        assert spy.call_count == 1
+        assert SCHEMA_B_PATH not in {call.args[1] for call in spy.call_args_list}
+
+    def test_recommend_runs_schema_b_on_the_same_resolved_descriptor(self, project: Path, mocker: Any) -> None:
+        """Should validate both schemas against one resolved file, without re-rendering."""
+        (project / "margo" / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+        render_spy = mocker.spy(verify_module, "write_temp_text")
+        run_spy = mocker.spy(verify_module, "run_validation")
+
+        verify(project_dir=str(project), recommend=True)
+
+        assert render_spy.call_count == 1
+        assert run_spy.call_count == 2
+        assert {call.args[0] for call in run_spy.call_args_list} == {render_spy.spy_return}
+        assert [call.args[1] for call in run_spy.call_args_list] == [SCHEMA_A_PATH, SCHEMA_B_PATH]
+
+    def test_recommend_populates_schema_b_findings(self, project: Path) -> None:
+        """Should report the recommended-slot warnings Schema A stays silent about."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project), recommend=True)
+
+        assert result.schema_a_results == []
+        assert [finding.severity for finding in result.schema_b_results] == [Severity.WARNING] * 4
+        assert {finding.field_path for finding in result.schema_b_results} == {
+            "/metadata",
+            "/metadata/catalog",
+            "/metadata/catalog/application",
+        }
+
+    def test_schema_b_warnings_do_not_flip_passed(self, project: Path) -> None:
+        """Should still pass: Schema B is advisory in this phase."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project), recommend=True)
+
+        assert result.schema_b_results != []
+        assert result.passed is True
+
+    def test_schema_b_errors_do_not_flip_passed(self, project: Path) -> None:
+        """Should still pass on a Schema B ERROR — only Schema A errors decide the verdict."""
+        descriptor = VALID_APP_YAML[: VALID_APP_YAML.index("    components:")] + "    components: []\n"
+        (project / "margo" / "app.yaml").write_text(descriptor, encoding="utf-8")
+
+        result = verify(project_dir=str(project), recommend=True)
+
+        assert any(finding.severity is Severity.ERROR for finding in result.schema_b_results)
+        assert result.schema_a_results == []
+        assert result.passed is True
+
+    def test_compliant_descriptor_has_no_schema_b_findings(self, project: Path) -> None:
+        """Should report nothing from either schema for a fully compliant descriptor."""
+        (project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project), recommend=True)
+
+        assert result.schema_a_results == []
+        assert result.schema_b_results == []
+        assert result.passed is True
+
+    def test_schema_a_failure_still_reports_schema_b(self, project: Path) -> None:
+        """Should run both passes even when Schema A fails, and keep passed False."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8")
+
+        result = verify(project_dir=str(project), recommend=True)
+
+        assert result.passed is False
+        assert any("'version' is a required property" in finding.message for finding in result.schema_a_results)
+        assert any("is recommended" in finding.message for finding in result.schema_b_results)
+
+
+class TestRecommendedSchemaOverride:
+    """Tests for the recommended_schema_path override."""
+
+    def test_custom_recommended_schema_is_used(self, project: Path, tmp_path: Path) -> None:
+        """Should validate against the provided schema instead of the bundled Schema B."""
+        (project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+        custom_schema = tmp_path / "custom-recommended.linkml.yaml"
+        custom_schema.write_text(
+            """
+id: https://example.org/custom-recommended
+name: custom_recommended
+prefixes:
+  linkml: https://w3id.org/linkml/
+  ex: https://example.org/custom-recommended/
+default_prefix: ex
+imports:
+  - linkml:types
+classes:
+  RecommendedApplicationDescription:
+    attributes:
+      somethingNiceToHave:
+        range: string
+        recommended: true
+""",
+            encoding="utf-8",
+        )
+
+        result = verify(project_dir=str(project), recommended_schema_path=str(custom_schema), recommend=True)
+
+        assert result.passed is True
+        assert any("Slot 'somethingNiceToHave' is recommended" in finding.message for finding in result.schema_b_results)
+
+    def test_override_is_ignored_without_recommend(self, project: Path, tmp_path: Path) -> None:
+        """Should not run any Schema B pass when recommend is False, override or not."""
+        (project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project), recommended_schema_path=str(tmp_path / "does-not-exist.yaml"))
+
+        assert result.schema_b_results == []
+        assert result.passed is True

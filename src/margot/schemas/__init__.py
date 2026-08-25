@@ -18,3 +18,11 @@ SCHEMA_A_URL = (
 SCHEMA_A_TARGET_CLASS = "ApplicationDescription"
 
 SCHEMA_A_PATH = str(files("margot.schemas") / "application-description.linkml.yaml")
+
+# Margot's own recommended schema. Curated here rather than vendored, so it has no pinned
+# upstream commit and `verify` prints no draft-spec line for it.
+SCHEMA_B_PATH = str(files("margot.schemas") / "margo-recommended.linkml.yaml")
+
+# Schema B constrains the upstream root class through an `is_a` subclass (see the decision
+# comment at the top of margo-recommended.linkml.yaml), so its target class differs from A's.
+SCHEMA_B_TARGET_CLASS = "RecommendedApplicationDescription"

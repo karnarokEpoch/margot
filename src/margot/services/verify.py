@@ -12,7 +12,13 @@ from margot.domain.metadata import MargoYaml, build_jinja2_context, load_margo_y
 from margot.domain.validation import ValidationFinding, VerifyResult, has_errors
 from margot.infra.filesystem import write_temp_text
 from margot.infra.templating import render_template_file
-from margot.schemas import SCHEMA_A_COMMIT, SCHEMA_A_PATH, SCHEMA_A_TARGET_CLASS
+from margot.schemas import (
+    SCHEMA_A_COMMIT,
+    SCHEMA_A_PATH,
+    SCHEMA_A_TARGET_CLASS,
+    SCHEMA_B_PATH,
+    SCHEMA_B_TARGET_CLASS,
+)
 from margot.validation.linkml_runner import run_validation
 
 JINJA_DESCRIPTOR = "app.yaml.jinja"
@@ -82,25 +88,40 @@ def resolve_descriptor(project_dir: str = ".", manifest_path: str | None = None)
     return ResolvedDescriptor(path=str(source), source_path=str(source), meta=meta, rendered=False)
 
 
-def verify(project_dir: str = ".", manifest_path: str | None = None, schema_path: str | None = None) -> VerifyResult:
-    """Validate the application description against the upstream Margo spec schema.
+def verify(
+    project_dir: str = ".",
+    manifest_path: str | None = None,
+    schema_path: str | None = None,
+    recommended_schema_path: str | None = None,
+    recommend: bool = False,
+) -> VerifyResult:
+    """Validate the application description against the Margo spec schema, and optionally the recommended one.
 
     Args:
         project_dir: Directory holding `margo.yaml`.
         manifest_path: Explicit descriptor path, bypassing `margo.yaml` resolution.
-        schema_path: Override for the vendored upstream schema.
+        schema_path: Override for the vendored upstream schema (Schema A).
+        recommended_schema_path: Override for the curated recommended schema (Schema B).
+        recommend: Run the recommended schema as a second pass. When False, Schema B is
+            not loaded or run at all and `schema_b_results` stays empty.
 
     Returns:
         The validation outcome. `passed` is False when any Schema A finding is an ERROR.
+        Schema B findings are advisory and never affect `passed`.
 
     Raises:
         ValueError: If the descriptor cannot be resolved or rendered.
     """
     schema = schema_path or SCHEMA_A_PATH
     descriptor = resolve_descriptor(project_dir, manifest_path)
+    recommended_findings: list[ValidationFinding] = []
     try:
         console.info(f"Running Schema A validation against {schema}")
         findings: list[ValidationFinding] = run_validation(descriptor.path, schema, SCHEMA_A_TARGET_CLASS)
+        if recommend:
+            recommended_schema = recommended_schema_path or SCHEMA_B_PATH
+            console.info(f"Running Schema B validation against {recommended_schema}")
+            recommended_findings = run_validation(descriptor.path, recommended_schema, SCHEMA_B_TARGET_CLASS)
     finally:
         if descriptor.rendered:
             Path(descriptor.path).unlink(missing_ok=True)
@@ -108,9 +129,11 @@ def verify(project_dir: str = ".", manifest_path: str | None = None, schema_path
 
     passed = not has_errors(findings)
     console.info(f"Schema A validation complete: {len(findings)} finding(s), passed={passed}")
+    if recommend:
+        console.info(f"Schema B validation complete: {len(recommended_findings)} advisory finding(s)")
     return VerifyResult(
         schema_a_results=findings,
-        schema_b_results=[],
+        schema_b_results=recommended_findings,
         schema_a_version=SCHEMA_A_COMMIT,
         passed=passed,
     )
