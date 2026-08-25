@@ -72,16 +72,23 @@ decisions:
   present, unresolved Jinja2 variable, unparseable YAML, or `kind` not
   `ApplicationDescription` → exit 1 pointing at `margot verify`. No other edge-case
   handling.
-* Past that gate it renders whatever the spec permits, faithfully — an orphan parameter, a
-  component with no `repository`, a profile with no components all show up as-is. Judging
-  them is `verify`'s job.
-* Rich `Panel` / `Columns` / `Tree` / `Table` blocks: identity, catalog, deployment
-  profiles (→ components → properties, no `quadlet` type exists in the Margo spec),
-  parameters (top-level `parameters` map joined with `configuration.schema` via
-  `configuration.sections[].settings[]`), configuration layout, and
-  `x-placeholder-extensions` when present. `--section` limits the output.
-* Coherence observations (orphan parameters, targets naming unknown components) are an
-  open idea, deliberately **not** designed this sprint.
+* Past that gate it renders whatever the spec permits, faithfully — a parameter no
+  `Setting` references, a component with no `repository`, a profile with no components all
+  show up as-is. Judging them is `verify`'s job.
+* Rich `Panel` / `Tree` blocks, full-width and stacked (no `Columns`): identity+catalog
+  (`apiVersion` as title, `Catalog: None` when absent), deployment profiles
+  (→ per-profile `requiredResources` → components → properties, `type` printed verbatim
+  so margot's `quadlet` profile renders even though upstream still pins `helm|compose`),
+  and one configuration tree carrying section → setting → schema → parameter → pointer →
+  components. `--section` filters which blocks appear, never their order.
+* **No parameters block** — parameters are reached through configuration, in the order a
+  reviewer thinks: what can be configured, what validates it, what it defaults to, where
+  it lands. Each pointer shows `(n/total)` against the count of distinct declared
+  components.
+* Coherence signals that fall out of the join for free — `(n/total)` ratios,
+  `(not declared)` / `(not defined)` markers, a trailing unreferenced-parameters subtree —
+  ship with it. A summarising Observations panel and anything with a severity or exit code
+  remain deliberately **out** of this sprint.
 
 ---
 

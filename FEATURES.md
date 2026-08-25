@@ -522,24 +522,58 @@ validation, no network.
 
 ```
 margot describe [--project-dir PATH] [--manifest PATH]
-                [--section metadata|profiles|parameters|config|extensions]
+                [--section metadata|profiles|config|extensions]
 ```
 
 **Descriptor resolution:** identical to `verify` — `--manifest`, else `margo.yaml`
 `directory` → `app.yaml.jinja` (rendered to a temp file) or `app.yaml`. Never reads
 `<build_dir>`, never requires a prior `build`.
 
-**Blocks rendered:** application identity (`id`, `kind`, `metadata.name`,
-`metadata.version`, `metadata.description`), catalog (`metadata.catalog`), deployment
-profiles as a tree (`deploymentProfiles[]` → `components[]` → `properties`) with
-`requiredResources`, parameters as a table (top-level `parameters` map joined with
-`configuration.schema` through `configuration.sections[].settings[]` for data type and
-constraints), the configuration layout as a tree, and `x-placeholder-extensions` when
-present. `--section` limits the output to selected blocks.
+**Blocks rendered**, always in this order, each as a full-width stacked panel:
+
+1. **Identity + catalog** — `apiVersion` as the panel title, `id`, `metadata.version` and
+   `metadata.name` as a grid, then labeled `Description:` and `Catalog:` blocks. No
+   catalog at all renders as `Catalog: None`. `kind` is not printed: the load gate already
+   refuses anything that is not an `ApplicationDescription`. The panel subtitle is the
+   resolved descriptor path, marked `(rendered)` when it came from `app.yaml.jinja`.
+2. **Deployment profiles** — one tree per entry: `type` and `id`, `description`, the
+   profile's own `requiredResources` (`cpu`/`memory`/`storage` on one line, `peripherals`
+   and `interfaces` as separate lines when present), then `components[]` → `properties`.
+3. **Configuration** — a single tree carrying everything configurable:
+
+   ```text
+   section → setting (+ immutable) → Schema: <name> <dataType> · <constraints>
+                                   → Parameter: <name> → Default: <value>
+                                                       → Pointer: <p> (n/total)
+                                                                    → components
+   ```
+
+   Each pointer reports how many components it targets against the total number of
+   distinct components declared across all deployment profiles. Parameters that no
+   `Setting` references are listed in a trailing subtree so they stay visible.
+4. **Extensions** — `x-placeholder-extensions`, rendered only when present.
+
+There is **no parameters block**: parameters are reached through configuration, which is
+the order a reviewer thinks in — what can be configured, what validates it, what it
+defaults to, where it lands.
+
+Panel titles carry counts (`7 profiles · 9 components`, `6 sections · 22 settings`).
+`--section` **filters** which blocks appear; it never reorders them, so flag order does
+not change the output. `metadata` covers identity and catalog together.
+
+`type` and component `properties` keys are printed verbatim — no enum check, no fixed
+property lookup. This is deliberate: margot supports a `quadlet` deployment profile ahead
+of the upstream spec (whose `type` pattern is still `^(helm|compose)$`), and the in-flight
+upstream proposal moves the property set around. Descriptor text is escaped before
+printing, so a value like `array[string]` renders literally instead of being read as rich
+markup. Scalars keep their literal form — strings quoted, numbers and booleans bare, `""`
+for an empty string, `—` for absent. Nothing is ever truncated or elided; long values
+word-wrap.
 
 The Margo spec permits plenty of odd-but-valid structures — a parameter no `Setting`
-refers to, a component without a `repository`, a profile with no components. `describe`
-renders them faithfully; judging them is `verify`'s job.
+refers to, a component without a `repository`, a profile with no components, a target
+naming a component nothing declares. `describe` renders them faithfully and marks them
+`(not defined)` / `(not declared)`; judging them is `verify`'s job.
 
 **Not provided:** no `--json`, no `--yaml`, no plain-text mode. Visual output only.
 
@@ -569,7 +603,7 @@ margot/
         │   ├── tags.py              # semver validation
         │   ├── metadata.py          # margo.yaml dataclasses + parser
         │   ├── validation.py        # ValidationFinding, VerifyResult
-        │   ├── describe.py          # describe display models + parameter/schema join
+        │   ├── describe.py          # describe display models + configuration join
         │   └── models.py            # PackageType enum, BuildTarget, etc.
         │
         ├── services/                # business logic — orchestrates domain + infra
