@@ -6,6 +6,7 @@ with margot's plugin set and translate LinkML report objects into margot's own
 type.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 import re
 from typing import Any
@@ -35,6 +36,25 @@ EXTENSION_SLOT = "x-placeholder-extensions"
 
 # Trailing " in /some/path" location suffix that linkml plugins append to messages.
 _LOCATION_SUFFIX = re.compile(r"^(?P<message>.*) in (?P<path>/\S*)$", re.DOTALL)
+
+# jsonschema builds its oneOf/anyOf message as f"{instance!r} is not valid under any of the
+# given schemas", i.e. it inlines a repr of the whole failing sub-object — for a polymorphic
+# slot like deploymentProfiles[].components[].properties that is the entire profile, which
+# makes the one-line `margot verify` output unreadable. The same error carries `.context`:
+# one sub-error per candidate schema branch that failed, each with its own specific message
+# and path. Those sub-errors are summarized instead of the flat message linkml passes on.
+_ALTERNATIVE_VALIDATORS = ("oneOf", "anyOf")
+
+# A oneOf/anyOf failure fans out one sub-error per branch per offending field, so the raw
+# list is both long and repetitive. Three distinct reasons is enough to act on; the rest is
+# reported as a count. Individual reasons are capped too: a nested `type` sub-error still
+# reprs its own instance, and that instance can itself be a large mapping.
+_MAX_REASONS = 3
+_MAX_REASON_LENGTH = 120
+
+# Header for the case where the branches disagree about *different* fields, so no single
+# field can be blamed and each reason has to carry its own path.
+_NO_MATCH_HEADER = "no matching schema — possible causes"
 
 _SEVERITY_MAP = {
     LinkmlSeverity.FATAL: Severity.ERROR,
@@ -107,7 +127,107 @@ def _to_finding(result: ValidationResult) -> ValidationFinding:
     message, field_path = _split_location(result.message)
     if not field_path:
         field_path = _source_path(result)
-    return ValidationFinding(field_path, message, _SEVERITY_MAP.get(result.severity, Severity.ERROR))
+    summary, shared_path = _alternatives_summary(result.source)
+    return ValidationFinding(
+        _join_path(field_path, shared_path) if summary else field_path,
+        summary or message,
+        _SEVERITY_MAP.get(result.severity, Severity.ERROR),
+    )
+
+
+def _alternatives_summary(source: Any) -> tuple[str, str]:  # noqa: ANN401
+    """Summarize a jsonschema oneOf/anyOf failure from its per-branch sub-errors.
+
+    Returns ``(message, shared_path)``. When every branch failed on the same field —
+    the common case for a discriminated polymorphic slot, where each candidate schema
+    rejects the same `type` value for its own reason — `shared_path` is that field's path
+    relative to the failure and the message lists the distinct reasons only; the caller
+    appends the path to the finding's own path so it is named once, not once per reason.
+    Otherwise `shared_path` is empty and each reason carries its own path.
+
+    Returns ``("", "")`` for anything that is not such a failure — every other message
+    passes through untouched. Duck-typed on purpose: jsonschema is reached only through
+    linkml, and the attributes used here (`validator`, `context`, `absolute_path`,
+    `message`) are the whole contract this needs.
+    """
+    if getattr(source, "validator", None) not in _ALTERNATIVE_VALIDATORS:
+        return "", ""
+    if not getattr(source, "context", None):
+        return "", ""
+    shared_path = _shared_reason_path(source)
+    reasons = _render_reasons(_branch_reasons(source, bare=shared_path is not None))
+    if shared_path is None:
+        return f"{_NO_MATCH_HEADER}: {reasons}", ""
+    return reasons, shared_path
+
+
+def _render_reasons(reasons: list[str]) -> str:
+    """Join reasons into one line, capped at `_MAX_REASONS` with a count of the remainder."""
+    omitted = len(reasons) - _MAX_REASONS
+    tail = f"; +{omitted} more" if omitted > 0 else ""
+    return f"{'; '.join(reasons[:_MAX_REASONS])}{tail}"
+
+
+def _shared_reason_path(source: Any) -> str | None:  # noqa: ANN401
+    """Return the single relative path all branch reasons are about, or None if they differ."""
+    root_depth = len(list(getattr(source, "absolute_path", None) or ()))
+    paths = {_relative_path(error, root_depth) for error in _leaf_errors(source)}
+    if len(paths) != 1:
+        return None
+    return paths.pop()
+
+
+def _branch_reasons(source: Any, bare: bool = False) -> list[str]:  # noqa: ANN401
+    """Return the distinct, most specific reasons behind a oneOf/anyOf failure, in report order.
+
+    With `bare`, reasons are rendered without their path — callers use this once they know
+    every reason shares the same path and have promoted it into the finding's own path.
+    """
+    root_depth = len(list(getattr(source, "absolute_path", None) or ()))
+    reasons: list[str] = []
+    for error in _leaf_errors(source):
+        reason = _format_reason(error, root_depth, bare=bare)
+        if reason not in reasons:
+            reasons.append(reason)
+    return reasons
+
+
+def _leaf_errors(error: Any) -> Iterator[Any]:  # noqa: ANN401
+    """Yield the most specific sub-errors, descending through nested oneOf/anyOf nodes.
+
+    Branches are themselves polymorphic, so a sub-error can be another oneOf/anyOf carrying
+    the same instance-repr message. Only the leaves say something specific.
+    """
+    context = getattr(error, "context", None)
+    if getattr(error, "validator", None) in _ALTERNATIVE_VALIDATORS and context:
+        for sub_error in context:
+            yield from _leaf_errors(sub_error)
+    else:
+        yield error
+
+
+def _format_reason(error: Any, root_depth: int, bare: bool = False) -> str:  # noqa: ANN401
+    """Render one sub-error as ``(at path: message)``, or as its bare message when `bare`."""
+    path = _relative_path(error, root_depth)
+    message = str(getattr(error, "message", ""))
+    if len(message) > _MAX_REASON_LENGTH:
+        message = f"{message[:_MAX_REASON_LENGTH].rstrip()}..."
+    if bare:
+        return message
+    return f"(at {path}: {message})" if path else f"({message})"
+
+
+def _relative_path(error: Any, root_depth: int) -> str:  # noqa: ANN401
+    """Return a sub-error's instance path relative to the failure it belongs to."""
+    parts = list(getattr(error, "absolute_path", None) or ())[root_depth:]
+    return "/".join(str(part) for part in parts)
+
+
+def _join_path(field_path: str, relative_path: str) -> str:
+    """Append a relative instance path to a finding's field path."""
+    if not relative_path:
+        return field_path
+    return f"{field_path.rstrip('/')}/{relative_path}"
 
 
 def _split_location(message: str) -> tuple[str, str]:

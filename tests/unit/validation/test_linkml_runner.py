@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from linkml.validator.report import Severity as LinkmlSeverity
 from pytest import fixture
 
-from margot.domain.validation import Severity
+from margot.domain.validation import Severity, ValidationFinding
 from margot.validation.linkml_runner import _to_finding, run_validation, strip_extension_slots
 
 MINIMAL_SCHEMA = """
@@ -51,12 +51,83 @@ classes:
         range: integer
 """
 
+# Mirrors the shape that triggered the bug in the real spec schema: a multivalued slot whose
+# range is a parent class with subclasses, which linkml compiles to an `anyOf` over one
+# candidate schema per class. A failure anywhere inside such a value makes jsonschema report
+# "<whole instance repr> is not valid under any of the given schemas". `kind` is the
+# discriminator — patterned on the parent, pinned by `equals_string` on each subclass — so a
+# bad `kind` fails every branch on that one slot, exactly like `deploymentProfiles[].type`.
+POLYMORPHIC_SCHEMA = """
+id: https://example.org/polymorphic
+name: polymorphic
+prefixes:
+  linkml: https://w3id.org/linkml/
+  ex: https://example.org/polymorphic/
+default_prefix: ex
+imports:
+  - linkml:types
+
+classes:
+  Machine:
+    tree_root: true
+    attributes:
+      name:
+        range: string
+        required: true
+      profiles:
+        range: Profile
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+  Profile:
+    attributes:
+      kind:
+        range: string
+        required: true
+        pattern: "^(helm|compose)$"
+      settings:
+        range: Settings
+        required: true
+
+  HelmProfile:
+    is_a: Profile
+    slot_usage:
+      kind:
+        equals_string: "helm"
+
+  ComposeProfile:
+    is_a: Profile
+    slot_usage:
+      kind:
+        equals_string: "compose"
+
+  Settings:
+    attributes:
+      revision:
+        range: string
+      wait:
+        range: boolean
+      packageLocation:
+        range: string
+      keyLocation:
+        range: string
+"""
+
 
 @fixture
 def schema_path(tmp_path: Path) -> str:
     """Write the minimal fixture schema and return its path."""
     path = tmp_path / "minimal.linkml.yaml"
     path.write_text(MINIMAL_SCHEMA, encoding="utf-8")
+    return str(path)
+
+
+@fixture
+def polymorphic_schema_path(tmp_path: Path) -> str:
+    """Write the polymorphic fixture schema and return its path."""
+    path = tmp_path / "polymorphic.linkml.yaml"
+    path.write_text(POLYMORPHIC_SCHEMA, encoding="utf-8")
     return str(path)
 
 
@@ -204,6 +275,110 @@ class TestRunValidationWarnings:
         assert findings[0].field_path == "/"
 
 
+class TestPolymorphicSlotErrors:
+    """A oneOf/anyOf failure must be summarized, not dumped as an instance repr."""
+
+    def _finding(self, tmp_path: Path, schema_path: str, data: str) -> ValidationFinding:
+        findings = run_validation(write_data(tmp_path, data), schema_path, "Machine")
+        assert len(findings) == 1
+        return findings[0]
+
+    def test_summary_replaces_the_instance_dump(self, tmp_path: Path, polymorphic_schema_path: str) -> None:
+        """Should report the specific failing field instead of jsonschema's instance repr."""
+        finding = self._finding(
+            tmp_path,
+            polymorphic_schema_path,
+            "name: press\nprofiles:\n  - kind: compose\n    settings:\n      wait: not-a-bool\n",
+        )
+
+        assert finding.severity is Severity.ERROR
+        assert finding.field_path == "/profiles/0"
+        assert "is not valid under any of the given schemas" not in finding.message
+        assert "{'" not in finding.message
+        assert "settings/wait" in finding.message
+        assert "'not-a-bool' is not of type 'boolean'" in finding.message
+
+    def test_differing_paths_keep_a_header_without_schema_jargon(self, tmp_path: Path, polymorphic_schema_path: str) -> None:
+        """Should head a multi-field failure with plain wording, not "candidate schemas"."""
+        finding = self._finding(
+            tmp_path,
+            polymorphic_schema_path,
+            "name: press\nprofiles:\n  - kind: compose\n    settings:\n      wait: not-a-bool\n",
+        )
+
+        assert finding.message.startswith("no matching schema — possible causes: ")
+        assert "none of" not in finding.message
+        assert "candidate schemas matched" not in finding.message
+
+    def test_shared_path_is_promoted_out_of_the_reasons(self, tmp_path: Path, polymorphic_schema_path: str) -> None:
+        """Should name a bad discriminator once, in the path, then list only the reasons."""
+        finding = self._finding(
+            tmp_path,
+            polymorphic_schema_path,
+            "name: press\nprofiles:\n  - kind: quadlet\n    settings:\n      wait: true\n",
+        )
+
+        assert finding.severity is Severity.ERROR
+        assert finding.field_path == "/profiles/0/kind"
+        assert "{'" not in finding.message
+        assert "none of" not in finding.message
+        assert "candidate schemas matched" not in finding.message
+        assert "(at " not in finding.message
+        assert finding.message.count("kind") == 0
+
+    def test_shared_path_summary_keeps_every_distinct_reason(self, tmp_path: Path, polymorphic_schema_path: str) -> None:
+        """Should still carry the pattern mismatch and both rejected constants."""
+        finding = self._finding(
+            tmp_path,
+            polymorphic_schema_path,
+            "name: press\nprofiles:\n  - kind: quadlet\n    settings:\n      wait: true\n",
+        )
+
+        assert "'quadlet' does not match '^(helm|compose)$'" in finding.message
+        assert "'helm' was expected" in finding.message
+        assert "'compose' was expected" in finding.message
+
+    def test_summary_stays_short_enough_for_one_ci_line(self, tmp_path: Path, polymorphic_schema_path: str) -> None:
+        """Should stay far below the raw instance dump, whose size grows with the instance."""
+        # Only `wait` is invalid; the other slots are valid but bulky, so jsonschema's own
+        # message (a repr of the whole profile) is >600 chars here while the summary is not
+        # affected by them at all. 300 chars is the bound: enough for the three reasons the
+        # summary may list, short enough for a single grep-able `SEVERITY path: message` line.
+        location = "https://example.com/some/quite/long/artifact/path/package-1.0.0.tar.gz"
+        data = (
+            "name: press\n"
+            "profiles:\n"
+            "  - kind: compose\n"
+            "    settings:\n"
+            "      wait: not-a-bool\n"
+            f"      packageLocation: {location}\n"
+            f"      keyLocation: {location}.sig\n"
+        )
+
+        finding = self._finding(tmp_path, polymorphic_schema_path, data)
+
+        assert location not in finding.message
+        assert len(finding.message) < 300
+
+    def test_summary_deduplicates_and_caps_reasons(self, tmp_path: Path, polymorphic_schema_path: str) -> None:
+        """Should list at most three distinct reasons and count the remainder."""
+        data = (
+            "name: press\nprofiles:\n  - kind: nope\n    settings:\n      wait: not-a-bool\n      revision: 7\n      extra: 1\n"
+        )
+
+        finding = self._finding(tmp_path, polymorphic_schema_path, data)
+
+        assert finding.message.count("(at ") == 3
+        assert " more" in finding.message
+
+    def test_non_polymorphic_error_message_is_untouched(self, tmp_path: Path, polymorphic_schema_path: str) -> None:
+        """Should pass a plain single error through with no summary wrapper."""
+        finding = self._finding(tmp_path, polymorphic_schema_path, "profiles: []\n")
+
+        assert finding.message == "'name' is a required property"
+        assert "no matching schema" not in finding.message
+
+
 class TestStripExtensionSlots:
     """Tests for the x-placeholder-extensions pre-processing step."""
 
@@ -289,3 +464,64 @@ class TestFindingMapping:
         result = SimpleNamespace(message="note in /metadata", severity=LinkmlSeverity.INFO, source=None)
 
         assert _to_finding(result).severity is Severity.INFO
+
+    def test_alternatives_without_context_pass_through(self) -> None:
+        """Should leave a oneOf error alone when it carries no sub-errors to summarize."""
+        result = SimpleNamespace(
+            message="valid under each of the given schemas",
+            severity=LinkmlSeverity.ERROR,
+            source=SimpleNamespace(validator="oneOf", context=[], absolute_path=["id"]),
+        )
+
+        finding = _to_finding(result)
+
+        assert finding.message == "valid under each of the given schemas"
+        assert finding.field_path == "/id"
+
+    def test_long_sub_message_is_truncated(self) -> None:
+        """Should cap an individual reason so a nested instance repr cannot leak in whole."""
+        result = SimpleNamespace(
+            message="ignored",
+            severity=LinkmlSeverity.ERROR,
+            source=SimpleNamespace(
+                validator="anyOf",
+                context=[SimpleNamespace(validator="type", absolute_path=["settings"], message="x" * 400)],
+                absolute_path=[],
+            ),
+        )
+
+        finding = _to_finding(result)
+
+        assert finding.field_path == "/settings"
+        assert finding.message == f"{'x' * 120}..."
+
+    def test_reasons_at_the_failure_root_get_no_path_prefix(self) -> None:
+        """Should render a sub-error with no sub-path as the bare reason, on the failure's path."""
+        result = SimpleNamespace(
+            message="ignored",
+            severity=LinkmlSeverity.ERROR,
+            source=SimpleNamespace(
+                validator="anyOf",
+                context=[SimpleNamespace(validator="type", message="1 is not of type 'string'")],
+                absolute_path=["a"],
+            ),
+        )
+
+        finding = _to_finding(result)
+
+        assert finding.field_path == "/a"
+        assert finding.message == "1 is not of type 'string'"
+
+    def test_shared_path_is_appended_to_a_root_field_path(self) -> None:
+        """Should not double the separator when the failure itself sits at the document root."""
+        result = SimpleNamespace(
+            message="ignored",
+            severity=LinkmlSeverity.ERROR,
+            source=SimpleNamespace(
+                validator="oneOf",
+                context=[SimpleNamespace(validator="pattern", absolute_path=["kind"], message="bad kind")],
+                absolute_path=[],
+            ),
+        )
+
+        assert _to_finding(result).field_path == "/kind"
