@@ -1,9 +1,13 @@
 """Pure-Python filesystem helpers for build operations."""
 
+from os import fdopen
 from pathlib import Path
 import re
 from shutil import copytree, ignore_patterns, rmtree
 from tarfile import open as tar_open
+from tempfile import mkstemp
+
+from yaml import YAMLError, safe_load
 
 from margot import console
 
@@ -95,3 +99,44 @@ def make_tarball(source_dir: str, output_path: str, root_name: str) -> None:
     with tar_open(output_file, "w:gz") as tar:
         for item in source_path.iterdir():
             tar.add(item, arcname=f"{root_name}/{item.name}", recursive=True)
+
+
+def load_yaml(path: str) -> object:
+    """Read and parse a YAML file.
+
+    Args:
+        path: File path to the YAML document.
+
+    Returns:
+        The parsed document (mapping, sequence, scalar, or None for an empty file).
+
+    Raises:
+        ValueError: If the file does not exist or is not valid YAML.
+    """
+    file_path = Path(path)
+    console.debug(f"Load YAML: {path}")
+    if not file_path.exists():
+        raise ValueError(f"File not found: {path}")
+    try:
+        return safe_load(file_path.read_text(encoding="utf-8"))
+    except YAMLError as e:
+        raise ValueError(f"{path} is not valid YAML: {e}") from e
+
+
+def write_temp_text(text: str, suffix: str = "") -> str:
+    """Write text to a new temporary file and return its path.
+
+    The caller owns the file and is responsible for deleting it.
+
+    Args:
+        text: Content to write, encoded as UTF-8.
+        suffix: Optional filename suffix (e.g. ``".yaml"``).
+
+    Returns:
+        Absolute path to the created temporary file.
+    """
+    handle, temp_path = mkstemp(suffix=suffix, prefix="margot-")
+    with fdopen(handle, "w", encoding="utf-8") as temp_file:
+        temp_file.write(text)
+    console.debug(f"Wrote temp file: {temp_path}")
+    return temp_path

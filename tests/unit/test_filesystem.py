@@ -5,9 +5,9 @@ import tarfile
 from typing import Any
 from unittest.mock import MagicMock
 
-from pytest import fixture
+from pytest import fixture, raises
 
-from margot.infra.filesystem import copy_tree, make_tarball, substitute_placeholders
+from margot.infra.filesystem import copy_tree, load_yaml, make_tarball, substitute_placeholders, write_temp_text
 
 
 @fixture
@@ -407,3 +407,93 @@ class TestMakeTarball:
         warning = mocker.patch("margot.infra.filesystem.console.warning")
         substitute_placeholders(str(directory), {"<margo_tag>": "1.0.0"})
         warning.assert_not_called()
+
+
+class TestLoadYaml:
+    """Tests for load_yaml function."""
+
+    def test_parses_mapping(self, tmp_path: Path, mock_console: MagicMock) -> None:
+        """Should return the parsed mapping for a valid YAML document."""
+        yaml_file = tmp_path / "app.yaml"
+        yaml_file.write_text("kind: ApplicationDescription\nid: hello-world\n", encoding="utf-8")
+
+        assert load_yaml(str(yaml_file)) == {"kind": "ApplicationDescription", "id": "hello-world"}
+
+    def test_parses_nested_structures(self, tmp_path: Path, mock_console: MagicMock) -> None:
+        """Should preserve nested mappings and sequences."""
+        yaml_file = tmp_path / "app.yaml"
+        yaml_file.write_text("metadata:\n  name: Hello\n  tags:\n    - demo\n    - sample\n", encoding="utf-8")
+
+        assert load_yaml(str(yaml_file)) == {"metadata": {"name": "Hello", "tags": ["demo", "sample"]}}
+
+    def test_empty_file_returns_none(self, tmp_path: Path, mock_console: MagicMock) -> None:
+        """Should return None for an empty document."""
+        yaml_file = tmp_path / "empty.yaml"
+        yaml_file.write_text("", encoding="utf-8")
+
+        assert load_yaml(str(yaml_file)) is None
+
+    def test_missing_file_raises_clear_error(self, tmp_path: Path, mock_console: MagicMock) -> None:
+        """Should raise ValueError naming the missing path."""
+        missing = tmp_path / "absent.yaml"
+
+        with raises(ValueError, match=f"File not found: {missing}"):
+            load_yaml(str(missing))
+
+    def test_malformed_yaml_raises_clear_error(self, tmp_path: Path, mock_console: MagicMock) -> None:
+        """Should raise ValueError mentioning the file and the parse problem."""
+        yaml_file = tmp_path / "broken.yaml"
+        yaml_file.write_text("kind: [unclosed\n", encoding="utf-8")
+
+        with raises(ValueError, match="is not valid YAML"):
+            load_yaml(str(yaml_file))
+
+    def test_emits_debug_log(self, tmp_path: Path, mock_console: MagicMock) -> None:
+        """Should log the loaded path at debug level."""
+        yaml_file = tmp_path / "app.yaml"
+        yaml_file.write_text("id: hello\n", encoding="utf-8")
+
+        load_yaml(str(yaml_file))
+
+        mock_console.assert_any_call(f"Load YAML: {yaml_file}")
+
+
+class TestWriteTempText:
+    """Tests for write_temp_text function."""
+
+    def test_writes_content_to_new_file(self, mock_console: MagicMock) -> None:
+        """Should create a temp file holding the given text."""
+        path = write_temp_text("kind: ApplicationDescription\n")
+        try:
+            assert Path(path).is_file()
+            assert Path(path).read_text(encoding="utf-8") == "kind: ApplicationDescription\n"
+        finally:
+            Path(path).unlink()
+
+    def test_applies_suffix(self, mock_console: MagicMock) -> None:
+        """Should honor the requested filename suffix."""
+        path = write_temp_text("id: hello\n", suffix=".yaml")
+        try:
+            assert path.endswith(".yaml")
+        finally:
+            Path(path).unlink()
+
+    def test_successive_calls_use_distinct_paths(self, mock_console: MagicMock) -> None:
+        """Should never reuse a path between calls."""
+        first = write_temp_text("one")
+        second = write_temp_text("two")
+        try:
+            assert first != second
+            assert Path(first).read_text(encoding="utf-8") == "one"
+            assert Path(second).read_text(encoding="utf-8") == "two"
+        finally:
+            Path(first).unlink()
+            Path(second).unlink()
+
+    def test_emits_debug_log(self, mock_console: MagicMock) -> None:
+        """Should log the created path at debug level."""
+        path = write_temp_text("content")
+        try:
+            mock_console.assert_any_call(f"Wrote temp file: {path}")
+        finally:
+            Path(path).unlink()
