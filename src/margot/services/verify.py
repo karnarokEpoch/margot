@@ -88,12 +88,14 @@ def resolve_descriptor(project_dir: str = ".", manifest_path: str | None = None)
     return ResolvedDescriptor(path=str(source), source_path=str(source), meta=meta, rendered=False)
 
 
-def verify(
+def verify(  # noqa: PLR0913
     project_dir: str = ".",
     manifest_path: str | None = None,
     schema_path: str | None = None,
     recommended_schema_path: str | None = None,
     recommend: bool = False,
+    strict: bool = False,
+    only_recommend: bool = False,
 ) -> VerifyResult:
     """Validate the application description against the Margo spec schema, and optionally the recommended one.
 
@@ -104,21 +106,36 @@ def verify(
         recommended_schema_path: Override for the curated recommended schema (Schema B).
         recommend: Run the recommended schema as a second pass. When False, Schema B is
             not loaded or run at all and `schema_b_results` stays empty.
+        strict: Make Schema B a contract instead of a lint pass — any finding, whatever its
+            severity, fails the run. Nothing to act on unless Schema B runs.
+        only_recommend: Run the recommended schema *instead of* the spec schema. Schema A is
+            not loaded or run at all, `schema_a_results` stays empty and `schema_a_version`
+            is blank — nothing was validated against the spec. Mutually exclusive with
+            `recommend`.
 
     Returns:
-        The validation outcome. `passed` is False when any Schema A finding is an ERROR.
-        Schema B findings are advisory and never affect `passed`.
+        The validation outcome. `passed` is False when any Schema A finding is an ERROR or,
+        with `strict`, when Schema B reported anything at all. Without `strict`, Schema B
+        findings are advisory and never affect `passed`.
 
     Raises:
-        ValueError: If the descriptor cannot be resolved or rendered.
+        ValueError: If `recommend` and `only_recommend` are both set, or if the descriptor
+            cannot be resolved or rendered.
     """
-    schema = schema_path or SCHEMA_A_PATH
+    if recommend and only_recommend:
+        raise ValueError("--recommend and --only-recommend are mutually exclusive — pass one or the other.")
+
+    run_schema_a = not only_recommend
+    run_schema_b = recommend or only_recommend
     descriptor = resolve_descriptor(project_dir, manifest_path)
+    findings: list[ValidationFinding] = []
     recommended_findings: list[ValidationFinding] = []
     try:
-        console.info(f"Running Schema A validation against {schema}")
-        findings: list[ValidationFinding] = run_validation(descriptor.path, schema, SCHEMA_A_TARGET_CLASS)
-        if recommend:
+        if run_schema_a:
+            schema = schema_path or SCHEMA_A_PATH
+            console.info(f"Running Schema A validation against {schema}")
+            findings = run_validation(descriptor.path, schema, SCHEMA_A_TARGET_CLASS)
+        if run_schema_b:
             recommended_schema = recommended_schema_path or SCHEMA_B_PATH
             console.info(f"Running Schema B validation against {recommended_schema}")
             recommended_findings = run_validation(descriptor.path, recommended_schema, SCHEMA_B_TARGET_CLASS)
@@ -127,14 +144,16 @@ def verify(
             Path(descriptor.path).unlink(missing_ok=True)
             console.debug(f"Removed temp file: {descriptor.path}")
 
-    passed = not has_errors(findings)
-    console.info(f"Schema A validation complete: {len(findings)} finding(s), passed={passed}")
-    if recommend:
-        console.info(f"Schema B validation complete: {len(recommended_findings)} advisory finding(s)")
+    passed = not has_errors(findings) and not (strict and recommended_findings)
+    if run_schema_a:
+        console.info(f"Schema A validation complete: {len(findings)} finding(s)")
+    if run_schema_b:
+        console.info(f"Schema B validation complete: {len(recommended_findings)} {'gating' if strict else 'advisory'} finding(s)")
+    console.info(f"Verification complete: passed={passed}")
     return VerifyResult(
         schema_a_results=findings,
         schema_b_results=recommended_findings,
-        schema_a_version=SCHEMA_A_COMMIT,
+        schema_a_version=SCHEMA_A_COMMIT if run_schema_a else "",
         passed=passed,
     )
 

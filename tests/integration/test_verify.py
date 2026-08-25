@@ -417,6 +417,157 @@ class TestRecommendedSchemaPass:
         assert any("is recommended" in finding.message for finding in result.schema_b_results)
 
 
+class TestStrictMode:
+    """Tests for strict=True, which turns the Schema B lint pass into a contract."""
+
+    def test_strict_fails_on_a_schema_b_warning(self, project: Path) -> None:
+        """Should fail on a Schema-B-only warning, with Schema A clean."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project), recommend=True, strict=True)
+
+        assert result.schema_a_results == []
+        assert [finding.severity for finding in result.schema_b_results] == [Severity.WARNING] * 4
+        assert result.passed is False
+
+    def test_strict_fails_on_a_schema_b_error(self, project: Path) -> None:
+        """Should fail on a Schema-B-only error, with Schema A clean."""
+        descriptor = VALID_APP_YAML[: VALID_APP_YAML.index("    components:")] + "    components: []\n"
+        (project / "margo" / "app.yaml").write_text(descriptor, encoding="utf-8")
+
+        result = verify(project_dir=str(project), recommend=True, strict=True)
+
+        assert result.schema_a_results == []
+        assert any(finding.severity is Severity.ERROR for finding in result.schema_b_results)
+        assert result.passed is False
+
+    def test_strict_passes_when_both_schemas_are_clean(self, project: Path) -> None:
+        """Should pass when neither schema has anything to report."""
+        (project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project), recommend=True, strict=True)
+
+        assert result.schema_a_results == []
+        assert result.schema_b_results == []
+        assert result.passed is True
+
+    def test_strict_without_recommend_does_not_run_schema_b(self, project: Path, mocker: Any) -> None:
+        """Should stay a Schema-A-only run: strict has nothing to act on."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+        spy = mocker.spy(verify_module, "run_validation")
+
+        result = verify(project_dir=str(project), strict=True)
+
+        assert spy.call_count == 1
+        assert result.schema_b_results == []
+        assert result.passed is True
+
+    def test_strict_still_fails_on_schema_a_errors(self, project: Path) -> None:
+        """Should keep the Schema A gate: strict adds a gate, it never removes one."""
+        (project / "margo" / "app.yaml").write_text(VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8")
+
+        result = verify(project_dir=str(project), recommend=True, strict=True)
+
+        assert result.passed is False
+        assert any("'version' is a required property" in finding.message for finding in result.schema_a_results)
+
+
+class TestOnlyRecommend:
+    """Tests for only_recommend=True, which runs Schema B and skips Schema A entirely."""
+
+    def test_only_recommend_does_not_run_schema_a(self, project: Path, mocker: Any) -> None:
+        """Should call the runner once, against Schema B only."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+        spy = mocker.spy(verify_module, "run_validation")
+
+        verify(project_dir=str(project), only_recommend=True)
+
+        assert spy.call_count == 1
+        assert [call.args[1] for call in spy.call_args_list] == [SCHEMA_B_PATH]
+
+    def test_only_recommend_leaves_schema_a_results_empty(self, project: Path) -> None:
+        """Should report no Schema A results and no pinned commit: Schema A never ran."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project), only_recommend=True)
+
+        assert result.schema_a_results == []
+        assert result.schema_a_version == ""
+        assert result.schema_b_results != []
+
+    def test_only_recommend_findings_do_not_gate_by_default(self, project: Path) -> None:
+        """Should pass despite Schema B findings: Schema B only gates with strict."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project), only_recommend=True)
+
+        assert result.schema_b_results != []
+        assert result.passed is True
+
+    def test_only_recommend_does_not_gate_on_inherited_spec_errors(self, project: Path) -> None:
+        """Should pass on a spec-invalid descriptor: without strict, nothing Schema B reports gates."""
+        (project / "margo" / "app.yaml").write_text(VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8")
+
+        result = verify(project_dir=str(project), only_recommend=True)
+
+        assert any(finding.severity is Severity.ERROR for finding in result.schema_b_results)
+        assert result.passed is True
+
+    def test_only_recommend_with_strict_fails_on_any_finding(self, project: Path) -> None:
+        """Should fail on a warning-only Schema B run when strict is set."""
+        (project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project), only_recommend=True, strict=True)
+
+        assert [finding.severity for finding in result.schema_b_results] == [Severity.WARNING] * 4
+        assert result.passed is False
+
+    def test_only_recommend_with_strict_passes_when_clean(self, project: Path) -> None:
+        """Should pass when Schema B reports nothing at all."""
+        (project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = verify(project_dir=str(project), only_recommend=True, strict=True)
+
+        assert result.schema_b_results == []
+        assert result.passed is True
+
+    def test_only_recommend_renders_a_template_once(self, project: Path, mocker: Any) -> None:
+        """Should resolve and render the descriptor exactly as the other modes do."""
+        (project / "margo" / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+        render_spy = mocker.spy(verify_module, "write_temp_text")
+        run_spy = mocker.spy(verify_module, "run_validation")
+
+        verify(project_dir=str(project), only_recommend=True)
+
+        assert render_spy.call_count == 1
+        assert [call.args[0] for call in run_spy.call_args_list] == [render_spy.spy_return]
+        assert not Path(render_spy.spy_return).exists()
+
+    def test_vendor_extensions_do_not_false_fail(self, project: Path) -> None:
+        """Should accept x-placeholder-extensions with Schema B running alone."""
+        descriptor = VALID_APP_YAML.replace(
+            "    components:\n",
+            "    x-placeholder-extensions:\n      vendor-acme:\n        profileHint: fast\n    components:\n",
+        ).replace(
+            "          packageLocation: https://example.com/compose.tar.gz\n",
+            "          packageLocation: https://example.com/compose.tar.gz\n"
+            "        x-placeholder-extensions:\n          vendor-acme:\n            componentHint: quick\n",
+        )
+        (project / "margo" / "app.yaml").write_text(descriptor, encoding="utf-8")
+
+        result = verify(project_dir=str(project), only_recommend=True, strict=True)
+
+        assert result.schema_b_results == []
+        assert result.passed is True
+
+    def test_only_recommend_with_recommend_is_rejected(self, project: Path) -> None:
+        """Should refuse the mutually exclusive combination before doing any work."""
+        (project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        with raises(ValueError, match="mutually exclusive"):
+            verify(project_dir=str(project), recommend=True, only_recommend=True)
+
+
 class TestRecommendedSchemaOverride:
     """Tests for the recommended_schema_path override."""
 
