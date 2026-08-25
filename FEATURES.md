@@ -471,8 +471,24 @@ spec document.
 ```
 margot verify [--project-dir PATH] [--manifest PATH]
               [--schema PATH] [--recommended-schema PATH]
-              [--recommend] [--strict]
+              [--recommend | --only-recommend] [--strict]
 ```
+
+**Flags:**
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--project-dir` | `.` | Directory holding `margo.yaml`. |
+| `--manifest` | resolved from `margo.yaml` | Explicit `app.yaml` / `app.yaml.jinja` path. |
+| `--schema` | vendored Schema A | Override the upstream Margo spec schema. |
+| `--recommended-schema` | vendored Schema B | Override the curated recommended schema. |
+| `--recommend` | off | Run Schema B as a second pass, after Schema A. |
+| `--only-recommend` | off | Run Schema B *instead of* Schema A — the spec schema is not loaded or run at all. |
+| `--strict` | off | Turn the Schema B lint pass into a contract: any finding, whatever its severity, fails the run. |
+
+`--recommend` and `--only-recommend` are mutually exclusive — passing both is rejected
+before any validation runs (exit 1). `--strict` needs a Schema B pass to act on: without
+`--recommend` or `--only-recommend` it changes nothing and emits a warning.
 
 **Manifest resolution:**
 
@@ -484,7 +500,10 @@ margot verify [--project-dir PATH] [--manifest PATH]
    `StrictUndefined` behavior `build` uses, and the rendered file is what gets validated.
    `verify` never reads `<build_dir>` and never requires a prior `build`.
 
-**Schema A — upstream Margo spec (always runs):**
+Resolution runs once per invocation, whichever schemas are active: both passes validate
+the same resolved file, never a re-rendered one.
+
+**Schema A — upstream Margo spec (runs unless `--only-recommend`):**
 
 1. Vendored at `src/margot/schemas/application-description.linkml.yaml`, pinned to an
    upstream commit (the spec is still draft). Overridable with `--schema`.
@@ -493,21 +512,50 @@ margot verify [--project-dir PATH] [--manifest PATH]
    - `RecommendedSlotsPlugin()` — warns on missing recommended fields
    - `MaximumCardinalityPlugin` — enforce cardinality constraints
 3. Any error fails the run (exit 1).
-4. The pinned draft commit is always printed, so results are never mistaken for
-   validation against a stable spec.
+4. The pinned draft commit is printed as `Validated against Margo spec (draft, commit
+   <sha>)`, so results are never mistaken for validation against a stable spec. With
+   `--only-recommend` Schema A does not run, so the line is not printed — it would claim a
+   check that never happened.
 
-**Schema B — margot recommended (`--recommend`):**
+`x-placeholder-extensions` mappings are removed from the instance before validation: the
+spec allows arbitrary vendor content there, LinkML's generated JSON Schema does not, and
+there is nothing inside a vendor extension for the spec's own vocabulary to check. All
+three plugins are clean on a spec-valid descriptor using extensions, in each of the three
+validation modes (A alone, B alone, A+B).
+
+**Schema B — margot recommended (`--recommend` / `--only-recommend`):**
 
 - Vendored at `src/margot/schemas/margo-recommended.linkml.yaml`, overridable with
-  `--recommended-schema`. Not loaded or run at all without `--recommend`.
+  `--recommended-schema`. Not loaded or run at all unless one of the two flags is passed.
 - Default: a lint pass — findings are reported, exit code unaffected.
-- With `--strict`: a contract — any finding fails the run (exit 1).
-- When both schemas run, findings are printed under separate labeled sections.
+- With `--strict`: a contract — any finding, whatever its severity, fails the run (exit 1).
+- Schema B imports Schema A and constrains it through `is_a` subclasses, so a descriptor
+  that breaches the spec has those errors repeated under the Schema B section.
+
+**Exit codes:** 0 = passed, 1 = any failure.
+
+| Flags | Schema A runs | Schema B runs | Exit code driven by |
+|---|---|---|---|
+| (none) | yes | no | Schema A errors |
+| `--strict` | yes | no | Schema A errors (`--strict` warns that it has nothing to act on) |
+| `--recommend` | yes | yes | Schema A errors — Schema B is advisory |
+| `--recommend --strict` | yes | yes | Schema A errors **or** any Schema B finding |
+| `--only-recommend` | no | yes | nothing — always 0, whatever Schema B reports |
+| `--only-recommend --strict` | no | yes | any Schema B finding |
+| `--recommend --only-recommend` | — | — | rejected as mutually exclusive |
 
 **Output:** plain CI-check-style pass/fail lines, pipeable into CI logs. No tables, no
 panels — visual inspection of a descriptor is `margot describe`.
 
-Exit codes: 0 = passed, 1 = any error.
+- Default: the draft-spec line and the Schema A verdict, unsectioned.
+- `--recommend` with findings from either schema: one labeled section per schema
+  (`── Schema A (Margo spec) ──` / `── Schema B (recommended) ──`), each with its own
+  verdict, then the overall `verify: PASS` / `verify: FAIL` line.
+- `--recommend` with **both** schemas clean: no section headers and no Schema B line at
+  all — with nothing to attribute, the sections are noise, and the output reads exactly
+  like a clean default run.
+- `--only-recommend`: Schema B's findings and verdict only, then the overall line. No
+  draft-spec line, no Schema A section.
 
 **Remote artifact reachability (`--remote`)** is backlog, not implemented — see
 `ROADMAP.md`.
