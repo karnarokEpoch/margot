@@ -11,47 +11,6 @@ sequencing; FEATURES.md is updated as items land (see backlog).
 
 ## Planned Sprints
 
-### Sprint 6 — `margot verify`
-
-**Goal:** Ship a complete `margot verify` command: local-only LinkML validation of the
-Margo application description (`app.yaml`, or `app.yaml.jinja` rendered to a temp file)
-against the upstream Margo spec schema (always-on) and an opt-in (`--recommend`)
-margot-curated recommended schema. Output is plain CI-check-style pass/fail. Remote
-artifact reachability checking is descoped to the backlog (see Backlog → Remaining
-commands above).
-
-**Prerequisite:** Sprint 5 is merged (✅ complete — see Completed Sprints below). `id`
-field is in `margo.yaml`, `domain/metadata.py` is final, and the Jinja2 build path is
-stable.
-
-**Full plan:** see [`.kiro/sprints/sprint-6.md`](.kiro/sprints/sprint-6.md) — background
-on the two LinkML schemas, all four scope items (validation infra, vendored schemas,
-`services/verify.py`, CLI wiring), layering/output rules, definition of done, and locked
-decisions. Ships in **3 phases, one PR and one commit each**: (1) Schema A vendored +
-`verify` command against it, (2) author Schema B + wire `--recommend`, (3) polish/DoD
-closure. Key locked decisions:
-
-* The command verifies the **application description** (`app.yaml` / `app.yaml.jinja`),
-  not `margo.yaml`. Templated descriptors are rendered to a temp file with the same
-  context `build` uses; `verify` never reads `<build_dir>` and never needs a prior build.
-* Schema A (upstream, vendored) always runs; Schema B (recommended, curated) only runs
-  with `--recommend`. When both run, output clearly separates findings under labeled
-  Schema A / Schema B sections.
-* Schema B is a lint pass by default (findings reported, exit code unaffected) and a
-  contract with `--strict` (any finding exits 1).
-* `verify` is local-only this sprint — no `--remote`, no network calls. Remote
-  reachability check is backlog (see above).
-* Output is plain pass/fail lines only — no tables, no panels, no `--deep`. The structured
-  visual view became its own command, `margot describe` (Sprint 7).
-* Vendored Schema A file states its pinned commit and that the Margo spec is still
-  draft; `verify` prints this by default so results aren't mistaken for a stable-spec check.
-* Descriptor resolution (find → render → load) ships as a standalone reusable function —
-  `describe` calls it unchanged in Sprint 7.
-* No example/golden `app.yaml` is shipped this sprint — users act on the warnings and
-  errors `verify` reports.
-
----
-
 ### Sprint 7 — `margot describe`
 
 **Goal:** Ship `margot describe`: a read-only, purely visual view of the Margo application
@@ -114,10 +73,10 @@ Unordered within groups; sequencing decided at sprint planning.
 ### Remaining commands
 
 * `verify --remote` — remote artifact reachability check, descoped from Sprint 6
-  (local-only `verify` ships in Sprint 6). For each component ref in `margo.yaml`,
-  call `OrasClient.get_manifest(ref)`, report REACHABLE / MISSING / WRONG_TYPE, with
-  `check_credentials(hostname)` before each call. Open question carried over: whether
-  variant tags are also checked or only primary versions.
+  (local-only `verify` shipped in Sprint 6 — see Completed Sprints). For each component
+  ref in `margo.yaml`, call `OrasClient.get_manifest(ref)`, report REACHABLE / MISSING /
+  WRONG_TYPE, with `check_credentials(hostname)` before each call. Open question carried
+  over: whether variant tags are also checked or only primary versions.
 
 ---
 
@@ -139,3 +98,4 @@ Unordered within groups; sequencing decided at sprint planning.
 | Sprint 3 | `margot build` — local artifact build for margo/compose/quadlet package types, placeholder substitution (`<app_tag>` from `appVersion`, `<margo_tag>`, `<compose_tag>`, `<quadlet_tag>`), variant support, idempotent output dir, multi-type `-t` flag, `margo.yaml` project descriptor, dynaconf config layering, pure-Python filesystem ops | — |
 | Sprint 4 | `margot auth login` / `margot auth logout` + `margot push` — OCI registry authentication via oras-py (`margot auth` subcommand group), credential expiry tracking (`~/.config/margot/credentials.toml`), proactive expiry check before registry ops, push built artifacts (margo/compose/quadlet) with correct `artifactType`, media types, and OCI annotations, SemVer gate before push, multi-type + variant support mirroring build | — |
 | Sprint 5 | `margot auth status` (credential expiry table), authenticated `fetch`/`pull` (transparent oras-py credential use), and the Jinja2 `app.yaml.jinja` rendering refactor: `id`/`version` required top-level fields, no `margo:` block (top-level `directory`/`repository` for the margo artifact instead), optional variant `version` with `<base>+<type>-<name>` derivation, `image: {search, replace}` block for compose/quadlet dev-local image swapping (`replace` is a Jinja2 template rendered with `StrictUndefined`), unresolved-placeholder warnings, per-component error messages. | — |
+| Sprint 6 | `margot verify` — local-only LinkML validation of the Margo application description (`app.yaml`, or `app.yaml.jinja` rendered to a temp file, never requiring a prior `build`), upstream Margo spec schema vendored at draft commit `45f4359` with that commit reported in the output, curated recommended schema (`--recommend`) as a lint pass and `--strict` as a contract, `--only-recommend` to lint against the recommended schema alone, `--schema` / `--recommended-schema` overrides, `validation/` LinkML adapter layer (plugin set + finding formatter, `x-placeholder-extensions` stripped so vendor content never false-fails), Jinja2 rendering extracted to `infra/templating.py` and shared with `build`, standalone descriptor resolution reused by `describe`, plain CI-style pass/fail output | — |
