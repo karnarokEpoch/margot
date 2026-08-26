@@ -4,6 +4,7 @@ from typer import Typer
 
 from margot.commands.auth import app as auth_app
 from margot.commands.build import build_cmd
+from margot.commands.describe import describe_cmd
 from margot.commands.fetch import fetch
 from margot.commands.global_options import global_options
 from margot.commands.pull import pull
@@ -23,6 +24,7 @@ app.command(name="build")(build_cmd)
 app.command(name="push")(push_cmd)
 app.command()(pull)
 app.command(name="verify")(verify_cmd)
+app.command(name="describe")(describe_cmd)
 
 # Register subcommand groups
 app.add_typer(auth_app, name="auth")

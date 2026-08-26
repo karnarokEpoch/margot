@@ -11,6 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
+from typer import Option
 
 from margot.domain.describe import (
     Catalog,
@@ -380,3 +381,73 @@ def build_extensions_panel(extensions: dict) -> Panel | None:
         grid.add_row(escape(str(key)), _plain(value))
 
     return Panel(grid, title="Extensions")
+
+
+
+# CLI command function
+def describe_cmd(
+    project_dir: str = Option(".", "--project-dir", help="Directory containing margo.yaml."),
+    manifest: str | None = Option(None, "--manifest", help="Path to app.yaml or app.yaml.jinja."),
+    section: list[str] | None = Option(None, "--section", help="Render only this section (metadata|profiles|config|extensions). Repeatable."),
+) -> None:
+    """Describe a Margo application description in rich, structured output.
+
+    Renders the descriptor through panels and trees: identity+catalog, deployment profiles,
+    configuration (sections → settings → schema/parameters → targets → components).
+    """
+    from margot import console
+    from margot.domain.describe import (
+        build_catalog,
+        build_configuration,
+        build_deployment_profiles,
+        build_identity,
+        component_index,
+    )
+    from margot.services import describe as describe_service
+
+    try:
+        # Resolve and load descriptor through Item 1 load gate
+        descriptor_dict = describe_service.load_descriptor(project_dir or ".", manifest)
+    except ValueError as e:
+        console.fatal(f"{str(e)} Run 'margot verify' to debug.")
+
+    # Build display model from dict
+    identity = build_identity(descriptor_dict)
+    catalog = build_catalog(descriptor_dict)
+    profiles = build_deployment_profiles(descriptor_dict)
+    index = component_index(descriptor_dict)
+    config = build_configuration(descriptor_dict, index)
+
+    # Determine which sections to render
+    requested_sections = set(section or []) if section else set()
+    if not requested_sections:
+        # All sections by default, but extensions only when present
+        requested_sections = {"metadata", "profiles", "config"}
+        if descriptor_dict.get("x-placeholder-extensions"):
+            requested_sections.add("extensions")
+
+    # Canonical order, regardless of flag order
+    canonical_order = ["metadata", "profiles", "config", "extensions"]
+    sections_to_render = [s for s in canonical_order if s in requested_sections]
+
+    # Get resolved path for subtitle
+    resolved = describe_service.resolve_descriptor(project_dir or ".", manifest)
+    resolved_path = resolved.source_path
+
+    # Render panels in order
+    for section in sections_to_render:
+        if section == "metadata":
+            panel = build_identity_catalog_panel(identity, catalog, resolved_path)
+            console.print_renderable(panel)
+        elif section == "profiles":
+            panel = build_deployment_profiles_panel(profiles, index)
+            console.print_renderable(panel)
+        elif section == "config":
+            panel = build_configuration_panel(config, index)
+            console.print_renderable(panel)
+        elif section == "extensions":
+            extensions = descriptor_dict.get("x-placeholder-extensions")
+            if extensions:
+                panel = build_extensions_panel(extensions)
+                if panel:
+                    console.print_renderable(panel)
