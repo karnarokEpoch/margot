@@ -242,7 +242,9 @@ class TestRequiredFields:
         )
         findings = _findings(descriptor, tmp_path)
 
-        assert findings == [ValidationFinding("/deploymentProfiles/0/components/0", "'name' is a required property", Severity.ERROR)]
+        assert findings == [
+            ValidationFinding("/deploymentProfiles/0/components/0", "'name' is a required property", Severity.ERROR)
+        ]
 
     def test_missing_component_properties_is_an_error(self, compliant: str, tmp_path: Path) -> None:
         """Should report the required-property ERROR for components[].properties."""
@@ -252,7 +254,9 @@ class TestRequiredFields:
         )
         findings = _findings(descriptor, tmp_path)
 
-        assert findings == [ValidationFinding("/deploymentProfiles/0/components/0", "'properties' is a required property", Severity.ERROR)]
+        assert findings == [
+            ValidationFinding("/deploymentProfiles/0/components/0", "'properties' is a required property", Severity.ERROR)
+        ]
 
     def test_fully_compliant_descriptor_has_no_required_field_errors(self, compliant: str, tmp_path: Path) -> None:
         """Should report zero ERRORs on a descriptor satisfying every required field."""
