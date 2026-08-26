@@ -529,8 +529,11 @@ validation modes (A alone, B alone, A+B).
   `--recommended-schema`. Not loaded or run at all unless one of the two flags is passed.
 - Default: a lint pass — findings are reported, exit code unaffected.
 - With `--strict`: a contract — any finding, whatever its severity, fails the run (exit 1).
-- Schema B imports Schema A and constrains it through `is_a` subclasses, so a descriptor
-  that breaches the spec has those errors repeated under the Schema B section.
+- Schema B is a standalone schema — it does not import Schema A and declares no `is_a`
+  relationship to any of its classes. It redeclares the fields it needs directly and
+  enforces the spec's own required-field set (`apiVersion`, `id`, `metadata`,
+  `deploymentProfiles`, and the required chain beneath them) as ERRORs in its own right,
+  so a Schema A re-vendor never silently changes what Schema B reports.
 
 **Exit codes:** 0 = passed, 1 = any failure.
 
