@@ -112,6 +112,11 @@ def print_table(table: Table) -> None:
     _get_stdout().print(table)
 
 
+def print_renderable(renderable) -> None:
+    """Print a rich renderable (Panel, Tree, Group, etc.) to stdout. Always shown."""
+    _get_stdout().print(renderable)
+
+
 def warning(message: str) -> None:
     """Print a yellow warning to stderr. Always shown."""
     if _debug:
