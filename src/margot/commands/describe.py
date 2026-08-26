@@ -298,25 +298,24 @@ def build_configuration_panel(config: Configuration, index: list[str]) -> Panel:
                 schema_line.append(DASH, style="dim")
             setting_node.add(schema_line)
 
-            # Parameter line
+            # Parameter line (with default value inline if resolved)
             param_line = Text("Parameter: ", style="cyan")
             if setting.parameter:
                 param_line.append(escape(setting.parameter))
+                # If parameter is resolved, append default value inline
+                if setting.parameter_resolved:
+                    param_line.append("  ")
+                    param_line.append(_literal(setting.parameter_resolved.value))
             else:
                 param_line.append(DASH, style="dim")
-            setting_node.add(param_line)
+            param_node = setting_node.add(param_line)
 
-            # If parameter is resolved, add default and targets
+            # If parameter is resolved, add targets under the Parameter node
             if setting.parameter_resolved:
                 param = setting.parameter_resolved
-                default_line = Text("Default: ", style="cyan")
-                default_line.append(_literal(param.value))
-                setting_node.add(default_line)
-
-                # Targets
                 targets = param.targets or []
                 if not targets:
-                    setting_node.add(Text("no targets", style="dim"))
+                    param_node.add(Text("no targets", style="dim"))
                 else:
                     for target in targets:
                         # Pointer line with (n/total) ratio
@@ -324,7 +323,7 @@ def build_configuration_panel(config: Configuration, index: list[str]) -> Panel:
                         pointer_line.append(_literal(target.pointer))
                         n_components = len(target.components or [])
                         pointer_line.append(f"  ({n_components}/{total_components} components)", style="dim")
-                        pointer_node = setting_node.add(pointer_line)
+                        pointer_node = param_node.add(pointer_line)
 
                         # Components under pointer
                         comps = target.components or []
