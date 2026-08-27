@@ -1,0 +1,75 @@
+name: Bug report
+description: Report a problem with margot
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in as much detail as
+        you can — it makes triage faster.
+
+  - type: input
+    id: version
+    attributes:
+      label: margot version
+      description: Output of `margot --version`
+      placeholder: "margot 1.2.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - pip / uv tool / pipx (PyPI)
+        - Container (ghcr.io)
+        - From source
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "e.g. Fedora 41, macOS 15, Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: The exact margot command that triggered the issue.
+      placeholder: "margot build --type compose"
+      render: bash
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Full error output. Run with `--debug` for infra-level detail.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: margo-yaml
+    attributes:
+      label: Relevant margo.yaml (redact anything sensitive)
+      render: yaml
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else — project structure, registry used, related issues.

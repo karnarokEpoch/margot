@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://karnarokepoch.github.io/margot/
+    about: Command reference, margo.yaml reference, and worked examples.
