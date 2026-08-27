@@ -1,0 +1,66 @@
+# Structurally valid (passes both Schema A and Schema B) but semantically inconsistent:
+# no LinkML schema check today catches a dangling parameter/setting/schema reference —
+# these are cross-field relationships, not shapes. Useful as a fixture for a future
+# semantic/coherence pass and for `margot describe`, which is expected to render the
+# mess faithfully rather than validate it (see sprint-7.md, Item 1).
+apiVersion: v1
+kind: ApplicationDescription
+id: loose-ends
+metadata:
+  name: Loose Ends
+  description: Exercises dangling parameter / setting / schema references.
+  version: 1.0.0
+  catalog:
+    organization:
+      - name: Example Corp
+deploymentProfiles:
+  - type: compose
+    id: default
+    components:
+      - name: loose-ends-compose
+        properties:
+          repository: oci://example.com/compose/loose-ends
+          revision: 1.0.0
+parameters:
+  # Declared but never referenced by any setting below — an orphaned parameter that
+  # will never be shown to a user for editing.
+  unusedApiKey:
+    value: ""
+    targets:
+      - pointer: API_KEY
+        components: ["loose-ends-compose"]
+  # Referenced by the "greeting" setting below — this one is properly linked.
+  greeting:
+    value: Hello
+    targets:
+      - pointer: GREETING
+        components: ["loose-ends-compose"]
+configuration:
+  sections:
+    - name: General
+      settings:
+        - parameter: greeting
+          name: Greeting
+          description: The greeting to use.
+          schema: requireText
+        # Points at a parameter that does not exist in `parameters` above — the setting
+        # has nothing to bind to.
+        - parameter: greetingAddressee
+          name: Greeting Addressee
+          description: The person, or group, the greeting addresses.
+          schema: requireText
+        # Points at a schema name that is not declared in `configuration.schema` below —
+        # the setting has no validation rule to apply.
+        - parameter: greeting
+          name: Greeting (strict)
+          description: A second setting for the same parameter, with a missing schema.
+          schema: strictText
+  schema:
+    - name: requireText
+      dataType: string
+      maxLength: 45
+      allowEmpty: false
+    # Declared but never referenced by any setting above — a dead schema rule.
+    - name: unusedRule
+      dataType: integer
+      minValue: 0

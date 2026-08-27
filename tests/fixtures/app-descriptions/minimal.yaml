@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ApplicationDescription
+id: hello-world
+metadata:
+  name: Hello World
+  version: "1.0.0"
+  catalog:
+    organization:
+      - name: Example Corp
+deploymentProfiles:
+  - type: compose
+    id: default
+    components:
+      - name: hello-world-compose
+        properties:
+          repository: oci://example.com/compose/hello-world
+          revision: 1.0.0

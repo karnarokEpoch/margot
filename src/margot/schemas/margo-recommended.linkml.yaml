@@ -4,54 +4,6 @@
 # it is curated here, so it carries no pinned commit and `margot verify` prints no draft-spec
 # line for it. It is an opt-in lint pass (`margot verify --recommend`), never a gate.
 #
-# ---------------------------------------------------------------------------------------
-# Overlay mechanism — decision
-# ---------------------------------------------------------------------------------------
-# "Overlay Schema A" is not a LinkML primitive. Three mechanisms were prototyped against a
-# real descriptor through the same runner Schema A uses
-# (`validation/linkml_runner.py::run_validation`, i.e. JsonschemaValidationPlugin(closed=True)
-# + RecommendedSlotsPlugin + MaximumCardinalityPlugin):
-#
-# CHOSEN — import Schema A, constrain it through `is_a` subclasses.
-#   Schema A is imported by its bare relative name (`application-description.linkml`, see
-#   `imports:` below) and every class this file constrains is declared as a subclass of its
-#   Schema A counterpart, adding only `slot_usage`. Constraints reach nested classes by
-#   re-ranging the parent slot at each level: RecommendedApplicationDescription.metadata ->
-#   RecommendedMetadata.catalog -> RecommendedCatalog.application ->
-#   RecommendedApplicationMetadata. `class_induced_slots` resolves those overrides, so
-#   RecommendedSlotsPlugin walks the whole chain. Verified: a fully-compliant descriptor
-#   yields zero findings, and the relative import resolves identically from an editable
-#   checkout and from an installed wheel (importlib.resources hands both a real directory,
-#   and hatchling ships both YAML files side by side in margot/schemas/).
-#   Consequence of importing: every Schema A constraint is inherited, so when Schema A already
-#   fails, Schema B repeats those errors on top of its own recommendations. Accepted — Schema B
-#   only runs on request and never changes the verdict, and re-deriving a constraint-free copy
-#   of Schema A is exactly the maintenance fork rejected below.
-#
-# REJECTED — standalone schema, no import, classes redeclared with only the constrained
-#   slots. `JsonschemaValidationPlugin(closed=True)` rejects every slot the schema does not
-#   declare, so a spec-valid descriptor came back with four spurious "Additional properties
-#   are not allowed" ERRORs (apiVersion/id/kind, author.email, deploymentProfiles[].type/id,
-#   components[].properties). Making it clean would mean re-declaring all 790 lines of
-#   Schema A here — a maintenance fork of the spec, which is exactly what vendoring +
-#   importing avoids.
-#
-# REJECTED — import Schema A and redeclare the same class names with added `slot_usage`.
-#   LinkML shadows rather than deep-merges a same-named class from an import: the
-#   redeclaration dropped every inherited attribute, and even the compliant descriptor
-#   failed with "Additional properties are not allowed ('apiVersion', 'deploymentProfiles',
-#   'id', 'kind', 'metadata' were unexpected)".
-#
-# ---------------------------------------------------------------------------------------
-# Severity mapping
-# ---------------------------------------------------------------------------------------
-# `recommended: true` slots surface through RecommendedSlotsPlugin as LinkML WARN, which
-# `linkml_runner._SEVERITY_MAP` already turns into `Severity.WARNING` — never ERROR.
-# `minimum_cardinality` becomes a JSON Schema `minItems`, so an empty list is reported by
-# JsonschemaValidationPlugin as `Severity.ERROR`. That severity is kept as LinkML reports it
-# rather than downgraded: Schema B findings do not affect `passed` or the exit code at this
-# stage regardless of severity, and preserving the distinction is what `--strict` will act on.
-#
 # Scope note: OCI artifact annotations (`org.opencontainers.image.*`) are deliberately absent
 # — they are written by `push`, not fields of the application description.
 # yaml-language-server: $schema=https://linkml.io/linkml-model/linkml_model/jsonschema/meta.schema.json
@@ -60,8 +12,10 @@ name: MargoRecommended
 title: Margot Recommended Application Description Schema
 description: >-
   Margot's curated recommendations on top of the Margo application description spec.
-  Flags fields that are optional in the specification but expected of a well-formed,
-  catalog-ready application, and tightens cardinality where the spec accepts an empty list.
+  Standalone: does not import the vendored upstream schema, so it never silently changes
+  when that file is re-vendored. Flags fields that are optional in the specification but
+  expected of a well-formed, catalog-ready application, tightens cardinality where the spec
+  accepts an empty list, and enforces the spec's own required-field set directly.
 version: 1.0
 prefixes:
   linkml: https://w3id.org/linkml/
@@ -69,43 +23,92 @@ prefixes:
 default_prefix: margot
 imports:
   - linkml:types
-  # Relative to this file's directory. LinkML appends the `.yaml` extension itself, so the
-  # vendored application-description.linkml.yaml is named without it.
-  - application-description.linkml
 
 classes:
   RecommendedApplicationDescription:
     description: >-
-      Root class for the recommended pass. Identical to the spec's ApplicationDescription,
-      with the metadata and deploymentProfiles slots re-ranged onto their recommended
-      counterparts.
-    is_a: ApplicationDescription
-    slot_usage:
+      Root class for the recommended pass. Declares every top-level field the spec allows on
+      `ApplicationDescription` (including Schema A's own `kind` addition, accepted but not
+      required) so a spec-valid descriptor validates cleanly under `closed=True`, and marks
+      `apiVersion`, `id`, `metadata` and `deploymentProfiles` required per the spec.
+    attributes:
+      apiVersion:
+        description: >-
+          Identifier of the version of the API the object definition follows. The spec is
+          pre-draft and the value has been seen in the wild as a bare version (`v1`,
+          margot's own descriptor-schema-version convention).
+        range: string
+        required: true
+        pattern: ^v[0-9]+(alpha[0-9]*|beta[0-9]*)?$
+      kind:
+        description: >-
+          Specifies the object type. Not part of the upstream spec's documented top-level
+          attributes; accepted here for compatibility with descriptors that carry it, but not
+          required by Schema B. When present it must name this class, matching Schema A's
+          own constraint.
+        range: string
+        equals_string: ApplicationDescription
+      id:
+        description: >-
+          An identifier for the application. Lower case letters, numbers and dashes only, at
+          most 200 characters. Recommended: namespace the id under a reverse-domain-style
+          prefix (at least 3 dash-separated segments, e.g. `com-example-mosquitto`) so ids
+          stay unique across vendors in a shared catalog. Not enforced as a pattern — plenty
+          of valid single-word ids exist already — but new applications should follow it.
+        range: string
+        required: true
+        pattern: ^[a-z0-9-]{1,200}$
       metadata:
+        description: Metadata element specifying characteristics about the application.
         range: RecommendedMetadata
+        required: true
       deploymentProfiles:
         description: >-
           The spec requires the slot but accepts an empty list; an application description
           that declares no deployment profile cannot be installed anywhere.
         range: RecommendedDeploymentProfile
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+        required: true
         minimum_cardinality: 1
+      parameters:
+        description: Configurable parameters to use when installing, or updating, the application.
+        range: RecommendedParameter
+        multivalued: true
+        inlined: true
+        inlined_as_list: false
+      configuration:
+        description: How parameters should be displayed to the user and validated.
+        range: RecommendedConfiguration
+    slots:
+      - x-placeholder-extensions
 
   RecommendedMetadata:
     description: Application metadata with a recommended human-readable description.
-    is_a: Metadata
-    slot_usage:
+    attributes:
+      name:
+        description: The application's official name.
+        range: string
+        required: true
       description:
         description: >-
           Catalogs and marketplaces show this text next to the application name. Without it
           the application is listed with nothing but its title.
+        range: string
         recommended: true
+      version:
+        description: The application's version.
+        range: string
+        required: true
       catalog:
+        description: Catalog element specifying the application's metadata for enabling its discovery.
         range: RecommendedCatalog
+        required: true
 
   RecommendedCatalog:
     description: Catalog metadata with recommended author and application blocks.
-    is_a: Catalog
-    slot_usage:
+    attributes:
       application:
         description: >-
           Holds the discovery metadata (icon, description file, release notes) recommended
@@ -116,30 +119,329 @@ classes:
         description: >-
           Optional in the spec. Recommended so consumers have a contact for the application
           beyond the providing organization.
+        range: RecommendedAuthor
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
         recommended: true
+      organization:
+        description: >-
+          Organization element specifying metadata about the organization/company providing
+          the application.
+        range: RecommendedOrganization
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+        required: true
 
   RecommendedApplicationMetadata:
     description: >-
-      Application-specific catalog metadata. All three slots are optional in the spec and
-      recommended here: they are what a catalog needs to present the application to a user.
-    is_a: ApplicationMetadata
-    slot_usage:
-      icon:
-        description: Without an icon the application renders as a placeholder tile.
-        recommended: true
+      Application-specific catalog metadata. All three highlighted slots are optional in the
+      spec and recommended here: they are what a catalog needs to present the application to
+      a user. Other spec-allowed slots are declared so they do not trip `closed=True`.
+    attributes:
       descriptionFile:
         description: The long-form description a catalog shows on the application's page.
+        range: string
         recommended: true
+      icon:
+        description: Without an icon the application renders as a placeholder tile.
+        range: string
+        recommended: true
+      licenseFile:
+        description: Link to the file that details the application's license.
+        range: string
       releaseNotes:
         description: Lets an operator tell what changed before accepting an update.
+        range: string
         recommended: true
+      site:
+        description: Link to the application's website.
+        range: string
+        pattern: ^https?://[^\s/$.?#][^\s]*$
+      tagline:
+        description: The application's slogan.
+        range: string
+      tags:
+        description: Additional context for categorizing or searching the application.
+        range: string
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+  RecommendedAuthor:
+    description: Information about the application's author.
+    attributes:
+      name:
+        description: The name of the application's creator.
+        range: string
+      email:
+        description: Email address of the application's creator.
+        range: string
+        pattern: .*@[a-z0-9.-]*
+
+  RecommendedOrganization:
+    description: Information about the providing organization.
+    attributes:
+      name:
+        description: Organization responsible for the application's development and distribution.
+        range: string
+        required: true
+      site:
+        description: Link to the organization's website.
+        range: string
+        pattern: ^https?://[^\s/$.?#][^\s]*$
 
   RecommendedDeploymentProfile:
     description: A deployment profile that must declare at least one component.
-    is_a: DeploymentProfile
-    slot_usage:
+    attributes:
+      type:
+        description: helm or compose or quadlet.
+        range: string
+        required: true
+        pattern: ^(helm|compose|quadlet)$
+      id:
+        description: >-
+          An identifier for the deployment profile, unique within this application
+          description's scope.
+        range: string
+        required: true
+      description:
+        description: Additional context about the deployment profile's purpose.
+        range: string
       components:
         description: >-
           The spec requires the slot but accepts an empty list; a profile with no component
           deploys nothing.
+        range: RecommendedComponent
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+        required: true
         minimum_cardinality: 1
+      requiredResources:
+        description: Resources required to install the application.
+        range: RecommendedRequiredResources
+    slots:
+      - x-placeholder-extensions
+
+  RecommendedRequiredResources:
+    description: Required resources element specifying the resources required to install the application.
+    attributes:
+      cpu:
+        range: RecommendedCPU
+      memory:
+        range: string
+        pattern: ^[0-9]+(Mi|Gi|Ki)$
+      storage:
+        range: string
+        pattern: ^[0-9]+(Mi|Gi|Ki|Ti|Pi|Ei)$
+      peripherals:
+        range: RecommendedPeripheral
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+      interfaces:
+        range: RecommendedCommunicationInterface
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+  RecommendedCPU:
+    description: CPU element specifying the CPU requirements for the application.
+    attributes:
+      cores:
+        range: double
+        required: true
+      architectures:
+        range: string
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+  RecommendedPeripheral:
+    description: Peripheral hardware of a device.
+    attributes:
+      type:
+        range: string
+        required: true
+      manufacturer:
+        range: string
+      model:
+        range: string
+
+  RecommendedCommunicationInterface:
+    description: Communication interface of a device.
+    attributes:
+      type:
+        range: string
+        required: true
+
+  RecommendedComponent:
+    description: A component of a deployment profile.
+    attributes:
+      name:
+        description: >-
+          A unique name used to identify the component package. Lower case letters, numbers
+          and dashes only.
+        range: string
+        required: true
+      properties:
+        description: The component package's deployment details.
+        range: RecommendedComponentProperties
+        required: true
+    slots:
+      - x-placeholder-extensions
+
+  RecommendedComponentProperties:
+    description: >-
+      Properties dictionary for component deployment details. `repository`/`revision` (OCI)
+      is the only supported way to locate a component's package. `packageLocation`/
+      `keyLocation` (plain URL + signature) are deliberately not declared as attributes: with
+      `closed=True` any property not listed here is rejected as an unknown property, which is
+      how this class bans them outright rather than just discouraging them.
+    attributes:
+      repository:
+        description: >-
+          OCI repository URI for the component package. MUST use the `oci://` scheme, e.g.
+          `oci://registry.example.com/org/component-name`.
+        range: string
+        pattern: ^oci://[^\s/]+(/[^\s/]+)+$
+      revision:
+        range: string
+      wait:
+        range: boolean
+      timeout:
+        description: >-
+          The time to wait for the component's installation to complete, formatted as
+          "##m##s" or just "##s", e.g. `8m30s` or `90s`.
+        range: string
+        pattern: ^([0-9]+m)?[0-9]+s$
+
+  RecommendedParameter:
+    description: A configurable parameter for the application.
+    attributes:
+      name:
+        range: string
+        identifier: true
+      value:
+        any_of:
+          - range: boolean
+          - range: integer
+          - range: double
+          - range: string
+      targets:
+        range: RecommendedTarget
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+        required: true
+
+  RecommendedTarget:
+    description: Specifies where the parameter applies in the deployment.
+    attributes:
+      pointer:
+        description: >-
+          For Helm deployments, dot notation into `values.yaml` (as with `helm install
+          --set`), e.g. `image.tag`. For Compose/quadlet deployments, an environment
+          variable name, e.g. `MQTT_PORT`. The two shapes can't be told apart from the
+          string alone, so this only enforces a light structural shape common to both: an
+          identifier-like segment, optionally dot-separated, no whitespace or shell/template
+          metacharacters.
+        range: string
+        required: true
+        pattern: ^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$
+      components:
+        range: string
+        multivalued: true
+        required: true
+
+  RecommendedConfiguration:
+    description: Configuration layout and validation rules.
+    attributes:
+      sections:
+        range: RecommendedSection
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+        required: true
+      schema:
+        range: RecommendedSchema
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+        required: true
+
+  RecommendedSection:
+    description: Named sections within the configuration layout.
+    attributes:
+      name:
+        range: string
+        required: true
+      settings:
+        range: RecommendedSetting
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+        required: true
+
+  RecommendedSetting:
+    description: Individual configuration settings.
+    attributes:
+      parameter:
+        range: string
+        required: true
+      name:
+        range: string
+        required: true
+      description:
+        range: string
+      immutable:
+        range: boolean
+      schema:
+        range: string
+        required: true
+
+  RecommendedSchema:
+    description: >-
+      Defines data type and rules for validating user provided parameter values. All
+      subclass-specific rule attributes (TextValidationSchema, NumericIntegerValidationSchema,
+      etc. in Schema A) are declared flat here, since this schema does not use `is_a`.
+    attributes:
+      name:
+        range: string
+        required: true
+      dataType:
+        range: string
+        required: true
+      allowEmpty:
+        range: boolean
+      minLength:
+        range: integer
+      maxLength:
+        range: integer
+      regexMatch:
+        range: string
+      minValue:
+        range: float
+      maxValue:
+        range: float
+      minPrecision:
+        range: integer
+      maxPrecision:
+        range: integer
+      multiselect:
+        range: boolean
+      options:
+        range: string
+        multivalued: true
+
+slots:
+  x-placeholder-extensions:
+    description: >-
+      Allows addition of arbitrary object (mapping) whose contents suppliers use to provide
+      vendor-specific functionality beyond what is defined in the Margo specification.
+    required: false
+    multivalued: true
+    inlined: true
+    inlined_as_list: false
