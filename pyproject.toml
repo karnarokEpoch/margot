@@ -2,6 +2,7 @@
 name = "margo-tooling"
 dynamic = ["version"]
 description = "Developer CLI for building and publishing Margo application packages"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
