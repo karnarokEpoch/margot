@@ -1,5 +1,5 @@
 [project]
-name = "margot"
+name = "margo-tooling"
 dynamic = ["version"]
 description = "Developer CLI for building and publishing Margo application packages"
 requires-python = ">=3.12"
