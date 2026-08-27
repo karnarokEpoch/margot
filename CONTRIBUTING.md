@@ -68,10 +68,10 @@ Releases follow a branch-based flow — no manual tagging.
 
 ### Steps
 
-1. Create a branch named `release/<version>` (e.g. `release/v0.2.0`):
+1. Create a branch named `release/<version>` (e.g. `release/0.2.0`):
 
    ```bash
-   git checkout -b release/v0.2.0
+   git checkout -b release/0.2.0
    ```
 
 2. Push and open a PR to `main`. The **Release Check** workflow previews
@@ -90,7 +90,7 @@ Releases follow a branch-based flow — no manual tagging.
 
 - Version is derived from git tags via `hatch-vcs` — no version string in source.
 - Tags pushed by the release workflow follow the branch name exactly
-  (e.g. branch `release/v0.2.0` → tag `v0.2.0`).
+  (e.g. branch `release/0.2.0` → tag `0.2.0`).
 
 ### No manual tags
 
