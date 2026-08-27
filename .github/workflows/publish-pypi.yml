@@ -1,0 +1,36 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Git tag of the GitHub release to publish (e.g. 1.2.3)"
+        required: true
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # required for PyPI trusted publishing
+
+    steps:
+      - name: Resolve release tag
+        id: tag
+        run: echo "version=${{ inputs.version || github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download ${{ steps.tag.outputs.version }} \
+            --repo ${{ github.repository }} \
+            --pattern '*.whl' \
+            --pattern '*.tar.gz' \
+            --dir dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
