@@ -5,6 +5,8 @@ domain model are passed through Text objects, never interpolated into markup str
 All descriptor-derived values are escaped before rendering.
 """
 
+from typing import Annotated, Any
+
 from rich.console import Group
 from rich.markup import escape
 from rich.panel import Panel
@@ -13,17 +15,23 @@ from rich.text import Text
 from rich.tree import Tree
 from typer import Option
 
+from margot import console
 from margot.domain.describe import (
     Catalog,
-    CatalogApplication,
-    Component,
     Configuration,
+    ConfigurationSection,
     DeploymentProfile,
     Identity,
-    ParameterTarget,
+    Parameter,
     Schema,
     Setting,
+    build_catalog,
+    build_configuration,
+    build_deployment_profiles,
+    build_identity,
+    component_index,
 )
+from margot.services import describe as describe_service
 
 DASH = "\u2014"  # em dash
 DOT = " \u00b7 "  # middle dot with spaces
@@ -61,25 +69,32 @@ def _kv_line(key: str, value: Text, width: int) -> Text:
     return line
 
 
-def _constraint_format(schema: Schema) -> Text:
-    """Format schema constraints in compact form: 1..65535, ≥10, ≤64, one of: a, b, c, etc."""
-    parts: list[str] = []
-
-    # minValue/maxValue range
-    if schema.min_value is not None and schema.max_value is not None:
-        parts.append(f"{schema.min_value}..{schema.max_value}")
-    elif schema.min_value is not None:
-        parts.append(f"\u2265{schema.min_value}")
-    elif schema.max_value is not None:
-        parts.append(f"\u2264{schema.max_value}")
-
-    # minLength/maxLength range
-    if schema.min_length is not None and schema.max_length is not None:
+def _add_range_constraints(parts: list[str], schema: Schema, is_numeric: bool) -> None:
+    """Add range constraints (minValue/maxValue or minLength/maxLength) to parts."""
+    if is_numeric:
+        if schema.min_value is not None and schema.max_value is not None:
+            parts.append(f"{schema.min_value}..{schema.max_value}")
+        elif schema.min_value is not None:
+            parts.append(f"\u2265{schema.min_value}")
+        elif schema.max_value is not None:
+            parts.append(f"\u2264{schema.max_value}")
+    elif schema.min_length is not None and schema.max_length is not None:
         parts.append(f"{schema.min_length}..{schema.max_length} chars")
     elif schema.min_length is not None:
         parts.append(f"\u2265{schema.min_length} chars")
     elif schema.max_length is not None:
         parts.append(f"\u2264{schema.max_length} chars")
+
+
+def _constraint_format(schema: Schema) -> Text:
+    """Format schema constraints in compact form: 1..65535, ≥10, ≤64, one of: a, b, c, etc."""
+    parts: list[str] = []
+
+    # minValue/maxValue range
+    _add_range_constraints(parts, schema, is_numeric=True)
+
+    # minLength/maxLength range
+    _add_range_constraints(parts, schema, is_numeric=False)
 
     # Regex
     if schema.regex_match is not None:
@@ -120,7 +135,7 @@ def build_identity_catalog_panel(identity: Identity, catalog: Catalog | None, re
     # Build body
     body: list = []
 
-    # Grid: id / version / name
+    # Build grid for id/version/name fields
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="cyan")
     grid.add_column()
@@ -257,6 +272,105 @@ def build_deployment_profiles_panel(profiles: list[DeploymentProfile], index: li
     return Panel(Group(*interleaved), title=title)
 
 
+def _build_schema_line(setting: Setting) -> Text:
+    """Build the schema line for a setting."""
+    schema_line = Text("Schema: ", style="cyan")
+    if setting.schema:
+        schema_line.append(escape(setting.schema.name or ""))
+        schema_line.append("  ")
+        schema_line.append(escape(setting.schema.data_type or ""))
+        if setting.schema.data_type:
+            schema_line.append("  ")
+            schema_line.append(_constraint_format(setting.schema))
+    else:
+        schema_line.append(DASH, style="dim")
+    return schema_line
+
+
+def _build_parameter_line(setting: Setting) -> Text:
+    """Build the parameter line with inline default value if present."""
+    param_line = Text("Parameter: ", style="cyan")
+    if setting.parameter:
+        param_line.append(escape(setting.parameter))
+        if setting.parameter_resolved:
+            param_line.append("  ")
+            param_line.append(_literal(setting.parameter_resolved.value))
+    else:
+        param_line.append(DASH, style="dim")
+    return param_line
+
+
+def _add_targets_to_node(param_node: Any, param: Parameter, total_components: int, index: list[str]) -> None:  # noqa: ANN401
+    """Add targets and components to the param_node tree."""
+    targets = param.targets or []
+    if not targets:
+        param_node.add(Text("no targets", style="dim"))
+    else:
+        for target in targets:
+            pointer_line = Text("Pointer: ", style="cyan")
+            pointer_line.append(_literal(target.pointer))
+            n_components = len(target.components or [])
+            pointer_line.append(
+                f"  ({n_components}/{total_components} components)", style="dim"
+            )
+            pointer_node = param_node.add(pointer_line)
+
+            comps = target.components or []
+            if not comps:
+                pointer_node.add(Text("none", style="dim"))
+            else:
+                for comp_name in comps:
+                    comp_text = Text(escape(comp_name))
+                    if comp_name not in index:
+                        comp_text.append("  (not declared)", style="dim")
+                    pointer_node.add(comp_text)
+
+
+def _build_section_tree(section: ConfigurationSection, total_components: int, index: list[str]) -> Tree:
+    """Build the tree for a single configuration section with all its settings."""
+    section_root = Text(escape(section.name or ""))
+    section_root.append("  [Section]", style="dim")
+    section_tree = Tree(section_root)
+
+    for setting in section.settings:
+        # Setting node
+        setting_label = Text(escape(setting.name or ""), style="bold")
+        setting_label.append("  [Setting]", style="dim")
+        if setting.immutable:
+            setting_label.append("  immutable", style="yellow")
+        setting_node = section_tree.add(setting_label)
+
+        # Add schema line
+        schema_line = _build_schema_line(setting)
+        setting_node.add(schema_line)
+
+        # Add parameter line
+        param_line = _build_parameter_line(setting)
+        param_node = setting_node.add(param_line)
+
+        # Add targets and components if parameter is resolved
+        if setting.parameter_resolved:
+            _add_targets_to_node(
+                param_node, setting.parameter_resolved, total_components, index
+            )
+
+    return section_tree
+
+
+def _build_unreferenced_tree(unreferenced: list[str]) -> Tree:
+    """Build the tree for unreferenced parameters."""
+    orphan_root = Text(
+        f"Unreferenced parameters ({len(unreferenced)})", style="bold yellow"
+    )
+    orphan_tree = Tree(orphan_root)
+    for param_name in unreferenced:
+        param_node = orphan_tree.add(Text(escape(param_name)))
+        default_line = Text("Default: ", style="cyan")
+        default_line.append(DASH, style="dim")
+        param_node.add(default_line)
+    return orphan_tree
+
+
 def build_configuration_panel(config: Configuration, index: list[str]) -> Panel:
     """Build the configuration panel with configuration-first join tree.
 
@@ -271,84 +385,14 @@ def build_configuration_panel(config: Configuration, index: list[str]) -> Panel:
     blocks: list = []
     total_components = len(index)
 
+    # Build section trees
     for section in config.sections:
-        # Section root
-        section_root = Text(escape(section.name or ""))
-        section_root.append("  [Section]", style="dim")
-        section_tree = Tree(section_root)
-
-        for setting in section.settings:
-            # Setting line: name [Setting] immutable-if-true
-            setting_label = Text(escape(setting.name or ""), style="bold")
-            setting_label.append("  [Setting]", style="dim")
-            if setting.immutable:
-                setting_label.append("  immutable", style="yellow")
-            setting_node = section_tree.add(setting_label)
-
-            # Schema line
-            schema_line = Text("Schema: ", style="cyan")
-            if setting.schema:
-                schema_line.append(escape(setting.schema.name or ""))
-                schema_line.append("  ")
-                schema_line.append(escape(setting.schema.data_type or ""))
-                if setting.schema.data_type:
-                    schema_line.append("  ")
-                    schema_line.append(_constraint_format(setting.schema))
-            else:
-                schema_line.append(DASH, style="dim")
-            setting_node.add(schema_line)
-
-            # Parameter line (with default value inline if resolved)
-            param_line = Text("Parameter: ", style="cyan")
-            if setting.parameter:
-                param_line.append(escape(setting.parameter))
-                # If parameter is resolved, append default value inline
-                if setting.parameter_resolved:
-                    param_line.append("  ")
-                    param_line.append(_literal(setting.parameter_resolved.value))
-            else:
-                param_line.append(DASH, style="dim")
-            param_node = setting_node.add(param_line)
-
-            # If parameter is resolved, add targets under the Parameter node
-            if setting.parameter_resolved:
-                param = setting.parameter_resolved
-                targets = param.targets or []
-                if not targets:
-                    param_node.add(Text("no targets", style="dim"))
-                else:
-                    for target in targets:
-                        # Pointer line with (n/total) ratio
-                        pointer_line = Text("Pointer: ", style="cyan")
-                        pointer_line.append(_literal(target.pointer))
-                        n_components = len(target.components or [])
-                        pointer_line.append(f"  ({n_components}/{total_components} components)", style="dim")
-                        pointer_node = param_node.add(pointer_line)
-
-                        # Components under pointer
-                        comps = target.components or []
-                        if not comps:
-                            pointer_node.add(Text("none", style="dim"))
-                        else:
-                            for comp_name in comps:
-                                comp_text = Text(escape(comp_name))
-                                if comp_name not in index:
-                                    comp_text.append("  (not declared)", style="dim")
-                                pointer_node.add(comp_text)
-
+        section_tree = _build_section_tree(section, total_components, index)
         blocks.append(section_tree)
 
-    # Unreferenced parameters subtree
+    # Build unreferenced parameters tree
     if config.unreferenced:
-        orphan_root = Text(f"Unreferenced parameters ({len(config.unreferenced)})", style="bold yellow")
-        orphan_tree = Tree(orphan_root)
-        for param_name in config.unreferenced:
-            param_node = orphan_tree.add(Text(escape(param_name)))
-            # Note: We don't have the actual Parameter objects here, so we'd need to pass them separately
-            # For now, just add a placeholder
-            default_line = Text("Default: ", style="cyan")
-            default_line.append(DASH, style="dim")
-            param_node.add(default_line)
+        orphan_tree = _build_unreferenced_tree(config.unreferenced)
         blocks.append(orphan_tree)
 
     # Interleave with blank lines
@@ -382,40 +426,63 @@ def build_extensions_panel(extensions: dict) -> Panel | None:
     return Panel(grid, title="Extensions")
 
 
+def _render_section(  # noqa: PLR0913
+    section_name: str,
+    identity: Identity,
+    catalog: Catalog | None,
+    profiles: list[DeploymentProfile],
+    index: list[str],
+    config: Configuration,
+    descriptor_dict: dict,
+    resolved_path: str,
+) -> None:
+    """Render a single section panel based on section name."""
+    if section_name == "metadata":
+        panel = build_identity_catalog_panel(identity, catalog, resolved_path)
+        console.print_renderable(panel)
+    elif section_name == "profiles":
+        panel = build_deployment_profiles_panel(profiles, index)
+        console.print_renderable(panel)
+    elif section_name == "config":
+        panel = build_configuration_panel(config, index)
+        console.print_renderable(panel)
+    elif section_name == "extensions":
+        extensions = descriptor_dict.get("x-placeholder-extensions")
+        if extensions:
+            panel = build_extensions_panel(extensions)
+            if panel:
+                console.print_renderable(panel)
+
 
 # CLI command function
 def describe_cmd(
     project_dir: str = Option(".", "--project-dir", help="Directory containing margo.yaml."),
     manifest: str | None = Option(None, "--manifest", help="Path to app.yaml or app.yaml.jinja."),
-    section: list[str] | None = Option(None, "--section", help="Render only this section (metadata|profiles|config|extensions). Repeatable."),
+    section: Annotated[
+        list[str] | None,
+        Option(
+            "--section",
+            help="Render only this section (metadata|profiles|config|extensions). Repeatable.",
+        ),
+    ] = None,
 ) -> None:
     """Describe a Margo application description in rich, structured output.
 
     Renders the descriptor through panels and trees: identity+catalog, deployment profiles,
     configuration (sections → settings → schema/parameters → targets → components).
     """
-    from margot import console
-    from margot.domain.describe import (
-        build_catalog,
-        build_configuration,
-        build_deployment_profiles,
-        build_identity,
-        component_index,
-    )
-    from margot.services import describe as describe_service
-
     try:
         # Resolve and load descriptor through Item 1 load gate
         descriptor_dict = describe_service.load_descriptor(project_dir or ".", manifest)
-    except ValueError as e:
-        console.fatal(f"{str(e)} Run 'margot verify' to debug.")
+    except (ValueError, TypeError) as e:
+        console.fatal(f"{e!s} Run 'margot verify' to debug.")
 
     # Build display model from dict
     identity = build_identity(descriptor_dict)
     catalog = build_catalog(descriptor_dict)
     profiles = build_deployment_profiles(descriptor_dict)
     index = component_index(descriptor_dict)
-    config = build_configuration(descriptor_dict, index)
+    config = build_configuration(descriptor_dict)
 
     # Determine which sections to render
     requested_sections = set(section or []) if section else set()
@@ -434,19 +501,8 @@ def describe_cmd(
     resolved_path = resolved.source_path
 
     # Render panels in order
-    for section in sections_to_render:
-        if section == "metadata":
-            panel = build_identity_catalog_panel(identity, catalog, resolved_path)
-            console.print_renderable(panel)
-        elif section == "profiles":
-            panel = build_deployment_profiles_panel(profiles, index)
-            console.print_renderable(panel)
-        elif section == "config":
-            panel = build_configuration_panel(config, index)
-            console.print_renderable(panel)
-        elif section == "extensions":
-            extensions = descriptor_dict.get("x-placeholder-extensions")
-            if extensions:
-                panel = build_extensions_panel(extensions)
-                if panel:
-                    console.print_renderable(panel)
+    # Render sections
+    for section_name in sections_to_render:
+        _render_section(
+            section_name, identity, catalog, profiles, index, config, descriptor_dict, resolved_path
+        )

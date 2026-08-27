@@ -1,19 +1,8 @@
 """Unit tests for the describe domain model — identity, catalog, and deployment profiles."""
 
-from pytest import raises
 
 from margot.domain.describe import (
-    Catalog,
-    CatalogApplication,
-    Component,
-    Configuration,
-    ConfigurationSection,
-    DeploymentProfile,
-    Identity,
-    Parameter,
-    ParameterTarget,
     Schema,
-    Setting,
     build_catalog,
     build_configuration,
     build_deployment_profiles,
@@ -393,7 +382,7 @@ class TestConfigurationModel:
         """Should return empty Configuration when no configuration block."""
         doc = {}
 
-        config = build_configuration(doc, component_index(doc))
+        config = build_configuration(doc)
 
         assert config.sections == []
         assert config.unreferenced == []
@@ -402,7 +391,7 @@ class TestConfigurationModel:
         """Should return Configuration with empty sections list when sections absent."""
         doc = {"configuration": {}}
 
-        config = build_configuration(doc, component_index(doc))
+        config = build_configuration(doc)
 
         assert config.sections == []
 
@@ -446,7 +435,7 @@ class TestConfigurationModel:
             },
         }
 
-        config = build_configuration(doc, ["app-compose"])
+        config = build_configuration(doc)
 
         assert len(config.sections) == 1
         section = config.sections[0]
@@ -484,7 +473,7 @@ class TestConfigurationModel:
             "parameters": {"param1": {"value": "test"}},
         }
 
-        config = build_configuration(doc, [])
+        config = build_configuration(doc)
 
         setting = config.sections[0].settings[0]
         assert setting.schema is not None
@@ -512,7 +501,7 @@ class TestConfigurationModel:
             "parameters": {"param1": {"value": "test"}},
         }
 
-        config = build_configuration(doc, [])
+        config = build_configuration(doc)
 
         setting = config.sections[0].settings[0]
         assert setting.schema is None
@@ -543,7 +532,7 @@ class TestConfigurationModel:
             "parameters": {},
         }
 
-        config = build_configuration(doc, [])
+        config = build_configuration(doc)
 
         setting = config.sections[0].settings[0]
         assert setting.parameter == "missing"
@@ -571,7 +560,7 @@ class TestConfigurationModel:
             "parameters": {"param1": {"value": "test"}},
         }
 
-        config = build_configuration(doc, [])
+        config = build_configuration(doc)
 
         setting = config.sections[0].settings[0]
         assert setting.immutable is True
@@ -611,7 +600,7 @@ class TestConfigurationModel:
             },
         }
 
-        config = build_configuration(doc, ["app1", "app2", "app3"])
+        config = build_configuration(doc)
 
         setting = config.sections[0].settings[0]
         param = setting.parameter_resolved
@@ -651,7 +640,7 @@ class TestConfigurationModel:
             },
         }
 
-        config = build_configuration(doc, ["app1"])
+        config = build_configuration(doc)
 
         param = config.sections[0].settings[0].parameter_resolved
         assert param is not None
@@ -685,7 +674,7 @@ class TestConfigurationModel:
             },
         }
 
-        config = build_configuration(doc, [])
+        config = build_configuration(doc)
 
         assert set(config.unreferenced) == {"orphan1", "orphan2"}
 
@@ -718,7 +707,7 @@ class TestConfigurationModel:
             },
         }
 
-        config = build_configuration(doc, [])
+        config = build_configuration(doc)
 
         assert config.unreferenced == []
 

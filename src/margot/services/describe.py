@@ -8,9 +8,7 @@ mapping with kind=ApplicationDescription.
 from pathlib import Path
 
 from margot import console
-from margot.domain.metadata import build_jinja2_context, load_margo_yaml
-from margot.infra.filesystem import load_yaml, write_temp_text
-from margot.infra.templating import render_template_file
+from margot.infra.filesystem import load_yaml
 from margot.services.verify import resolve_descriptor
 
 JINJA_DESCRIPTOR = "app.yaml.jinja"
@@ -44,14 +42,18 @@ def load_descriptor(project_dir: str = ".", manifest_path: str | None = None) ->
 
         # Enforce: must be a mapping
         if not isinstance(parsed, dict):
-            raise ValueError("Application description must parse into a mapping (dict), not a sequence or scalar.")
+            raise TypeError("Application description must parse into a mapping (dict), not a sequence or scalar.")
 
         # Enforce: kind must be ApplicationDescription
         kind = parsed.get("kind")
         if kind != "ApplicationDescription":
-            raise ValueError(f"Application description kind must be 'ApplicationDescription', got '{kind}'. Run 'margot verify' to debug.")
+            raise ValueError(
+                f"Application description kind must be 'ApplicationDescription', got '{kind}'. Run 'margot verify' to debug."
+            )
 
-        console.info("Item 1 load gate passed: valid mapping with kind=ApplicationDescription")
+        console.info(
+            "Item 1 load gate passed: valid mapping with kind=ApplicationDescription"
+        )
         return parsed
 
     finally:

@@ -14,7 +14,7 @@ from json import dumps
 from os.path import relpath
 import sys
 
-from rich.console import Console
+from rich.console import Console, RenderableType
 from rich.table import Table
 from typer import Exit
 
@@ -112,7 +112,7 @@ def print_table(table: Table) -> None:
     _get_stdout().print(table)
 
 
-def print_renderable(renderable) -> None:
+def print_renderable(renderable: RenderableType) -> None:
     """Print a rich renderable (Panel, Tree, Group, etc.) to stdout. Always shown."""
     _get_stdout().print(renderable)
 

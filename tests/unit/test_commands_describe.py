@@ -3,12 +3,15 @@
 from io import StringIO
 import re
 
-from pytest import fixture
 from rich.console import Console
 
+from margot.commands.describe import (
+    build_configuration_panel,
+    build_deployment_profiles_panel,
+    build_extensions_panel,
+    build_identity_catalog_panel,
+)
 from margot.domain.describe import (
-    Catalog,
-    CatalogApplication,
     Component,
     Configuration,
     ConfigurationSection,
@@ -18,12 +21,6 @@ from margot.domain.describe import (
     ParameterTarget,
     Schema,
     Setting,
-)
-from margot.commands.describe import (
-    build_identity_catalog_panel,
-    build_deployment_profiles_panel,
-    build_configuration_panel,
-    build_extensions_panel,
 )
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -122,7 +119,8 @@ class TestIdentityCatalogPanel:
         text = _render_to_text(panel)
 
         # The [string] part should appear (escaped as \[string\], which is still visible)
-        assert "array" in text and "string" in text
+        assert "array" in text
+        assert "string" in text
 
 
 class TestDeploymentProfilesPanel:
@@ -474,9 +472,9 @@ class TestConfigurationPanel:
         # Verify no separate "Default:" line appears
         # (The default value should be inline with Parameter:)
         lines = text.split("\n")
-        param_lines = [l for l in lines if "Parameter:" in l]
-        default_lines = [l for l in lines if "Default:" in l]
-        
+        param_lines = [line for line in lines if "Parameter:" in line]
+        default_lines = [line for line in lines if "Default:" in line]
+
         assert len(param_lines) >= 1, "Should have Parameter: line"
         assert len(default_lines) == 0, "Should NOT have separate Default: line"
 
@@ -516,7 +514,7 @@ class TestConfigurationPanel:
         assert "1883" in text
         # No separate Default: line
         lines = text.split("\n")
-        default_lines = [l for l in lines if "Default:" in l]
+        default_lines = [line for line in lines if "Default:" in line]
         assert len(default_lines) == 0, "Should NOT have separate Default: line"
 
     def test_configuration_parameter_not_defined_case(self) -> None:

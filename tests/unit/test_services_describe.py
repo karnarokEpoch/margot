@@ -1,12 +1,13 @@
 """Unit tests for the describe service — descriptor resolution and load gate."""
 
 from pathlib import Path
+import re
+import tempfile
 from tempfile import TemporaryDirectory
 
 from pytest import fixture, raises
 
 from margot.services import describe as describe_service
-
 
 MARGO_YAML = """apiVersion: v1
 id: hello-world
@@ -82,7 +83,7 @@ class TestDescribeServiceStaticDescriptor:
 
     def test_load_descriptor_missing_file_raises_valueerror(self, temp_project: Path) -> None:
         """Should raise ValueError when neither app.yaml nor app.yaml.jinja exists."""
-        with raises(ValueError, match="No app.yaml or app.yaml.jinja found"):
+        with raises(ValueError, match=re.escape("No app.yaml or app.yaml.jinja found")):
             describe_service.load_descriptor(str(temp_project))
 
     def test_load_descriptor_both_forms_present_raises_valueerror(self, temp_project: Path) -> None:
@@ -90,14 +91,14 @@ class TestDescribeServiceStaticDescriptor:
         (temp_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
         (temp_project / "margo" / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
 
-        with raises(ValueError, match="Both app.yaml.jinja and app.yaml found"):
+        with raises(ValueError, match=re.escape("Both app.yaml.jinja and app.yaml found")):
             describe_service.load_descriptor(str(temp_project))
 
     def test_load_descriptor_wrong_kind_raises_valueerror(self, temp_project: Path) -> None:
         """Should raise ValueError when kind is not ApplicationDescription."""
         (temp_project / "margo" / "app.yaml").write_text(WRONG_KIND_APP_YAML, encoding="utf-8")
 
-        with raises(ValueError, match="kind.*ApplicationDescription"):
+        with raises(ValueError, match=re.escape("kind") + r".*ApplicationDescription"):
             describe_service.load_descriptor(str(temp_project))
 
     def test_load_descriptor_unparseable_yaml_raises_valueerror(self, temp_project: Path) -> None:
@@ -108,10 +109,10 @@ class TestDescribeServiceStaticDescriptor:
             describe_service.load_descriptor(str(temp_project))
 
     def test_load_descriptor_not_a_mapping_raises_valueerror(self, temp_project: Path) -> None:
-        """Should raise ValueError when YAML is not a mapping."""
+        """Should raise TypeError when YAML is not a mapping."""
         (temp_project / "margo" / "app.yaml").write_text(NOT_A_MAPPING_APP_YAML, encoding="utf-8")
 
-        with raises(ValueError, match="must parse into a mapping"):
+        with raises(TypeError, match=re.escape("must parse into a mapping")):
             describe_service.load_descriptor(str(temp_project))
 
 
@@ -142,7 +143,6 @@ class TestDescribeServiceTemplatedDescriptor:
         (temp_project / "margo" / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
 
         # Get a reference to temp files before the call
-        import tempfile
         temp_dir = Path(tempfile.gettempdir())
         before_temps = set(temp_dir.glob("margot-*.yaml"))
 

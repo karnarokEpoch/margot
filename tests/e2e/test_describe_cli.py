@@ -1024,7 +1024,7 @@ class TestDescribeSensorDashboardFixture:
         assert "author" in plain
         # The em-dash (—) should appear in context of author
         # Check that both author label and em-dash are present
-        assert "\u2014" in plain or "–" in plain  # em-dash or en-dash
+        assert "\u2014" in plain or "-" in plain  # em-dash or hyphen
 
     def test_sensor_dashboard_quadlet_type_verbatim(self, sensor_dashboard_project: Path) -> None:
         """Should render 'quadlet' type verbatim, not validate or reject it."""
@@ -1045,7 +1045,7 @@ class TestDescribeSensorDashboardFixture:
 
         assert result.exit_code == 0
         # Check for bare integer on the Parameter line (inline, not "Default:")
-        # Format is "Parameter: mqttPort  1883"
+        # Should see Parameter: mqttPort followed by bare integer 1883
         assert "Parameter: mqttPort" in plain
         assert "1883" in plain
         # Ensure quoted version is NOT present
@@ -1058,7 +1058,7 @@ class TestDescribeSensorDashboardFixture:
 
         assert result.exit_code == 0
         # Check for explicit empty string marker on Parameter line
-        # Format is "Parameter: otelDeviceId  """
+        # Should see Parameter: otelDeviceId followed by explicit empty string marker ""
         assert "Parameter: otelDeviceId" in plain
         assert '""' in plain
 

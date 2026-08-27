@@ -185,30 +185,54 @@ def build_catalog(doc: dict) -> Catalog | None:
     )
 
     # Build author list
-    authors = []
-    for author_data in catalog_data.get("author") or []:
-        authors.append(
-            Author(
-                name=author_data.get("name"),
-                email=author_data.get("email"),
-            )
+    authors = [
+        Author(
+            name=author_data.get("name"),
+            email=author_data.get("email"),
         )
+        for author_data in catalog_data.get("author") or []
+    ]
 
     # Build organization list
-    orgs = []
-    for org_data in catalog_data.get("organization") or []:
-        orgs.append(
-            Organization(
-                name=org_data.get("name"),
-                site=org_data.get("site"),
-            )
+    orgs = [
+        Organization(
+            name=org_data.get("name"),
+            site=org_data.get("site"),
         )
+        for org_data in catalog_data.get("organization") or []
+    ]
 
     # Return None if catalog is empty (no app, no authors, no orgs)
-    if not (app.tagline or app.site or app.icon or app.description_file or app.license_file or app.release_notes or app.tags or authors or orgs):
+    if not (
+        app.tagline
+        or app.site
+        or app.icon
+        or app.description_file
+        or app.license_file
+        or app.release_notes
+        or app.tags
+        or authors
+        or orgs
+    ):
         return None
 
-    return Catalog(application=app if (app.tagline or app.site or app.icon or app.description_file or app.license_file or app.release_notes or app.tags) else None, author=authors, organization=orgs)
+    return Catalog(
+        application=(
+            app
+            if (
+                app.tagline
+                or app.site
+                or app.icon
+                or app.description_file
+                or app.license_file
+                or app.release_notes
+                or app.tags
+            )
+            else None
+        ),
+        author=authors,
+        organization=orgs,
+    )
 
 
 def build_deployment_profiles(doc: dict) -> list[DeploymentProfile]:
@@ -224,14 +248,13 @@ def build_deployment_profiles(doc: dict) -> list[DeploymentProfile]:
     profiles = []
 
     for profile_data in profiles_data:
-        components = []
-        for component_data in profile_data.get("components") or []:
-            components.append(
-                Component(
-                    name=component_data.get("name"),
-                    properties=component_data.get("properties") or {},
-                )
+        components = [
+            Component(
+                name=component_data.get("name"),
+                properties=component_data.get("properties") or {},
             )
+            for component_data in profile_data.get("components") or []
+        ]
 
         profiles.append(
             DeploymentProfile(
@@ -262,7 +285,7 @@ def component_index(doc: dict) -> list[str]:
     return list(seen)
 
 
-def build_configuration(doc: dict, index: list[str]) -> Configuration:
+def build_configuration(doc: dict) -> Configuration:
     """Transform configuration into a Configuration dataclass with the configuration-first join.
 
     This is the heart of the describe command: walks sections -> settings -> (schema, parameter)
@@ -270,7 +293,6 @@ def build_configuration(doc: dict, index: list[str]) -> Configuration:
 
     Args:
         doc: The parsed descriptor dict.
-        index: The deduplicated component index from component_index().
 
     Returns:
         A Configuration with sections and unreferenced parameters.
@@ -320,14 +342,13 @@ def build_configuration(doc: dict, index: list[str]) -> Configuration:
             parameter_resolved = None
             if param_name and param_name in parameters_map:
                 param_data = parameters_map[param_name]
-                targets = []
-                for target_data in param_data.get("targets") or []:
-                    targets.append(
-                        ParameterTarget(
-                            pointer=target_data.get("pointer"),
-                            components=target_data.get("components") or [],
-                        )
+                targets = [
+                    ParameterTarget(
+                        pointer=target_data.get("pointer"),
+                        components=target_data.get("components") or [],
                     )
+                    for target_data in param_data.get("targets") or []
+                ]
                 parameter_resolved = Parameter(
                     value=param_data.get("value"),
                     targets=targets,
