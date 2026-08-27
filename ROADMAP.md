@@ -11,6 +11,16 @@ sequencing; FEATURES.md is updated as items land (see backlog).
 
 ## Planned Sprints
 
+### Sprint 8 — `describe` component-first view + orphan detection
+
+`describe` gains a second configuration traversal (component → parameter → setting/
+schema, mirroring Sprint 7's section-first walk), read-only orphan/dead-end detection
+(unreferenced parameters, unresolved schema references, unused schemas, dangling
+component pointers), and documented shell completion setup. `--section config` renamed
+to `--section config-first` (no alias) alongside the new `--section component-first`.
+No validation exit paths added — stays inside `describe`'s existing read-only contract.
+Full plan at [`.kiro/sprints/sprint-8.md`](.kiro/sprints/sprint-8.md).
+
 ---
 
 ## Backlog / Stack (Sprint 8+)
