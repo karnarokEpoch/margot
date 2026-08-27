@@ -461,32 +461,176 @@ No table, no filtering — display whatever the registry returns.
 
 ### `margot verify`
 
-Validate the margo application description and optionally check published artifacts.
+Validate the Margo **application description** (`app.yaml`, or `app.yaml.jinja` when the
+project templates it) against the upstream Margo spec LinkML schema, and optionally
+against margot's curated recommended schema.
+
+`margo.yaml` is not validated by this command — it is margot's build anchor, not a Margo
+spec document.
 
 ```
-margot verify [--manifest PATH] [--schema PATH]
-                [--remote] [--version VERSION]
-                [--registry REG] [--repository REPO]
+margot verify [--project-dir PATH] [--manifest PATH]
+              [--schema PATH] [--recommended-schema PATH]
+              [--recommend | --only-recommend] [--strict]
 ```
 
-**Local validation (always runs):**
+**Flags:**
 
-1. Load `margo.yaml` (default: `margo/margo.yaml` or configurable)
-2. Load LinkML schema (default: `margo-spec.yaml` alongside manifest)
-3. Validate with `linkml.validator` using:
+| Flag | Default | Effect |
+|---|---|---|
+| `--project-dir` | `.` | Directory holding `margo.yaml`. |
+| `--manifest` | resolved from `margo.yaml` | Explicit `app.yaml` / `app.yaml.jinja` path. |
+| `--schema` | vendored Schema A | Override the upstream Margo spec schema. |
+| `--recommended-schema` | vendored Schema B | Override the curated recommended schema. |
+| `--recommend` | off | Run Schema B as a second pass, after Schema A. |
+| `--only-recommend` | off | Run Schema B *instead of* Schema A — the spec schema is not loaded or run at all. |
+| `--strict` | off | Turn the Schema B lint pass into a contract: any finding, whatever its severity, fails the run. |
+
+`--recommend` and `--only-recommend` are mutually exclusive — passing both is rejected
+before any validation runs (exit 1). `--strict` needs a Schema B pass to act on: without
+`--recommend` or `--only-recommend` it changes nothing and emits a warning.
+
+**Manifest resolution:**
+
+1. `--manifest` if given — may point at an `app.yaml` or an `app.yaml.jinja`.
+2. Otherwise `margo.yaml` is loaded from `--project-dir` (default `.`) and its
+   `directory` field is searched for `app.yaml.jinja`, then `app.yaml`. Both present is an
+   error; neither present is an error.
+3. A `.jinja` descriptor is rendered to a **temporary file** with the same context and
+   `StrictUndefined` behavior `build` uses, and the rendered file is what gets validated.
+   `verify` never reads `<build_dir>` and never requires a prior `build`.
+
+Resolution runs once per invocation, whichever schemas are active: both passes validate
+the same resolved file, never a re-rendered one.
+
+**Schema A — upstream Margo spec (runs unless `--only-recommend`):**
+
+1. Vendored at `src/margot/schemas/application-description.linkml.yaml`, pinned to an
+   upstream commit (the spec is still draft). Overridable with `--schema`.
+2. Validate with `linkml.validator` using:
    - `JsonschemaValidationPlugin(closed=True)` — no unexpected fields
    - `RecommendedSlotsPlugin()` — warns on missing recommended fields
    - `MaximumCardinalityPlugin` — enforce cardinality constraints
-4. Format errors using the existing `format_validation_error` pattern
-5. Exit code 0 = valid, 1 = validation errors
+3. Any error fails the run (exit 1).
+4. The pinned draft commit is printed as `Validated against Margo spec (draft, commit
+   <sha>)`, so results are never mistaken for validation against a stable spec. With
+   `--only-recommend` Schema A does not run, so the line is not printed — it would claim a
+   check that never happened.
 
-**Remote check (`--remote` flag):**
+`x-placeholder-extensions` mappings are removed from the instance before validation: the
+spec allows arbitrary vendor content there, LinkML's generated JSON Schema does not, and
+there is nothing inside a vendor extension for the spec's own vocabulary to check. All
+three plugins are clean on a spec-valid descriptor using extensions, in each of the three
+validation modes (A alone, B alone, A+B).
 
-- Call `oras manifest fetch` for each referenced component tag in the manifest
-- Verify each referenced OCI tag is reachable and has the expected artifact type
-- Report any 404 / wrong type as errors
+**Schema B — margot recommended (`--recommend` / `--only-recommend`):**
 
-**Output:** rich table of results per check (PASS / WARN / FAIL with details).
+- Vendored at `src/margot/schemas/margo-recommended.linkml.yaml`, overridable with
+  `--recommended-schema`. Not loaded or run at all unless one of the two flags is passed.
+- Default: a lint pass — findings are reported, exit code unaffected.
+- With `--strict`: a contract — any finding, whatever its severity, fails the run (exit 1).
+- Schema B is a standalone schema — it does not import Schema A and declares no `is_a`
+  relationship to any of its classes. It redeclares the fields it needs directly and
+  enforces the spec's own required-field set (`apiVersion`, `id`, `metadata`,
+  `deploymentProfiles`, and the required chain beneath them) as ERRORs in its own right,
+  so a Schema A re-vendor never silently changes what Schema B reports.
+
+**Exit codes:** 0 = passed, 1 = any failure.
+
+| Flags | Schema A runs | Schema B runs | Exit code driven by |
+|---|---|---|---|
+| (none) | yes | no | Schema A errors |
+| `--strict` | yes | no | Schema A errors (`--strict` warns that it has nothing to act on) |
+| `--recommend` | yes | yes | Schema A errors — Schema B is advisory |
+| `--recommend --strict` | yes | yes | Schema A errors **or** any Schema B finding |
+| `--only-recommend` | no | yes | nothing — always 0, whatever Schema B reports |
+| `--only-recommend --strict` | no | yes | any Schema B finding |
+| `--recommend --only-recommend` | — | — | rejected as mutually exclusive |
+
+**Output:** plain CI-check-style pass/fail lines, pipeable into CI logs. No tables, no
+panels — visual inspection of a descriptor is `margot describe`.
+
+- Default: the draft-spec line and the Schema A verdict, unsectioned.
+- `--recommend` with findings from either schema: one labeled section per schema
+  (`── Schema A (Margo spec) ──` / `── Schema B (recommended) ──`), each with its own
+  verdict, then the overall `verify: PASS` / `verify: FAIL` line.
+- `--recommend` with **both** schemas clean: no section headers and no Schema B line at
+  all — with nothing to attribute, the sections are noise, and the output reads exactly
+  like a clean default run.
+- `--only-recommend`: Schema B's findings and verdict only, then the overall line. No
+  draft-spec line, no Schema A section.
+
+**Remote artifact reachability (`--remote`)** is backlog, not implemented — see
+`ROADMAP.md`.
+
+---
+
+### `margot describe`
+
+Render the Margo application description as a structured, visual view: rich panels,
+trees and tables organizing the raw descriptor for human review. Read-only, no schema
+validation, no network.
+
+```
+margot describe [--project-dir PATH] [--manifest PATH]
+                [--section metadata|profiles|config|extensions]
+```
+
+**Descriptor resolution:** identical to `verify` — `--manifest`, else `margo.yaml`
+`directory` → `app.yaml.jinja` (rendered to a temp file) or `app.yaml`. Never reads
+`<build_dir>`, never requires a prior `build`.
+
+**Blocks rendered**, always in this order, each as a full-width stacked panel:
+
+1. **Identity + catalog** — `apiVersion` as the panel title, `id`, `metadata.version` and
+   `metadata.name` as a grid, then labeled `Description:` and `Catalog:` blocks. No
+   catalog at all renders as `Catalog: None`. `kind` is not printed: the load gate already
+   refuses anything that is not an `ApplicationDescription`. The panel subtitle is the
+   resolved descriptor path, marked `(rendered)` when it came from `app.yaml.jinja`.
+2. **Deployment profiles** — one tree per entry: `type` and `id`, `description`, the
+   profile's own `requiredResources` (`cpu`/`memory`/`storage` on one line, `peripherals`
+   and `interfaces` as separate lines when present), then `components[]` → `properties`.
+3. **Configuration** — a single tree carrying everything configurable:
+
+   ```text
+   section → setting (+ immutable) → Schema: <name> <dataType> · <constraints>
+                                   → Parameter: <name> → Default: <value>
+                                                       → Pointer: <p> (n/total)
+                                                                    → components
+   ```
+
+   Each pointer reports how many components it targets against the total number of
+   distinct components declared across all deployment profiles. Parameters that no
+   `Setting` references are listed in a trailing subtree so they stay visible.
+4. **Extensions** — `x-placeholder-extensions`, rendered only when present.
+
+There is **no parameters block**: parameters are reached through configuration, which is
+the order a reviewer thinks in — what can be configured, what validates it, what it
+defaults to, where it lands.
+
+Panel titles carry counts (`7 profiles · 9 components`, `6 sections · 22 settings`).
+`--section` **filters** which blocks appear; it never reorders them, so flag order does
+not change the output. `metadata` covers identity and catalog together.
+
+`type` and component `properties` keys are printed verbatim — no enum check, no fixed
+property lookup. This is deliberate: margot supports a `quadlet` deployment profile ahead
+of the upstream spec (whose `type` pattern is still `^(helm|compose)$`), and the in-flight
+upstream proposal moves the property set around. Descriptor text is escaped before
+printing, so a value like `array[string]` renders literally instead of being read as rich
+markup. Scalars keep their literal form — strings quoted, numbers and booleans bare, `""`
+for an empty string, `—` for absent. Nothing is ever truncated or elided; long values
+word-wrap.
+
+The Margo spec permits plenty of odd-but-valid structures — a parameter no `Setting`
+refers to, a component without a `repository`, a profile with no components, a target
+naming a component nothing declares. `describe` renders them faithfully and marks them
+`(not defined)` / `(not declared)`; judging them is `verify`'s job.
+
+**Not provided:** no `--json`, no `--yaml`, no plain-text mode. Visual output only.
+
+Exit codes: 0 always, except 1 when the descriptor cannot be loaded (missing, both
+`app.yaml` and `app.yaml.jinja` present, unresolved Jinja2 variable, unparseable YAML, or
+`kind` not `ApplicationDescription`) — in which case the error points at `margot verify`.
 
 ---
 
@@ -509,6 +653,8 @@ margot/
         ├── domain/                  # pure logic — zero I/O, zero framework imports
         │   ├── tags.py              # semver validation
         │   ├── metadata.py          # margo.yaml dataclasses + parser
+        │   ├── validation.py        # ValidationFinding, VerifyResult
+        │   ├── describe.py          # describe display models + configuration join
         │   └── models.py            # PackageType enum, BuildTarget, etc.
         │
         ├── services/                # business logic — orchestrates domain + infra
@@ -516,25 +662,32 @@ margot/
         │   ├── push.py              # push flow (credential check → oci.push)
         │   ├── pull.py
         │   ├── fetch.py
-        │   ├── verify.py            # linkml validation + optional remote check
+        │   ├── verify.py            # descriptor resolution + linkml validation
+        │   ├── describe.py          # descriptor resolution + display model build
         │   └── auth.py              # login/logout orchestration
         │
         ├── infra/                   # I/O adapters — no business logic
         │   ├── oci.py               # oras-py wrapper (push/pull/fetch/login/logout)
         │   ├── credentials.py       # ~/.config/margot/credentials.toml R/W
-        │   └── filesystem.py        # tree copy, placeholder substitution, tar helpers
+        │   ├── templating.py        # app.yaml.jinja rendering (shared by build/verify/describe)
+        │   └── filesystem.py        # tree copy, placeholder substitution, tar, yaml, temp files
+        │
+        ├── schemas/                 # vendored LinkML schemas (data, not code)
+        │   ├── application-description.linkml.yaml   # upstream Margo spec, pinned commit
+        │   └── margo-recommended.linkml.yaml         # margot curated recommendations
         │
         ├── commands/                # CLI layer — parse args, call service, render output
         │   ├── build.py
         │   ├── push.py
         │   ├── pull.py
         │   ├── fetch.py
-        │   ├── verify.py
+        │   ├── verify.py            # plain pass/fail lines
+        │   ├── describe.py          # rich panels / trees / tables
         │   └── auth.py              # margot auth {login,logout,status}
         │
         └── validation/              # linkml-specific, called by services/verify.py
-            ├── linkml_runner.py
-            ├── error_formatter.py
+            ├── linkml_runner.py     # only module allowed to import linkml
+            ├── error_formatter.py   # findings → plain strings / row tuples
             └── max_cardinality.py
 ```
 
@@ -542,11 +695,11 @@ margot/
 
 | Layer | Rule | Imports |
 |---|---|---|
-| `commands/` | Parse args, call one service, render output. No logic. | `services/`, `config` |
+| `commands/` | Parse args, call one service, render output. No logic, no I/O. | `services/`, `config` |
 | `services/` | Orchestrate the feature flow. No CLI, no rich output. | `domain/`, `infra/`, `validation/` |
 | `domain/` | Pure functions and dataclasses. Raise `ValueError` on bad input. | stdlib only |
-| `infra/` | All I/O (filesystem, OCI, ECR, credentials file). | `domain/`, stdlib, third-party |
-| `validation/` | LinkML runner and formatters. | `domain/`, `infra/` |
+| `infra/` | All I/O (filesystem, OCI, ECR, credentials file, templating). | `domain/`, stdlib, third-party |
+| `validation/` | LinkML runner and formatters. Returns data, never `rich` objects. | `domain/`, `infra/` |
 
 ---
 

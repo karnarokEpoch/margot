@@ -1,0 +1,164 @@
+apiVersion: v1
+kind: ApplicationDescription
+id: digitron-orchestrator
+metadata:
+  name: Digitron Orchestrator
+  description: Northstar's AI-driven Digitron instrument orchestrator.
+  version: 1.2.1
+  catalog:
+    application:
+      icon: ./resources/ndo-logo.png
+      tagline: Next-gen, AI driven, Digitron instrument orchestrator.
+      descriptionFile: ./resources/description.md
+      releaseNotes: ./resources/release-notes.md
+      licenseFile: ./resources/license.pdf
+      site: http://www.northstar-ida.com
+      tags: ["optimization", "instrumentation"]
+    author:
+      - name: Roger Wilkershank
+        email: rpwilkershank@northstar-ida.com
+    organization:
+      - name: Northstar Industrial Applications
+        site: http://northstar-ida.com
+deploymentProfiles:
+  - type: helm
+    id: digitron-orchestrator-helm-a
+    description: >-
+      Installs the application as a Helm chart deployment. The device needs a screen and
+      a keyboard, as indicated in the required peripherals.
+    components:
+      - name: database-services
+        properties:
+          repository: oci://quay.io/charts/realtime-database-services
+          revision: 2.3.7
+          wait: true
+          timeout: 8m30s
+      - name: digitron-orchestrator
+        properties:
+          repository: oci://northstarida.azurecr.io/charts/northstarida-digitron-orchestrator
+          revision: 1.0.9
+          wait: true
+    requiredResources:
+      cpu:
+        cores: 1.5
+        architectures:
+          - amd64
+      memory: 1024Mi
+      storage: 10Gi
+      peripherals:
+        - type: gpu
+          manufacturer: NVIDIA
+        - type: display
+      interfaces:
+        - type: ethernet
+        - type: bluetooth
+  - type: compose
+    id: digitron-orchestrator-compose-a
+    description: Installs the application as a set of Compose services.
+    components:
+      - name: digitron-orchestrator-docker
+        properties:
+          repository: oci://northstarida.azurecr.io/compose/digitron-orchestrator
+          revision: 1.0.9
+parameters:
+  idpName:
+    value: "test"
+    targets:
+      - pointer: idp.name
+        components: ["digitron-orchestrator"]
+      - pointer: IDP_NAME
+        components: ["digitron-orchestrator-docker"]
+  idpUrl:
+    targets:
+      - pointer: idp.providerUrl
+        components: ["digitron-orchestrator"]
+      - pointer: IDP_URL
+        components: ["digitron-orchestrator-docker"]
+  adminPrincipalName:
+    targets:
+      - pointer: administrator.userPrincipalName
+        components: ["digitron-orchestrator"]
+      - pointer: ADMIN_PRINCIPALNAME
+        components: ["digitron-orchestrator-docker"]
+  pollFrequency:
+    value: 30
+    targets:
+      - pointer: settings.pollFrequency
+        components: ["digitron-orchestrator", "database-services"]
+      - pointer: POLL_FREQUENCY
+        components: ["digitron-orchestrator-docker"]
+  cpuLimit:
+    value: 1
+    targets:
+      - pointer: settings.limits.cpu
+        components: ["digitron-orchestrator"]
+  deploymentMode:
+    value: standard
+    targets:
+      - pointer: settings.mode
+        components: ["digitron-orchestrator"]
+configuration:
+  sections:
+    - name: Identity Provider
+      settings:
+        - parameter: idpName
+          name: Name
+          description: The name of the Identity Provider to use.
+          immutable: true
+          schema: requiredText
+        - parameter: idpUrl
+          name: Provider URL
+          description: The URL of the Identity Provider.
+          immutable: true
+          schema: url
+    - name: Administrator
+      settings:
+        - parameter: adminPrincipalName
+          name: Principal Name
+          description: The principal name of the administrator.
+          schema: email
+    - name: Resource Limits
+      settings:
+        - parameter: pollFrequency
+          name: Poll Frequency
+          description: How often the service polls for updated data, in seconds.
+          schema: pollRange
+        - parameter: cpuLimit
+          name: CPU Limit
+          description: Maximum number of CPU cores to allow the application to consume.
+          schema: cpuRange
+        - parameter: deploymentMode
+          name: Deployment Mode
+          description: The deployment mode to run the orchestrator in.
+          schema: modeSelect
+  schema:
+    - name: requiredText
+      dataType: string
+      maxLength: 45
+      allowEmpty: false
+    - name: email
+      dataType: string
+      allowEmpty: false
+      regexMatch: .*@[a-z0-9.-]*
+    - name: url
+      dataType: string
+      allowEmpty: false
+      regexMatch: ^(http(s):\/\/.)[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)$
+    - name: pollRange
+      dataType: integer
+      minValue: 30
+      maxValue: 360
+      allowEmpty: false
+    - name: cpuRange
+      dataType: double
+      minValue: 0.5
+      maxPrecision: 1
+      allowEmpty: false
+    - name: modeSelect
+      dataType: string
+      allowEmpty: false
+      options: ["standard", "eco", "performance"]
+      multiselect: false
+x-placeholder-extensions:
+  vendor-acme:
+    supportTier: gold

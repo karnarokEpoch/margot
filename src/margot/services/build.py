@@ -4,13 +4,12 @@ from pathlib import Path
 from shutil import rmtree
 from tempfile import mkdtemp
 
-from jinja2 import Environment, StrictUndefined, UndefinedError
-
 from margot import console
 from margot.domain.metadata import ComponentConfig, ImageConfig, MargoYaml, build_jinja2_context, load_margo_yaml
 from margot.domain.models import BuildTarget, PackageType
 from margot.domain.tags import validate_oci_tag, validate_semver
 from margot.infra.filesystem import copy_tree, make_tarball, substitute_placeholders
+from margot.infra.templating import render_template_file, render_template_string
 
 
 def build(
@@ -112,13 +111,11 @@ def _build_margo(
     if jinja_file.exists() and static_file.exists():
         raise ValueError("Both app.yaml.jinja and app.yaml found in margo source directory — use one or the other, not both.")
     if jinja_file.exists():
-        try:
-            environment = Environment(undefined=StrictUndefined)  # noqa: S701
-            rendered = environment.from_string(jinja_file.read_text(encoding="utf-8")).render(
-                build_jinja2_context(meta, global_repository=meta.repository)
-            )
-        except UndefinedError as e:
-            raise ValueError(f"Unresolved Jinja2 variable in app.yaml.jinja: {e}") from e
+        rendered = render_template_file(
+            str(jinja_file),
+            build_jinja2_context(meta, global_repository=meta.repository),
+            source_label="app.yaml.jinja",
+        )
         static_file.write_text(rendered, encoding="utf-8")
         jinja_file.unlink()
     elif not static_file.exists():
@@ -191,12 +188,11 @@ def _render_image_pair(meta: MargoYaml, image: ImageConfig | None) -> tuple[str,
     """Render an optional image replacement template with the manifest context."""
     if image is None:
         return None
-    try:
-        rendered_replace = Environment(undefined=StrictUndefined).from_string(image.replace).render(  # noqa: S701
-            build_jinja2_context(meta, global_repository=meta.repository)
-        )
-    except UndefinedError as e:
-        raise ValueError(f"Unresolved Jinja2 variable in image.replace: {e}") from e
+    rendered_replace = render_template_string(
+        image.replace,
+        build_jinja2_context(meta, global_repository=meta.repository),
+        source_label="image.replace",
+    )
     return image.search, rendered_replace
 
 

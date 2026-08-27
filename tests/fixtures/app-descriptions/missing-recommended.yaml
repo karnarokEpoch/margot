@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ApplicationDescription
+id: plain-service
+metadata:
+  name: Plain Service
+  version: 2.0.0
+  catalog:
+    application:
+      site: https://example.com/plain-service
+      tags: ["utility"]
+    organization:
+      - name: Example Corp
+deploymentProfiles:
+  - type: compose
+    id: default
+    components:
+      - name: plain-service-compose
+        properties:
+          repository: oci://example.com/compose/plain-service
+          revision: 2.0.0

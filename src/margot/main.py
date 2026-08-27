@@ -8,6 +8,7 @@ from margot.commands.fetch import fetch
 from margot.commands.global_options import global_options
 from margot.commands.pull import pull
 from margot.commands.push import push_cmd
+from margot.commands.verify import verify_cmd
 
 app = Typer(
     name="margot",
@@ -21,6 +22,7 @@ app.command()(fetch)
 app.command(name="build")(build_cmd)
 app.command(name="push")(push_cmd)
 app.command()(pull)
+app.command(name="verify")(verify_cmd)
 
 # Register subcommand groups
 app.add_typer(auth_app, name="auth")

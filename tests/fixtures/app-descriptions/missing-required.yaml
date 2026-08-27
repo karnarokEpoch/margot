@@ -1,0 +1,17 @@
+# Deliberately missing several spec-required fields, to exercise both schemas' hard
+# error paths at once:
+#   - top-level `id` absent (required by Schema A and Schema B)
+#   - `metadata.version` absent (required by both)
+#   - `metadata.catalog.organization` absent (required by both)
+#   - `deploymentProfiles[0].components` is an empty list (Schema A accepts an empty
+#     list; Schema B's minimum_cardinality rejects it — the two schemas disagree here
+#     on purpose, see margo-recommended.linkml.yaml's cardinality section)
+apiVersion: v1
+kind: ApplicationDescription
+metadata:
+  name: Broken Service
+  catalog: {}
+deploymentProfiles:
+  - type: compose
+    id: default
+    components: []
