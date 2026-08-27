@@ -58,7 +58,7 @@ Changelog is generated from these prefixes via [git-cliff](https://git-cliff.org
 Runs on every push to `main` and every PR:
 
 - **Lint** — `make lint`
-- **Test** — `make test` on Python 3.12 + 3.13
+- **Test** — `make test` on Python 3.12 + 3.13 + 3.14
 
 CI must pass before merge.
 
