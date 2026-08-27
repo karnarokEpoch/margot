@@ -15,7 +15,7 @@ from margot.infra.filesystem import load_yaml
 from margot.schemas import SCHEMA_B_PATH, SCHEMA_B_TARGET_CLASS
 from margot.validation.linkml_runner import run_validation
 
-COMPLIANT_APP_YAML = """apiVersion: application.margo.org/v1alpha1
+COMPLIANT_APP_YAML = """apiVersion: v1
 kind: ApplicationDescription
 id: hello-world
 metadata:
@@ -39,7 +39,8 @@ deploymentProfiles:
     components:
       - name: hello-world-compose
         properties:
-          packageLocation: https://example.com/compose.tar.gz
+          repository: oci://example.com/compose/hello-world
+          revision: 1.0.0
 x-placeholder-extensions:
   vendor-acme:
     topLevel: true
@@ -249,7 +250,7 @@ class TestRequiredFields:
     def test_missing_component_properties_is_an_error(self, compliant: str, tmp_path: Path) -> None:
         """Should report the required-property ERROR for components[].properties."""
         descriptor = compliant.replace(
-            "        properties:\n          packageLocation: https://example.com/compose.tar.gz\n",
+            "        properties:\n          repository: oci://example.com/compose/hello-world\n          revision: 1.0.0\n",
             "",
         )
         findings = _findings(descriptor, tmp_path)
@@ -263,6 +264,178 @@ class TestRequiredFields:
         findings = _findings(compliant, tmp_path)
 
         assert _messages(findings, Severity.ERROR) == []
+
+
+class TestValueLevelChecks:
+    """Pattern/value constraints added on top of the presence/cardinality checks above."""
+
+    def test_apiversion_accepts_bare_v1(self, compliant: str, tmp_path: Path) -> None:
+        """Should accept the bare `v1` form margot's own fixtures use."""
+        assert _findings(compliant, tmp_path) == []
+
+    def test_apiversion_accepts_a_pre_release_suffix(self, compliant: str, tmp_path: Path) -> None:
+        """Should accept `v<N>alpha<N>`/`v<N>beta<N>` suffixes on the bare version."""
+        descriptor = compliant.replace("apiVersion: v1\n", "apiVersion: v2alpha3\n")
+
+        assert _findings(descriptor, tmp_path) == []
+
+    def test_apiversion_rejects_the_fully_qualified_form(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR for `application.margo.org/v1alpha1` — no longer a valid shape."""
+        descriptor = compliant.replace("apiVersion: v1\n", "apiVersion: application.margo.org/v1alpha1\n")
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/apiVersion"]
+        assert _messages(findings, Severity.ERROR) != []
+
+    def test_apiversion_rejects_garbage(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR for a value matching neither known shape."""
+        descriptor = compliant.replace("apiVersion: v1\n", "apiVersion: banana\n")
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/apiVersion"]
+        assert _messages(findings, Severity.ERROR) != []
+
+    def test_kind_rejects_wrong_value(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR when kind names something other than ApplicationDescription."""
+        descriptor = compliant.replace("kind: ApplicationDescription\n", "kind: Something\n")
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/kind"]
+        assert _messages(findings, Severity.ERROR) != []
+
+    def test_id_rejects_uppercase_and_underscores(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR for an id outside the lowercase/digit/dash charset."""
+        descriptor = compliant.replace("id: hello-world\n", "id: Hello_World\n")
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/id"]
+        assert _messages(findings, Severity.ERROR) != []
+
+    def test_id_accepts_a_single_dash_id(self, compliant: str, tmp_path: Path) -> None:
+        """Should accept the un-namespaced ids already used across the fixture suite.
+
+        The ≥3-dash domain-namespacing convention (e.g. `com-example-mosquitto`) is
+        documentation guidance only, not an enforced pattern — see the slot description.
+        """
+        assert _findings(compliant, tmp_path) == []
+
+    def test_organization_site_rejects_a_non_url(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR when organization.site is not an http(s) URL."""
+        descriptor = compliant.replace("        site: https://example.com\n", "        site: example.com\n")
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/metadata/catalog/organization/0/site"]
+        assert _messages(findings, Severity.ERROR) != []
+
+    def test_organization_site_accepts_http_and_https(self, compliant: str, tmp_path: Path) -> None:
+        """Should accept both http:// and https:// forms."""
+        assert _findings(compliant, tmp_path) == []
+        assert _findings(compliant.replace("https://example.com", "http://example.com"), tmp_path) == []
+
+    def test_repository_requires_oci_scheme(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR when repository does not use the oci:// scheme."""
+        descriptor = compliant.replace(
+            "          repository: oci://example.com/compose/hello-world\n",
+            "          repository: https://example.com/compose/hello-world\n",
+        )
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/deploymentProfiles/0/components/0/properties/repository"]
+        assert _messages(findings, Severity.ERROR) != []
+
+    def test_repository_accepts_oci_scheme(self, compliant: str, tmp_path: Path) -> None:
+        """Should accept a well-formed oci:// reference."""
+        assert _findings(compliant, tmp_path) == []
+
+    def test_package_location_is_banned(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR when packageLocation is present at all.
+
+        `packageLocation`/`keyLocation` are not declared as attributes on
+        RecommendedComponentProperties, so under `closed=True` they surface as an unknown
+        property — see the class description.
+        """
+        descriptor = compliant.replace(
+            "          repository: oci://example.com/compose/hello-world\n          revision: 1.0.0\n",
+            "          packageLocation: https://example.com/compose.tar.gz\n",
+        )
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/deploymentProfiles/0/components/0/properties"]
+        assert _messages(findings, Severity.ERROR) != []
+
+    def test_key_location_is_banned(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR when keyLocation is present at all. See packageLocation above."""
+        descriptor = compliant.replace(
+            "          revision: 1.0.0\n",
+            "          revision: 1.0.0\n          keyLocation: https://example.com/compose.tar.gz.sig\n",
+        )
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/deploymentProfiles/0/components/0/properties"]
+        assert _messages(findings, Severity.ERROR) != []
+
+    def test_timeout_accepts_the_documented_minutes_and_seconds_format(self, compliant: str, tmp_path: Path) -> None:
+        """Should accept the "##m##s" format the spec documents."""
+        descriptor = compliant.replace(
+            "          revision: 1.0.0\n",
+            "          revision: 1.0.0\n          timeout: 8m30s\n",
+        )
+
+        assert _findings(descriptor, tmp_path) == []
+
+    def test_timeout_accepts_a_seconds_only_format(self, compliant: str, tmp_path: Path) -> None:
+        """Should accept "##s" with no minutes component — minutes are optional."""
+        descriptor = compliant.replace(
+            "          revision: 1.0.0\n",
+            "          revision: 1.0.0\n          timeout: 90s\n",
+        )
+
+        assert _findings(descriptor, tmp_path) == []
+
+    def test_timeout_rejects_a_bare_number(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR for a timeout missing the trailing seconds unit."""
+        descriptor = compliant.replace(
+            "          revision: 1.0.0\n",
+            "          revision: 1.0.0\n          timeout: 90\n",
+        )
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/deploymentProfiles/0/components/0/properties/timeout"]
+        assert _messages(findings, Severity.ERROR) != []
+
+    def test_pointer_accepts_helm_dot_notation(self, compliant: str, tmp_path: Path) -> None:
+        """Should accept a Helm-style values.yaml dot path."""
+        descriptor = _with_target(compliant, "image.tag")
+
+        assert _findings(descriptor, tmp_path) == []
+
+    def test_pointer_accepts_compose_env_var_name(self, compliant: str, tmp_path: Path) -> None:
+        """Should accept a Compose-style UPPER_SNAKE_CASE environment variable name."""
+        descriptor = _with_target(compliant, "MQTT_PORT")
+
+        assert _findings(descriptor, tmp_path) == []
+
+    def test_pointer_rejects_whitespace_and_shell_metacharacters(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR for a pointer that is not identifier-shaped.
+
+        Deliberately light-touch: Helm dot-paths and Compose env var names cannot be told
+        apart from the string alone (see the slot description), so this only rejects
+        obviously-wrong shapes rather than picking one convention.
+        """
+        descriptor = _with_target(compliant, "$(rm -rf /)")
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/parameters/greeting/targets/0/pointer"]
+        assert _messages(findings, Severity.ERROR) != []
+
+
+def _with_target(compliant: str, pointer: str) -> str:
+    """Return `compliant` with a top-level `parameters` entry targeting the given pointer."""
+    return compliant.replace(
+        "x-placeholder-extensions:",
+        f"parameters:\n  greeting:\n    value: hi\n    targets:\n      - pointer: {pointer}\n"
+        '        components: ["hello-world-compose"]\nx-placeholder-extensions:',
+    )
 
 
 class TestStandaloneSchema:
@@ -286,13 +459,16 @@ class TestStandaloneSchema:
 
         assert "application-description.linkml" not in schema.get("imports", [])
 
-    def test_schema_a_id_pattern_is_not_inherited(self, compliant: str, tmp_path: Path) -> None:
-        """Should accept a value Schema A's `id` pattern would reject.
+    def test_schema_b_defines_its_own_id_pattern(self, compliant: str, tmp_path: Path) -> None:
+        """Should reject a value against Schema B's own `id` pattern, not an inherited one.
 
-        Schema A constrains `id` to `^[a-z0-9-]{1,200}$`; Schema B only requires the field to
-        be present. Proves the two schemas are independent, not that Schema B is laxer by
-        design intent — value-level rules are follow-up work (see the decision comment).
+        Schema A and Schema B both constrain `id` to `^[a-z0-9-]{1,200}$`, but Schema B's
+        rule is declared directly on `RecommendedApplicationDescription` — this schema has no
+        `imports:`/`is_a:` relationship to Schema A at all (see the two tests above). The
+        matching shape is coincidence of intent, not inheritance.
         """
         findings = _findings(compliant.replace("id: hello-world", "id: Hello_World"), tmp_path)
 
-        assert findings == []
+        assert findings == [
+            ValidationFinding("/id", "'Hello_World' does not match '^[a-z0-9-]{1,200}$'", Severity.ERROR)
+        ]

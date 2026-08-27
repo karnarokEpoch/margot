@@ -33,21 +33,31 @@ classes:
       `apiVersion`, `id`, `metadata` and `deploymentProfiles` required per the spec.
     attributes:
       apiVersion:
-        description: Identifier of the version of the API the object definition follows.
+        description: >-
+          Identifier of the version of the API the object definition follows. The spec is
+          pre-draft and the value has been seen in the wild as a bare version (`v1`,
+          margot's own descriptor-schema-version convention).
         range: string
         required: true
+        pattern: ^v[0-9]+(alpha[0-9]*|beta[0-9]*)?$
       kind:
         description: >-
           Specifies the object type. Not part of the upstream spec's documented top-level
           attributes; accepted here for compatibility with descriptors that carry it, but not
-          required by Schema B.
+          required by Schema B. When present it must name this class, matching Schema A's
+          own constraint.
         range: string
+        equals_string: ApplicationDescription
       id:
         description: >-
           An identifier for the application. Lower case letters, numbers and dashes only, at
-          most 200 characters.
+          most 200 characters. Recommended: namespace the id under a reverse-domain-style
+          prefix (at least 3 dash-separated segments, e.g. `com-example-mosquitto`) so ids
+          stay unique across vendors in a shared catalog. Not enforced as a pattern — plenty
+          of valid single-word ids exist already — but new applications should follow it.
         range: string
         required: true
+        pattern: ^[a-z0-9-]{1,200}$
       metadata:
         description: Metadata element specifying characteristics about the application.
         range: RecommendedMetadata
@@ -148,6 +158,7 @@ classes:
       site:
         description: Link to the application's website.
         range: string
+        pattern: ^https?://[^\s/$.?#][^\s]*$
       tagline:
         description: The application's slogan.
         range: string
@@ -179,15 +190,16 @@ classes:
       site:
         description: Link to the organization's website.
         range: string
+        pattern: ^https?://[^\s/$.?#][^\s]*$
 
   RecommendedDeploymentProfile:
     description: A deployment profile that must declare at least one component.
     attributes:
       type:
-        description: helm or compose.
+        description: helm or compose or quadlet.
         range: string
         required: true
-        pattern: ^(helm|compose)$
+        pattern: ^(helm|compose|quadlet)$
       id:
         description: >-
           An identifier for the deployment profile, unique within this application
@@ -282,20 +294,29 @@ classes:
       - x-placeholder-extensions
 
   RecommendedComponentProperties:
-    description: Properties dictionary for component deployment details.
+    description: >-
+      Properties dictionary for component deployment details. `repository`/`revision` (OCI)
+      is the only supported way to locate a component's package. `packageLocation`/
+      `keyLocation` (plain URL + signature) are deliberately not declared as attributes: with
+      `closed=True` any property not listed here is rejected as an unknown property, which is
+      how this class bans them outright rather than just discouraging them.
     attributes:
       repository:
+        description: >-
+          OCI repository URI for the component package. MUST use the `oci://` scheme, e.g.
+          `oci://registry.example.com/org/component-name`.
         range: string
+        pattern: ^oci://[^\s/]+(/[^\s/]+)+$
       revision:
         range: string
       wait:
         range: boolean
       timeout:
+        description: >-
+          The time to wait for the component's installation to complete, formatted as
+          "##m##s" or just "##s", e.g. `8m30s` or `90s`.
         range: string
-      packageLocation:
-        range: string
-      keyLocation:
-        range: string
+        pattern: ^([0-9]+m)?[0-9]+s$
 
   RecommendedParameter:
     description: A configurable parameter for the application.
@@ -320,8 +341,16 @@ classes:
     description: Specifies where the parameter applies in the deployment.
     attributes:
       pointer:
+        description: >-
+          For Helm deployments, dot notation into `values.yaml` (as with `helm install
+          --set`), e.g. `image.tag`. For Compose/quadlet deployments, an environment
+          variable name, e.g. `MQTT_PORT`. The two shapes can't be told apart from the
+          string alone, so this only enforces a light structural shape common to both: an
+          identifier-like segment, optionally dot-separated, no whitespace or shell/template
+          metacharacters.
         range: string
         required: true
+        pattern: ^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$
       components:
         range: string
         multivalued: true

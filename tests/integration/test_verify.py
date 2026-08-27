@@ -21,7 +21,7 @@ compose:
   version: 1.0.0
 """
 
-VALID_APP_YAML = """apiVersion: application.margo.org/v1alpha1
+VALID_APP_YAML = """apiVersion: v1
 kind: ApplicationDescription
 id: hello-world
 metadata:
@@ -45,13 +45,14 @@ deploymentProfiles:
     components:
       - name: hello-world-compose
         properties:
-          packageLocation: https://example.com/compose.tar.gz
+          repository: oci://example.com/compose/hello-world
+          revision: 1.0.0
 x-placeholder-extensions:
   vendor-acme:
     topLevel: true
 """
 
-TEMPLATED_APP_YAML = """apiVersion: application.margo.org/v1alpha1
+TEMPLATED_APP_YAML = """apiVersion: v1
 kind: ApplicationDescription
 id: {{ manifest.id }}
 metadata:
@@ -69,7 +70,8 @@ deploymentProfiles:
     components:
       - name: {{ manifest.compose.component }}
         properties:
-          packageLocation: https://example.com/compose.tar.gz
+          repository: oci://example.com/compose/hello-world
+          revision: 1.0.0
         x-placeholder-extensions:
           vendor-acme:
             ref: {{ manifest.compose.ref }}
@@ -132,8 +134,8 @@ class TestVerifyStaticDescriptor:
             "    components:\n",
             "    x-placeholder-extensions:\n      vendor-acme:\n        profileHint: fast\n    components:\n",
         ).replace(
-            "          packageLocation: https://example.com/compose.tar.gz\n",
-            "          packageLocation: https://example.com/compose.tar.gz\n"
+            "          revision: 1.0.0\n",
+            "          revision: 1.0.0\n"
             "        x-placeholder-extensions:\n          vendor-acme:\n            componentHint: quick\n",
         )
         (project / "margo" / "app.yaml").write_text(descriptor, encoding="utf-8")
@@ -549,8 +551,8 @@ class TestOnlyRecommend:
             "    components:\n",
             "    x-placeholder-extensions:\n      vendor-acme:\n        profileHint: fast\n    components:\n",
         ).replace(
-            "          packageLocation: https://example.com/compose.tar.gz\n",
-            "          packageLocation: https://example.com/compose.tar.gz\n"
+            "          revision: 1.0.0\n",
+            "          revision: 1.0.0\n"
             "        x-placeholder-extensions:\n          vendor-acme:\n            componentHint: quick\n",
         )
         (project / "margo" / "app.yaml").write_text(descriptor, encoding="utf-8")
