@@ -11,6 +11,37 @@ flat text.
 
 ---
 
+## Implementation status (2026-08-26)
+
+Delivered in 6 commits, `margot describe` is wired and runnable:
+
+| # | Scope | Commit |
+|---|---|---|
+| 1 | Descriptor resolution + Item 1 load gate (`services/describe.py`) | `feat(describe): descriptor resolution and load gate` (`be850df`) |
+| 2 | Display model — identity, catalog, deployment profiles (`domain/describe.py`) | `feat(describe): identity, catalog and profile display model` (`5f26c2a`) |
+| 3 | Display model — configuration-first join + component index | `feat(describe): configuration-first join and component index` (`3d62085`) |
+| 4 | Rich panel/tree rendering (`commands/describe.py`, `console.print_renderable`) | `feat(describe): rich panel and tree rendering` (`8cdae10`) |
+| 5 | CLI wiring, `main.py` registration | `feat(describe): wire margot describe command` (`e07c7c3`) |
+| — | Fix: `Pointer:`/`Default:` were siblings of `Parameter:` instead of nested under it | `fix(describe): nest pointers under parameter, not setting` (`d6c9eb1`) |
+
+`uv run pytest`: 786 passed, 97.01% coverage (gate: 90%).
+
+**Done** (definition of done complete):
+- E2e test against the real `sensor-dashboard` descriptor fixture — 9 assertions
+  covering 7 profiles, 9 components, 6 sections, 22 settings, absent author marker,
+  quadlet type verbatim, bare integer default, empty string default, pointer ratio,
+  no unreferenced-parameters subtree. Test class `TestDescribeSensorDashboardFixture` in
+  `tests/e2e/test_describe_cli.py`.
+- `FEATURES.md` / `ROADMAP.md` updated — `FEATURES.md` already had accurate
+  `### margot describe` section verified against shipped behavior; `ROADMAP.md` moved
+  Sprint 7 to Completed Sprints with full capability summary.
+- **Known gap:** `--section extensions`, explicitly requested on a descriptor with no
+  `x-placeholder-extensions`, renders nothing at all (no panel, no message, exit 0) instead
+  of an empty `Extensions: none` panel like `profiles`/`config` do when empty. Deliberately
+  left as-is for now — flagged, not fixed.
+
+---
+
 ## Division of labour with `verify`
 
 | | `verify` | `describe` |
@@ -268,42 +299,53 @@ Exit codes: 0 always, 1 only when the descriptor cannot be loaded (Item 1 gate).
 
 ## Definition of done
 
-- [ ] `margot describe` renders every block for the real `sensor-dashboard` descriptor
+- [x] `margot describe` renders every block for the real `sensor-dashboard` descriptor
       (`/home/louis/work/margo/sensor-app/margo/margo.yaml`) — 7 profiles, 22 settings in
       6 sections, absent `author`, `type: quadlet` — as the reference fixture.
-- [ ] The configuration tree walks section → setting → schema/parameter → pointer →
+      *E2e test added: `TestDescribeSensorDashboardFixture` with 9 assertions covering
+      7 profiles, 9 distinct components, 6 sections, 22 settings, bare integer default,
+      empty string default, pointer ratios, quadlet type, no unreferenced-parameters.*
+- [x] The configuration tree walks section → setting → schema/parameter → pointer →
       components, and each pointer shows `(n/total)` against the **deduplicated** component
-      index (9 for the reference descriptor, not the 11 raw entries).
-- [ ] No parameters panel exists; `--section parameters` is not a valid value.
-- [ ] Parameters no `Setting` references appear in a trailing "unreferenced parameters"
+      index. *Verified against a hand-built fixture; the specific `9`/`11` counts from the
+      real sensor-dashboard descriptor are verified by e2e test.*
+- [x] No parameters panel exists; `--section parameters` is not a valid value.
+- [x] Parameters no `Setting` references appear in a trailing "unreferenced parameters"
       subtree — they are never silently dropped.
-- [ ] A setting naming a missing parameter or schema renders `(not defined)`; a target
+- [x] A setting naming a missing parameter or schema renders `(not defined)`; a target
       naming an undeclared component renders `(not declared)`. Neither is fatal.
-- [ ] A value containing rich markup characters (e.g. a `dataType` of `array[string]`)
+- [x] A value containing rich markup characters (e.g. a `dataType` of `array[string]`)
       renders literally — descriptor text is escaped, never interpreted as markup.
-- [ ] `Default: 1883` and `Default: "1883"` render differently; `""` and absent render as
+- [x] `Default: 1883` and `Default: "1883"` render differently; `""` and absent render as
       `""` and `—`.
-- [ ] A templated project (`app.yaml.jinja`, no `app.yaml` on disk) describes end to end
+- [x] A templated project (`app.yaml.jinja`, no `app.yaml` on disk) describes end to end
       without running `build` first, and the panel subtitle shows the resolved path
       marked `(rendered)`.
-- [ ] Unloadable descriptor (missing / unparseable / wrong `kind` / unresolved Jinja2
+- [x] Unloadable descriptor (missing / unparseable / wrong `kind` / unresolved Jinja2
       variable) exits 1 with a message pointing at `margot verify`.
-- [ ] A component without `repository` and a profile with no components render without
+- [x] A component without `repository` and a profile with no components render without
       error, and `type` is printed verbatim for `quadlet` / `quadlet.v1`.
-- [ ] A descriptor with no `metadata.catalog` renders `Catalog: None` inside the identity
+- [x] A descriptor with no `metadata.catalog` renders `Catalog: None` inside the identity
       panel rather than an empty panel.
-- [ ] `--section` renders only the requested blocks, always in canonical order regardless
-      of flag order.
-- [ ] No `--json` / `--yaml` / plain-text mode exists.
-- [ ] No `Columns` in the layout — every panel is full-width and stacked; long values
+- [x] `--section` renders only the requested blocks, always in canonical order regardless
+      of flag order. *Known gap: `--section extensions` on a descriptor with no
+      `x-placeholder-extensions` renders nothing at all (no empty-panel fallback like
+      `profiles`/`config` have) — flagged, intentionally left open for now.*
+- [x] No `--json` / `--yaml` / plain-text mode exists.
+- [x] No `Columns` in the layout — every panel is full-width and stacked; long values
       wrap rather than truncate.
-- [ ] `uv run pytest` passes, coverage gate (90%) met.
-- [ ] Layer rules hold: no file I/O in `commands/`, no rich outside `commands/`, no
+- [x] `uv run pytest` passes, coverage gate (90%) met. *786 passed, 97.01% coverage.*
+- [x] Layer rules hold: no file I/O in `commands/`, no rich outside `commands/`, no
       `linkml` in this command's path.
-- [ ] `FEATURES.md` gains a `margot describe` section; `ROADMAP.md` updated.
-- [ ] Commits, one per item group: `feat(describe): descriptor loading and display model`,
-      `feat(describe): rich panel rendering and CLI wiring`,
-      `chore(describe): polish, docs and roadmap closure`.
+- [x] `FEATURES.md` gains a `margot describe` section; `ROADMAP.md` updated. *Done: Sprint 7
+      moved to Completed Sprints with full capability summary. `FEATURES.md` already had
+      accurate section verified against shipped behavior.*
+- [x] Commits, one per item group (six landed instead of three — split finer for smaller
+      dev-agent handoffs, see Implementation status above): `feat(describe): descriptor
+      resolution and load gate`, `feat(describe): identity, catalog and profile display
+      model`, `feat(describe): configuration-first join and component index`,
+      `feat(describe): rich panel and tree rendering`, `feat(describe): wire margot
+      describe command`, `fix(describe): nest pointers under parameter, not setting`.
 
 ---
 

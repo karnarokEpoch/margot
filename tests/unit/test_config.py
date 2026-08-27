@@ -77,7 +77,7 @@ class TestEnvironmentVariables:
 
     def test_margot_build_dir_env_var(self, isolated_config: None, monkeypatch: Any) -> None:
         """MARGOT_BUILD_DIR env var should override default."""
-        monkeypatch.setenv("MARGOT_BUILD_DIR", "/tmp/custom_build")  # noqa: S108
+        monkeypatch.setenv("MARGOT_BUILD_DIR", "/tmp/custom_build")
         # Reload Settings to pick up the new env var
         new_settings = Dynaconf(
             envvar_prefix="MARGOT",
@@ -89,7 +89,7 @@ class TestEnvironmentVariables:
             load_dotenv=False,
         )
         monkeypatch.setattr(config, "Settings", new_settings)
-        assert config.get("build_dir") == "/tmp/custom_build"  # noqa: S108
+        assert config.get("build_dir") == "/tmp/custom_build"
 
     def test_margot_registry_env_var(self, isolated_config: None, monkeypatch: Any) -> None:
         """MARGOT_REGISTRY env var should override default."""
@@ -123,7 +123,7 @@ class TestEnvironmentVariables:
 
     def test_margot_run_dir_env_var(self, isolated_config: None, monkeypatch: Any) -> None:
         """MARGOT_RUN_DIR env var should override default."""
-        monkeypatch.setenv("MARGOT_RUN_DIR", "/tmp/custom_run")  # noqa: S108
+        monkeypatch.setenv("MARGOT_RUN_DIR", "/tmp/custom_run")
         new_settings = Dynaconf(
             envvar_prefix="MARGOT",
             settings_file=[
@@ -134,7 +134,7 @@ class TestEnvironmentVariables:
             load_dotenv=False,
         )
         monkeypatch.setattr(config, "Settings", new_settings)
-        assert config.get("run_dir") == "/tmp/custom_run"  # noqa: S108
+        assert config.get("run_dir") == "/tmp/custom_run"
 
 
 class TestConfigureOverrides:
@@ -142,8 +142,8 @@ class TestConfigureOverrides:
 
     def test_configure_build_dir(self, isolated_config: None) -> None:
         """configure(build_dir=...) should set the override."""
-        config.configure(build_dir="/tmp/build")  # noqa: S108
-        assert config.get("build_dir") == "/tmp/build"  # noqa: S108
+        config.configure(build_dir="/tmp/build")
+        assert config.get("build_dir") == "/tmp/build"
 
     def test_configure_registry(self, isolated_config: None) -> None:
         """configure(registry=...) should set the override."""
@@ -187,13 +187,13 @@ class TestCaseInsensitivity:
 
     def test_configure_lowercase_key(self, isolated_config: None) -> None:
         """configure() should accept lowercase keys."""
-        config.configure(build_dir="/tmp/build")  # noqa: S108
-        assert config.get("BUILD_DIR") == "/tmp/build"  # noqa: S108
+        config.configure(build_dir="/tmp/build")
+        assert config.get("BUILD_DIR") == "/tmp/build"
 
     def test_configure_uppercase_key(self, isolated_config: None) -> None:
         """configure() should accept uppercase keys."""
-        config.configure(BUILD_DIR="/tmp/build")  # noqa: S108
-        assert config.get("build_dir") == "/tmp/build"  # noqa: S108
+        config.configure(BUILD_DIR="/tmp/build")
+        assert config.get("build_dir") == "/tmp/build"
 
 
 class TestGetSettings:

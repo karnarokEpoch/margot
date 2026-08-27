@@ -95,6 +95,7 @@ ban-relative-imports = "all"
 "tests/**/*.py" = [
     "S101",    # assert is fine in tests
     "S106",    # hardcoded passwords in test fixtures are fine
+    "S108",    # hardcoded temp paths in tests are fine
     "ANN",     # no annotation requirements in tests
     "PLR2004", # magic values are fine in test assertions
     "ARG002",  # fixture params used for side effects are intentionally 'unused'
