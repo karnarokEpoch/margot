@@ -21,6 +21,16 @@ to `--section config-first` (no alias) alongside the new `--section component-fi
 No validation exit paths added — stays inside `describe`'s existing read-only contract.
 Full plan at [`.kiro/sprints/sprint-8.md`](.kiro/sprints/sprint-8.md).
 
+### Sprint 9 — `--json` output and stable error codes
+
+Makes margot's output and failure modes machine-consumable for scripts/agents: `--json`
+on `describe` and `verify` (their display/result dataclasses already have zero `rich`
+coupling), a stable, closed exit-code taxonomy replacing today's single `Exit(1)`
+catch-all across 22 call sites, a structured `--json` error envelope on stderr, and
+explicit `--no-color`/`NO_COLOR` support. No change to default rich rendering. Orthogonal
+to Sprint 8, can run in parallel. Full plan at
+[`.kiro/sprints/sprint-9.md`](.kiro/sprints/sprint-9.md).
+
 ---
 
 ## Backlog / Stack (Sprint 8+)
