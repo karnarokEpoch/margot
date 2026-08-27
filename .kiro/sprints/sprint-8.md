@@ -110,15 +110,26 @@ below).
 `margot --help`) but have no dedicated how-to anywhere — they only appear verbatim inside
 the copied help-text block in `README.md`.
 
+**Confirmed via `margot --show-completion bash`:** neither flag takes a custom output
+path. `--install-completion [bash|zsh|fish|powershell|pwsh]` appends directly to the
+shell's default rc file (e.g. `~/.bashrc`) — no `--path` option, not appropriate for
+anyone managing their own sourced-completions layout (e.g. a file under
+`~/.bash_profile`-managed includes rather than a raw rc append).
+
 Add a short "Shell completion" subsection (README and `docs/index.md`, kept in sync per
-existing convention):
+existing convention) documenting **both** paths, not just the one-liner:
 
 ```bash
+# Quick setup — appends to your shell's rc file directly
 margot --install-completion
+
+# Manual setup — prints the script; redirect it wherever you source completions from
+margot --show-completion bash > ~/.local/share/bash-completion/completions/margot
 ```
 
-Note the shell-restart requirement and the manual alternative
-(`margot --show-completion` to print the script for sourcing/inspection).
+Note the shell-restart requirement for both, and that `--install-completion` offers no
+control over *where* it writes — call this out explicitly so users who curate their own
+rc includes reach for `--show-completion` first.
 
 **Files:** `README.md`, `docs/index.md`.
 
