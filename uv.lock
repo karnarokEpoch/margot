@@ -696,7 +696,7 @@ wheels = [
 ]
 
 [[package]]
-name = "margot"
+name = "margo-tooling"
 source = { editable = "." }
 dependencies = [
     { name = "dynaconf" },
