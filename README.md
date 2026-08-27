@@ -157,6 +157,7 @@ raw manifest JSON for a quick remote inspection, without pulling anything.
 - [FEATURES.md](FEATURES.md) — authoritative spec: architecture, commands, OCI media
   types, config, error handling.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, testing, release process.
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — community standards.
 
 ## License
 

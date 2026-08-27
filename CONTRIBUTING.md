@@ -1,5 +1,8 @@
 # Contributing to margot
 
+By participating in this project, you agree to abide by the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Prerequisites
 
 - Python ≥ 3.12
