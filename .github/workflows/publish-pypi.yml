@@ -1,8 +1,9 @@
 name: Publish to PyPI
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -12,6 +13,11 @@ on:
 
 jobs:
   publish:
+    # release.yml creates the GitHub release using GITHUB_TOKEN, so the
+    # `release: published` event never fires (GitHub does not chain workflow
+    # runs triggered by the default token). Trigger off the Release workflow
+    # itself instead.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -20,7 +26,15 @@ jobs:
     steps:
       - name: Resolve release tag
         id: tag
-        run: echo "version=${{ inputs.version || github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION=$(gh release view --repo ${{ github.repository }} --json tagName --jq .tagName)
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Download release artifacts
         env:
