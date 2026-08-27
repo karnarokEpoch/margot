@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an improvement or new capability for margot
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Check [FEATURES.md](https://github.com/karnarokEpoch/margot/blob/main/FEATURES.md)
+        and the [roadmap](https://github.com/karnarokEpoch/margot/blob/main/ROADMAP.md) first —
+        it may already be planned.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that margot doesn't support today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should margot do instead? A new flag, command, config key, etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you're using today, or other approaches you considered.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, examples, related issues.
