@@ -197,7 +197,7 @@ def _push_margo(
 
     # Push
     console.info(f"Pushing margo: {resolved_registry}/{resolved_repository}:{version}")
-    client = oci.OrasClient()
+    client = oci.OrasClient(hostname=resolved_registry)
     client.push_margo(
         build_dir=build_dir,
         version=version,
@@ -282,7 +282,7 @@ def _push_flat_component(  # noqa: PLR0913
 
     # Push
     console.info(f"Pushing {component_name}: {resolved_registry}/{resolved_repository}:{version}")
-    client = oci.OrasClient()
+    client = oci.OrasClient(hostname=resolved_registry)
     push_method = client.push_compose if component_type == PackageType.COMPOSE else client.push_quadlet
     push_method(
         archive_path=str(archive_path),
@@ -359,7 +359,7 @@ def _push_variant_component(  # noqa: PLR0913
 
         # Push
         console.info(f"Pushing {component_name} variant '{v.name}': {resolved_registry}/{resolved_repository}:{version}")
-        client = oci.OrasClient()
+        client = oci.OrasClient(hostname=resolved_registry)
         push_method = client.push_compose if component_type == PackageType.COMPOSE else client.push_quadlet
         push_method(
             archive_path=str(archive_path),
