@@ -6,6 +6,6 @@ from importlib.metadata import PackageNotFoundError, version
 def get_version() -> str:
     """Return the installed margot package version, or 'unknown' if not installed."""
     try:
-        return version("margot")
+        return version("margo-tooling")
     except PackageNotFoundError:
         return "unknown"
