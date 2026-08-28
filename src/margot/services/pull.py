@@ -98,7 +98,7 @@ def pull_artifact(
     """
     # Normalize URI by stripping scheme
     uri = uri_domain.strip_scheme(uri)
-    
+
     uri_domain.validate_uri(uri)
     console.info(f"URI validated: {uri}")
 

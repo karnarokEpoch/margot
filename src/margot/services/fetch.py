@@ -24,7 +24,7 @@ def fetch_manifest(uri: str) -> dict[str, Any]:
     """
     # Normalize URI by stripping scheme
     uri = uri_domain.strip_scheme(uri)
-    
+
     uri_domain.validate_uri(uri)
     hostname = uri_domain.extract_hostname(uri)
     console.info(f"Checking credentials for {hostname}")
