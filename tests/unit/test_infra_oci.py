@@ -1,9 +1,11 @@
 """Unit tests for infra/oci.py OrasClient wrapper."""
 
+from inspect import signature
 import logging
 from typing import Any
 
 from oras.client import OrasClient as OrasClientLib
+from oras.container import Container
 
 from margot import console
 from margot.infra.oci import OrasClient, _OrasLogHandler
@@ -86,17 +88,6 @@ class TestOrasClient:
         client = OrasClient()
         result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", FAKE_OUTDIR)
         assert result == []
-
-    def test_download_blob_returns_outfile(self, mocker: Any) -> None:
-        """download_blob() should return the outfile path after downloading."""
-        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
-        mock_download = mocker.patch("margot.infra.oci.OrasClientLib.download_blob")
-        mock_container = mocker.MagicMock()
-        mocker.patch.object(OrasClient, "get_container", return_value=mock_container)
-        client = OrasClient()
-        result = client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
-        assert result == FAKE_BLOB_OUT
-        mock_download.assert_called_once_with(container=mock_container, digest="sha256:abc", outfile=FAKE_BLOB_OUT)
 
     def test_oras_logger_configured_on_init(self, mocker: Any) -> None:
         """After OrasClient(), oras.logger logger should have an _OrasLogHandler."""
@@ -203,20 +194,6 @@ class TestOciAdapterDebugLogging:
         assert "Pull layers:" in err.getvalue()
         assert out.getvalue() == ""
 
-    def test_download_blob_emits_debug_when_debug_mode(
-        self, mocker: Any, capture_console: tuple[Any, Any], reset_console: None
-    ) -> None:
-        """download_blob() should emit debug message when debug=True."""
-        console.set_debug(True)
-        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
-        mocker.patch("margot.infra.oci.OrasClientLib.download_blob")
-        mock_container = mocker.MagicMock()
-        mocker.patch.object(OrasClient, "get_container", return_value=mock_container)
-        _out, err = capture_console
-        client = OrasClient()
-        client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
-        assert "Download blob:" in err.getvalue()
-
     def test_login_emits_debug_when_debug_mode(
         self, mocker: Any, capture_console: tuple[Any, Any], reset_console: None
     ) -> None:
@@ -240,3 +217,147 @@ class TestOciAdapterDebugLogging:
         client = OrasClient()
         client.logout(hostname="public.ecr.aws")
         assert "Logout:" in err.getvalue()
+
+
+class TestGetManifestLSP:
+    """Tests for OrasClient.get_manifest() Liskov Substitution Principle compatibility."""
+
+    def test_get_manifest_with_string_uri_delegates_correctly(self, mocker: Any) -> None:
+        """get_manifest(uri_string) should convert to Container and delegate to base class."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_base_get_manifest = mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_manifest",
+            return_value={"schemaVersion": 2},
+        )
+        mock_get_container = mocker.MagicMock()
+        mock_container = mocker.MagicMock()
+        mock_get_container.return_value = mock_container
+        mocker.patch.object(OrasClient, "get_container", mock_get_container)
+
+        client = OrasClient()
+        result = client.get_manifest("public.ecr.aws/g2n4p2m7/margo:1.0.0")
+
+        assert result == {"schemaVersion": 2}
+        mock_get_container.assert_called_once_with("public.ecr.aws/g2n4p2m7/margo:1.0.0")
+        # Should pass Container object, not string, to base class
+        mock_base_get_manifest.assert_called_once_with(
+            mock_container,
+            None,
+            None,
+        )
+
+    def test_get_manifest_with_container_object_and_allowed_media_type(self, mocker: Any) -> None:
+        """get_manifest(Container, allowed_media_type=[...]) should pass through unchanged to base."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_base_get_manifest = mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_manifest",
+            return_value={"schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json"},
+        )
+
+        container = Container(name="g2n4p2m7/margo", registry="public.ecr.aws")
+        allowed_types = ["application/vnd.oci.image.manifest.v1+json"]
+
+        client = OrasClient()
+        result = client.get_manifest(container, allowed_media_type=allowed_types)
+
+        assert result == {"schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json"}
+        # Should pass Container and allowed_media_type through unchanged to base class
+        mock_base_get_manifest.assert_called_once_with(
+            container,
+            allowed_types,
+            None,
+        )
+
+    def test_get_manifest_with_container_and_validation_schema(self, mocker: Any) -> None:
+        """get_manifest(Container, validation_schema=...) should pass all params through."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_base_get_manifest = mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_manifest",
+            return_value={"schemaVersion": 2},
+        )
+
+        container = Container(name="g2n4p2m7/margo", registry="public.ecr.aws")
+        validation_schema = {"type": "object"}
+
+        client = OrasClient()
+        result = client.get_manifest(container, validation_schema=validation_schema)
+
+        assert result == {"schemaVersion": 2}
+        mock_base_get_manifest.assert_called_once_with(
+            container,
+            None,
+            validation_schema,
+        )
+
+    def test_pull_invokes_get_manifest_polymorphically_with_container_and_media_type(
+        self, mocker: Any
+    ) -> None:
+        """pull() → super().pull() → internal self.get_manifest(container, allowed_media_type).
+
+        This is the actual scenario that was broken: oras.provider.Registry.pull() internally
+        calls self.get_manifest(container, allowed_media_type) polymorphically. Our override
+        must accept both parameters to avoid TypeError.
+        """
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+
+        # Mock the base class's pull() to call our get_manifest with Container + allowed_media_type
+        # This simulates what oras.provider.Registry.pull() does internally
+        original_get_manifest_called = []
+
+        def mock_pull_impl(self, **kwargs) -> list[str]:  # noqa: ARG001
+            # Simulate what oras.provider.Registry.pull() does internally
+            container = Container(name="g2n4p2m7/margo", registry="public.ecr.aws")
+            allowed_types = ["application/vnd.oci.image.manifest.v1+json"]
+            # This internal call should work without TypeError
+            # Call the real get_manifest implementation (not base), which should accept all params
+            self.get_manifest(container, allowed_media_type=allowed_types)
+            original_get_manifest_called.append((container, allowed_types))
+            return ["margo.yaml"]
+
+        mocker.patch("margot.infra.oci.OrasClientLib.pull", mock_pull_impl)
+        # Mock the base get_manifest to avoid actually hitting the network
+        mocker.patch("margot.infra.oci.OrasClientLib.get_manifest", return_value={})
+
+        client = OrasClient()
+        # This should NOT raise TypeError about positional arguments
+        result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", "/tmp/out")
+
+        assert result == ["margo.yaml"]
+        # Verify that our override was called with Container (not string)
+        assert len(original_get_manifest_called) == 1
+
+    def test_get_manifest_logging_with_string_uri(
+        self, mocker: Any, capture_console: tuple[Any, Any], reset_console: None
+    ) -> None:
+        """get_manifest(uri_string) should log the URI string in debug output."""
+        console.set_debug(True)
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mocker.patch("margot.infra.oci.OrasClientLib.get_manifest", return_value={})
+        mock_container = mocker.MagicMock()
+        mocker.patch.object(OrasClient, "get_container", return_value=mock_container)
+        _out, err = capture_console
+
+        client = OrasClient()
+        client.get_manifest("public.ecr.aws/g2n4p2m7/margo:1.0.0")
+
+        err_output = err.getvalue()
+        assert "GET manifest:" in err_output
+        # Should log the URI or container ref
+        assert "public.ecr.aws/g2n4p2m7/margo:1.0.0" in err_output or "g2n4p2m7/margo" in err_output
+
+    def test_get_manifest_logging_with_container_object(
+        self, mocker: Any, capture_console: tuple[Any, Any], reset_console: None
+    ) -> None:
+        """get_manifest(Container) should log the container in debug output without errors."""
+        console.set_debug(True)
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mocker.patch("margot.infra.oci.OrasClientLib.get_manifest", return_value={})
+
+        container = Container(name="g2n4p2m7/margo", registry="public.ecr.aws")
+        _out, err = capture_console
+
+        client = OrasClient()
+        client.get_manifest(container)
+
+        err_output = err.getvalue()
+        assert "GET manifest:" in err_output

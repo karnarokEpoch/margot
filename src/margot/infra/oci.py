@@ -7,6 +7,7 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 
 from oras.client import OrasClient as OrasClientLib
+from oras.container import Container
 from oras.defaults import annotation_title
 from oras.oci import ManifestConfig, NewLayer, NewManifest
 
@@ -62,12 +63,32 @@ class OrasClient(OrasClientLib):
             self.auth.load_configs(self.get_container(hostname))
         _configure_oras_logger()
 
-    def get_manifest(self, uri: str) -> dict[str, Any]:
-        """
-        Fetch the manifest of an OCI artifact.
+    def get_manifest(
+        self,
+        container: str | Container,
+        allowed_media_type: list | None = None,
+        validation_schema: dict | None = None,
+    ) -> dict[str, Any]:
+        """Fetch the manifest of an OCI artifact.
+
+        This method overrides the base class signature to support both legacy usage
+        patterns from margot's own call sites (which pass a URI string) and internal
+        oras-py polymorphic calls (which pass a Container object with extra parameters).
+
+        Liskov Substitution Principle: The override's signature is a superset-compatible
+        match of the base class's, accepting both a plain URI string and a Container
+        object with optional parameters. Internal oras-py calls (e.g., from Registry.pull())
+        dispatch through self.get_manifest(container, allowed_media_type) polymorphically,
+        passing a Container object and optional allowed_media_type; this method must
+        accept both forms without re-wrapping or dropping arguments.
 
         Args:
-            uri: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0)
+            container: Full OCI reference as a string (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0)
+                or an oras.container.Container instance (when called by oras-py internals).
+            allowed_media_type: Optional list of allowed manifest media types.
+                Passed through to the base class unchanged.
+            validation_schema: Optional validation schema dict. Passed through to the base
+                class unchanged.
 
         Returns:
             Manifest dict from the registry.
@@ -75,8 +96,15 @@ class OrasClient(OrasClientLib):
         Raises:
             Exception: If fetch fails.
         """
-        console.debug(f"GET manifest: {uri}")
-        return super().get_manifest(uri)
+        # If container is a plain string (margot's own external call sites), convert to Container.
+        # If it's already a Container (oras-py's internal polymorphic dispatch), use as-is.
+        if isinstance(container, str):
+            console.debug(f"GET manifest: {container}")
+            container = self.get_container(container)
+        else:
+            console.debug(f"GET manifest: {container}")
+
+        return super().get_manifest(container, allowed_media_type, validation_schema)
 
     def pull(self, uri: str, outdir: str) -> list[str]:
         """
