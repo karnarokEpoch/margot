@@ -124,33 +124,26 @@ def _resolve_registry_repository(
     if cli_registry and cli_repository:
         return cli_registry, cli_repository
 
+    # Determine fallback repository source (component > global)
+    fallback_repo = component_repository or global_repository
+
     if cli_registry and not cli_repository:
-        # Registry given but no repository — try component, then global
-        if component_repository:
-            # Component repository might be just the path part
-            _, repo = _parse_component_repository(component_repository)
-            return cli_registry, repo
-        if global_repository:
-            _, repo = _parse_component_repository(global_repository)
+        # Registry given but no repository — use fallback repository
+        if fallback_repo:
+            _, repo = _parse_component_repository(fallback_repo)
             return cli_registry, repo
         raise ValueError("--repository is required when --registry is specified without a component repository in margo.yaml")
 
     if not cli_registry and cli_repository:
-        # Repository given but no registry — try component, then global
-        if component_repository:
-            reg, _ = _parse_component_repository(component_repository)
-            return reg, cli_repository
-        if global_repository:
-            reg, _ = _parse_component_repository(global_repository)
+        # Repository given but no registry — use fallback repository
+        if fallback_repo:
+            reg, _ = _parse_component_repository(fallback_repo)
             return reg, cli_repository
         raise ValueError("--registry is required when --repository is specified without a component repository in margo.yaml")
 
-    # Neither CLI arg given — fall back to component, then global repository
-    if component_repository:
-        return _parse_component_repository(component_repository)
-
-    if global_repository:
-        return _parse_component_repository(global_repository)
+    # Neither CLI arg given — use fallback repository
+    if fallback_repo:
+        return _parse_component_repository(fallback_repo)
 
     raise ValueError("No registry/repository specified. Use --registry and --repository flags or set 'repository' in margo.yaml.")
 
