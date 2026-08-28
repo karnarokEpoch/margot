@@ -78,10 +78,14 @@ def push_cmd(
 
         if all_targets:
             for target in all_targets:
-                if target.variant_name:
-                    console.success(f"Pushed ({target.variant_name}): {target.version}")
+                if target.registry and target.repository:
+                    full_ref = f"{target.registry}/{target.repository}:{target.version}"
                 else:
-                    console.success(f"Pushed: {target.version}")
+                    full_ref = target.version
+                if target.variant_name:
+                    console.success(f"Pushed ({target.variant_name}): {full_ref}")
+                else:
+                    console.success(f"Pushed: {full_ref}")
         else:
             console.warning("Nothing was pushed.")
 
