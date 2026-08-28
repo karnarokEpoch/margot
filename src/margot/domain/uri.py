@@ -3,20 +3,41 @@
 from semver import Version
 
 
+def strip_scheme(uri: str) -> str:
+    """
+    Strip a leading 'oci://' scheme prefix if present (case-insensitive).
+
+    Args:
+        uri: OCI reference string, optionally with a scheme prefix.
+
+    Returns:
+        The URI with 'oci://' prefix removed if present, otherwise unchanged.
+
+    Examples:
+        strip_scheme("oci://public.ecr.aws/org/repo:tag") → "public.ecr.aws/org/repo:tag"
+        strip_scheme("public.ecr.aws/org/repo:tag") → "public.ecr.aws/org/repo:tag"
+        strip_scheme("oci://example.com/repo:1.0") → "example.com/repo:1.0"
+    """
+    if uri.lower().startswith("oci://"):
+        return uri[6:]
+    return uri
+
+
 def validate_uri(uri: str) -> None:
     """Raise ValueError if uri is empty or missing a tag separator with a non-empty tag.
 
     Args:
-        uri: OCI reference string to validate.
+        uri: OCI reference string to validate (scheme prefix will be stripped).
 
     Raises:
         ValueError: If uri is empty.
         ValueError: If uri has no ':' separator or the tag after ':' is empty.
     """
-    if not uri:
+    normalized = strip_scheme(uri)
+    if not normalized:
         raise ValueError("URI must not be empty")
-    tag_sep = uri.rfind(":")
-    if tag_sep == -1 or not uri[tag_sep + 1 :]:
+    tag_sep = normalized.rfind(":")
+    if tag_sep == -1 or not normalized[tag_sep + 1 :]:
         raise ValueError("URI must contain a tag separated by ':' (e.g. registry/repo:tag)")
 
 
@@ -25,7 +46,7 @@ def extract_tag(uri: str) -> str:
     Extract the tag portion from an OCI URI.
 
     Assumes the URI has already been validated by validate_uri().
-    Returns everything after the last ':'.
+    Returns everything after the last ':'. Strips scheme prefix first.
 
     Args:
         uri: A validated OCI reference string.
@@ -33,14 +54,15 @@ def extract_tag(uri: str) -> str:
     Returns:
         The tag string (e.g. '1.0.0', 'latest', '1.3.0-simple.1').
     """
-    return uri[uri.rfind(":") + 1 :]
+    normalized = strip_scheme(uri)
+    return normalized[normalized.rfind(":") + 1 :]
 
 
 def extract_hostname(uri: str) -> str:
     """
     Extract the registry hostname from an OCI URI.
 
-    Returns everything before the first '/' in the URI.
+    Returns everything before the first '/' in the URI. Strips scheme prefix first.
 
     Args:
         uri: A validated OCI reference string (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0).
@@ -51,12 +73,13 @@ def extract_hostname(uri: str) -> str:
     Raises:
         ValueError: If uri is empty or has no '/' separator with a non-empty hostname.
     """
-    if not uri:
+    normalized = strip_scheme(uri)
+    if not normalized:
         raise ValueError("URI must not be empty")
-    sep = uri.find("/")
+    sep = normalized.find("/")
     if sep in (-1, 0):
         raise ValueError("URI must contain a hostname separated by '/' (e.g. registry/repo:tag)")
-    return uri[:sep]
+    return normalized[:sep]
 
 
 def validate_semver_tag(tag: str) -> bool:

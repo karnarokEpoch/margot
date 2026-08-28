@@ -12,7 +12,7 @@ def fetch_manifest(uri: str) -> dict[str, Any]:
     Fetch an OCI artifact manifest by URI.
 
     Args:
-        uri: Full OCI reference (e.g. public.ecr.aws/org/repo:tag)
+        uri: Full OCI reference (e.g. public.ecr.aws/org/repo:tag or oci://public.ecr.aws/org/repo:tag)
 
     Returns:
         Manifest dict from the registry.
@@ -22,6 +22,9 @@ def fetch_manifest(uri: str) -> dict[str, Any]:
         CredentialsExpiredError: If credentials for the registry have expired.
         Exception: If fetch fails.
     """
+    # Normalize URI by stripping scheme
+    uri = uri_domain.strip_scheme(uri)
+    
     uri_domain.validate_uri(uri)
     hostname = uri_domain.extract_hostname(uri)
     console.info(f"Checking credentials for {hostname}")
