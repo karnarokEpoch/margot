@@ -55,6 +55,63 @@ Rules:
 - `infra/` emit `debug` per I/O call.
 - The one exception: `echo(f"margot {get_version()}")` in `global_options.py` — version output is not a log message.
 
+## Overriding methods on a third-party base class
+
+When a class in `infra/` subclasses a third-party library class (e.g.
+`OrasClient(oras.client.OrasClient)`), an overridden method's signature must accept a
+**strict superset** of what the base class method accepts — same or wider parameter
+types, same or more optional parameters with defaults, never a narrowed type and never a
+dropped parameter. This holds even when every call site in margot's own code only ever
+uses the narrower form.
+
+**Why:** the base class's own internals can call the overridden method back on `self`
+polymorphically, with arguments margot's call sites never produce. `oras.provider.Registry
+.pull()` calls `self.get_manifest(container, allowed_media_type)` and
+`self.download_blob(container, ...)` internally with an already-built `Container` object
+and extra positional args — not the plain URI string margot's own services pass in. An
+override typed as `get_manifest(self, uri: str)` accepts margot's own calls fine but
+raises `TypeError` the moment `super().pull()` dispatches back into it. This is a Liskov
+Substitution Principle violation: a subclass must be substitutable for its base class from
+the point of view of *any* caller, including the base class's own methods calling back
+into `self`. See `src/margot/infra/oci.py` `get_manifest()` / `download_blob()` for the
+fixed shape — signature widened to `container: str | Container, allowed_media_type=None,
+validation_schema=None` (matching the base exactly), with the narrowing handled *inside*
+the method body via `isinstance` checks, not in the signature.
+
+```python
+# wrong — narrows the base class contract
+class OrasClient(OrasClientLib):
+    def get_manifest(self, uri: str) -> dict[str, Any]:
+        return super().get_manifest(uri)
+
+# correct — superset signature, normalize internally
+class OrasClient(OrasClientLib):
+    def get_manifest(
+        self,
+        container: str | Container,
+        allowed_media_type: list | None = None,
+        validation_schema: dict | None = None,
+    ) -> dict[str, Any]:
+        if isinstance(container, str):
+            container = self.get_container(container)
+        return super().get_manifest(container, allowed_media_type, validation_schema)
+```
+
+Checklist before narrowing or simplifying an override:
+
+- Read the base class's actual signature (`inspect.signature(Base.method)` or the source)
+  before assuming margot's own call site is the only caller.
+- Accept the union type and normalize inside the method body — don't reject the base
+  type to keep the override "simple."
+- Add a regression test that calls the override the way the *base class* calls it
+  internally (polymorphic dispatch via another base method, e.g. `super().pull()`), not
+  only the way margot's own services call it. That call path is what a signature-narrowing
+  bug hides behind.
+
+This is distinct from the `commands/` → `services/` → `domain/` + `infra/` layering rule
+(module dependency direction) — this rule is about inheritance contracts when `infra/`
+wraps a third-party class.
+
 ## Testing
 
 - **TDD is mandatory.** Write tests for the expected final behavior before or alongside implementation. Never write stub tests that just verify a `NotImplementedError` — test what the code *should* do. A failing test is correct and expected until the implementation catches up.
