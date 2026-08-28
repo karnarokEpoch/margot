@@ -176,3 +176,37 @@ def section(label: str) -> None:
     """
     separator = f"── {label} ──"
     _get_stderr().print(f"[blue]{separator}[/blue]")
+
+
+def verdict(label: str, outcome: str, detail: str) -> None:
+    """Print a validation verdict line to stdout with outcome-aware coloring.
+
+    Renders:
+    - label (e.g. "Schema A (Margo spec)") in white (neutral, header-like)
+    - outcome (PASS/FAIL/advisory) in outcome-specific color:
+      - PASS → green
+      - FAIL → red
+      - advisory → orange3 (but not printed as a word, just colors the detail)
+    - detail (e.g. summary counts or advisory note) in the outcome color
+
+    For "advisory" outcome, the detail already contains the advisory note string,
+    so we just color the whole line in orange3 to indicate advisory status.
+    
+    Output goes to stdout (pipeable, like success()).
+    """
+    # Map outcome to appropriate color
+    outcome_color_map = {
+        "PASS": "green",
+        "FAIL": "red",
+        "advisory": "orange3",
+    }
+    outcome_color = outcome_color_map.get(outcome, "dim")
+
+    # For advisory, don't print the word "advisory" - just color the detail
+    if outcome == "advisory":
+        line = f"[white]{label}[/white][dim]: [/dim][{outcome_color}]{detail}[/{outcome_color}]"
+    else:
+        # For PASS/FAIL, print the outcome word in color, then the detail
+        line = f"[white]{label}[/white][dim]: [/dim][{outcome_color}]{outcome}[/{outcome_color}] — {detail}"
+    
+    _get_stdout().print(line)

@@ -42,6 +42,7 @@ console.debug(f"GET manifest: {uri}")  # only shown with --debug
 console.fatal("Invalid URI.")          # prints error and raises Exit(1)
 console.finding(escaped_line, "ERROR")  # print a validation finding with severity color
 console.section("Schema A (Margo spec)")  # print a blue section separator
+console.verdict("Schema A (Margo spec)", "PASS", "no findings")  # print a verdict with outcome coloring
 
 # wrong
 from rich import print as rprint
@@ -50,11 +51,12 @@ echo("Error: ...", err=True)
 ```
 
 Rules:
-- `success` → stdout (pipeable). `warning`, `info`, `debug`, `fatal`, `finding`, `section` → stderr.
+- `success` → stdout (pipeable). `warning`, `info`, `debug`, `fatal`, `finding`, `section`, `verdict` → stderr (except `verdict` → stdout).
 - `domain/` must not import `console` — it raises `ValueError`, the calling layer logs the outcome.
-- `commands/` use `success`, `warning`, `fatal`. Never emit `info` or `debug` from a command directly.
-  - `finding(text, severity)` is for rendering validation findings with color matching severity (ERROR/WARNING/INFO).
-  - `section(label)` is for rendering blue section separators in validation output.
+- `commands/` use `success`, `warning`, `fatal`, `verdict`. Never emit `info` or `debug` from a command directly.
+  - `finding(text, severity)` is for rendering validation findings with color matching severity (ERROR/WARNING/INFO) to stderr.
+  - `section(label)` is for rendering blue section separators in validation output to stderr.
+  - `verdict(label, outcome, detail)` is for rendering validation verdict lines (Schema A/B summaries) with outcome-aware coloring (PASS→green, FAIL→red, advisory→orange3) to stdout. Label renders white, outcome in color, detail plain.
 - `services/` emit `info` at each significant step.
 - `infra/` emit `debug` per I/O call.
 - The one exception: `echo(f"margot {get_version()}")` in `global_options.py` — version output is not a log message.

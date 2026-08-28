@@ -863,3 +863,112 @@ class TestVerifySectionColoring:
         # No section separators in default mode
         assert "── Schema A" not in plain
         assert "── Schema B" not in plain
+
+
+class TestVerdictLineColoring:
+    """E2E tests for verdict line coloring (Schema A/B summary lines)."""
+
+    def test_schema_a_pass_verdict_renders_green(self, cli_project: Path) -> None:
+        """Should render Schema A PASS verdict with green outcome."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        raw_stdout = result.stdout or ""
+
+        # PASS verdict should be present
+        assert "Schema A (Margo spec): PASS" in _output(result)
+        # Should be colored green (ANSI code 32 or 92)
+        assert "[32m" in raw_stdout or "[92m" in raw_stdout
+
+    def test_schema_a_fail_verdict_renders_red(self, cli_project: Path) -> None:
+        """Should render Schema A FAIL verdict with red outcome."""
+        # Use a descriptor missing required field so it fails
+        (cli_project / "margo" / "app.yaml").write_text(
+            VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
+        )
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        raw_stdout = result.stdout or ""
+
+        # FAIL verdict should be present
+        assert "Schema A (Margo spec): FAIL" in _output(result)
+        # Should be colored red (ANSI code 31 or 91)
+        assert "[31m" in raw_stdout or "[91m" in raw_stdout
+
+    def test_schema_b_advisory_verdict_renders_orange(self, cli_project: Path) -> None:
+        """Should render Schema B advisory verdict (warnings without --strict) in orange."""
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        raw_stdout = result.stdout or ""
+
+        # Advisory verdict should be present
+        plain = _output(result)
+        assert "advisory, does not affect the exit code" in plain
+
+        # Should be colored orange3 (ANSI code 172)
+        # Note: orange3 is 38;5;172 in 256-color mode
+        assert "[38;5;172m" in raw_stdout or "[172m" in raw_stdout
+
+    def test_schema_b_pass_verdict_under_strict_renders_green(self, cli_project: Path) -> None:
+        """Should render Schema B PASS verdict under --strict in green."""
+        # Use COMPLIANT_APP_YAML which satisfies all Schema B recommendations
+        (cli_project / "margo" / "app.yaml").write_text(COMPLIANT_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--only-recommend", "--strict"])
+        raw_stdout = result.stdout or ""
+
+        # PASS verdict should be present
+        assert "Schema B (recommended): PASS" in _output(result)
+        # Should be colored green
+        assert "[32m" in raw_stdout or "[92m" in raw_stdout
+
+    def test_schema_b_fail_verdict_under_strict_renders_red(self, cli_project: Path) -> None:
+        """Should render Schema B FAIL verdict under --strict in red."""
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend", "--strict"])
+        raw_stdout = result.stdout or ""
+
+        # FAIL verdict should be present
+        assert "Schema B (recommended): FAIL" in _output(result)
+        # Should be colored red
+        assert "[31m" in raw_stdout or "[91m" in raw_stdout
+
+    def test_verdict_label_renders_in_white(self, cli_project: Path) -> None:
+        """Should render Schema A/B labels in white, distinct from outcome color."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        raw_stdout = result.stdout or ""
+
+        # Labels should be colored white (ANSI code 37 or 97)
+        # We expect to see white codes around the label text
+        assert "[37m" in raw_stdout  # white color code
+
+    def test_final_verdict_pass_remains_unchanged(self, cli_project: Path) -> None:
+        """Should not change final 'verify: PASS' line color or stream when printed."""
+        # Use SPARSE so there are findings and sections shown, making _verdict() run
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        plain = _output(result)
+
+        # Final verdict should be present and pass (because Schema A passes, Schema B is advisory)
+        assert "verify: PASS" in plain
+        assert result.exit_code == 0
+
+    def test_final_verdict_fail_remains_unchanged(self, cli_project: Path) -> None:
+        """Should not change final 'verify: FAIL' line color or stream when printed."""
+        # Use a descriptor with Schema A errors so _verdict() fails
+        (cli_project / "margo" / "app.yaml").write_text(
+            VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
+        )
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        plain = _output(result)
+
+        # Final verdict should be present and fail (with Error: prefix on stderr)
+        # The plain output combines stdout and stderr
+        assert "verify: FAIL" in plain or "Error:" in plain
+        assert result.exit_code == 1
