@@ -131,13 +131,21 @@ class OrasClient(OrasClientLib):
             return result
         return []
 
-    def download_blob(self, uri: str, digest: str, outfile: str) -> str:
+    def download_blob(self, container: str | Container, digest: str, outfile: str) -> str:
         """
         Download a single blob by digest to outfile.
 
+        Liskov Substitution Principle compliance: Registry.pull() calls self.download_blob()
+        polymorphically with a Container object in its internal layer-download loop (three
+        call sites in oras-py source). This override must accept both a plain URI string
+        (from margot's external callers in services/pull.py) and an already-constructed
+        Container object (from oras-py's internal callers).
+
         Args:
-            uri: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0).
-                Used to resolve the registry/repository container.
+            container: Either a full OCI reference string (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0)
+                that will be resolved to a Container via self.get_container(), OR an
+                already-constructed oras.container.Container object (which is passed through
+                unchanged to the base class).
             digest: The blob digest (e.g. 'sha256:abc...').
             outfile: Destination file path (created by oras-py).
 
@@ -148,7 +156,9 @@ class OrasClient(OrasClientLib):
             Exception: If download fails.
         """
         console.debug(f"Download blob: {digest} → {outfile}")
-        super().download_blob(uri, digest, outfile)
+        # Convert string URI to Container if needed; pass Container objects unchanged
+        resolved_container = self.get_container(container) if isinstance(container, str) else container
+        super().download_blob(resolved_container, digest, outfile)
         return outfile
 
     def login(self, hostname: str, username: str, password: str) -> None:

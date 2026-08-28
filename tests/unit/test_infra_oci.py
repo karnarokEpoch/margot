@@ -89,6 +89,29 @@ class TestOrasClient:
         result = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", FAKE_OUTDIR)
         assert result == []
 
+    def test_download_blob_with_uri_string_returns_outfile(self, mocker: Any) -> None:
+        """download_blob(uri_string, ...) should convert URI to Container and delegate to base class."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_download = mocker.patch("margot.infra.oci.OrasClientLib.download_blob")
+        mock_container = mocker.MagicMock()
+        mocker.patch.object(OrasClient, "get_container", return_value=mock_container)
+        client = OrasClient()
+        result = client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
+        assert result == FAKE_BLOB_OUT
+        mock_download.assert_called_once_with(mock_container, "sha256:abc", FAKE_BLOB_OUT)
+
+    def test_download_blob_with_container_object_returns_outfile(self, mocker: Any) -> None:
+        """download_blob(container_obj, ...) should pass Container through unchanged to base class."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_download = mocker.patch("margot.infra.oci.OrasClientLib.download_blob")
+        # Create a real Container object to test polymorphic dispatch
+        container_obj = Container(name="margo", registry="public.ecr.aws")
+        client = OrasClient()
+        result = client.download_blob(container_obj, "sha256:abc", FAKE_BLOB_OUT)
+        assert result == FAKE_BLOB_OUT
+        # Base class should receive the Container object unchanged
+        mock_download.assert_called_once_with(container_obj, "sha256:abc", FAKE_BLOB_OUT)
+
     def test_oras_logger_configured_on_init(self, mocker: Any) -> None:
         """After OrasClient(), oras.logger logger should have an _OrasLogHandler."""
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
@@ -150,6 +173,28 @@ class TestOrasClient:
         mock_remove.assert_called_once_with("public.ecr.aws")
 
 
+class TestDownloadBlobPolymorphism:
+    """Tests for download_blob() polymorphism: accepts both string URI and Container object."""
+
+    def test_download_blob_accepts_both_string_and_container_types(self, mocker: Any) -> None:
+        """Verify download_blob() signature accepts str | Container for the first parameter.
+
+        This is a signature-level test verifying LSP compliance: the override
+        must accept both string URIs (external callers) and Container objects
+        (oras-py's internal polymorphic dispatch).
+        """
+        # Check the signature has the correct type hint
+        sig = signature(OrasClient.download_blob)
+        container_param = sig.parameters["container"]
+
+        # Verify the type hint includes both str and Container
+        assert container_param.annotation is not None
+        annotation_str = str(container_param.annotation)
+        # The annotation should mention both str and Container
+        assert "str" in annotation_str
+        assert "Container" in annotation_str
+
+
 class TestOciAdapterDebugLogging:
     """Tests for OrasClient with debug logging."""
 
@@ -193,6 +238,20 @@ class TestOciAdapterDebugLogging:
         client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", FAKE_OUTDIR)
         assert "Pull layers:" in err.getvalue()
         assert out.getvalue() == ""
+
+    def test_download_blob_emits_debug_when_debug_mode(
+        self, mocker: Any, capture_console: tuple[Any, Any], reset_console: None
+    ) -> None:
+        """download_blob() should emit debug message when debug=True."""
+        console.set_debug(True)
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mocker.patch("margot.infra.oci.OrasClientLib.download_blob")
+        mock_container = mocker.MagicMock()
+        mocker.patch.object(OrasClient, "get_container", return_value=mock_container)
+        _out, err = capture_console
+        client = OrasClient()
+        client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
+        assert "Download blob:" in err.getvalue()
 
     def test_login_emits_debug_when_debug_mode(
         self, mocker: Any, capture_console: tuple[Any, Any], reset_console: None
