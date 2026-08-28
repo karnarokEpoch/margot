@@ -98,6 +98,7 @@ def _build_margo(
 ) -> BuildTarget:
     """Build the margo component, rendering an optional app.yaml.jinja descriptor."""
     version = version_override or meta.version
+    version = version.replace("+", "_")
     validate_oci_tag(version)
     validate_semver(version)
     console.info(f"Building margo: version {version}")
@@ -164,6 +165,7 @@ def _build_flat_component(  # noqa: PLR0913
     version = version_override or component.version
     if version is None:
         raise ValueError(f"{component_name} version not specified and no version_override provided")
+    version = version.replace("+", "_")
     validate_oci_tag(version)
     validate_semver(version)
     console.info(f"Building {component_name}: version {version}")

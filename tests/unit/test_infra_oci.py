@@ -91,10 +91,12 @@ class TestOrasClient:
         """download_blob() should return the outfile path after downloading."""
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
         mock_download = mocker.patch("margot.infra.oci.OrasClientLib.download_blob")
+        mock_container = mocker.MagicMock()
+        mocker.patch.object(OrasClient, "get_container", return_value=mock_container)
         client = OrasClient()
         result = client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
         assert result == FAKE_BLOB_OUT
-        mock_download.assert_called_once_with("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
+        mock_download.assert_called_once_with(container=mock_container, digest="sha256:abc", outfile=FAKE_BLOB_OUT)
 
     def test_oras_logger_configured_on_init(self, mocker: Any) -> None:
         """After OrasClient(), oras.logger logger should have an _OrasLogHandler."""
@@ -167,6 +169,8 @@ class TestOciAdapterDebugLogging:
         console.set_debug(True)
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
         mocker.patch("margot.infra.oci.OrasClientLib.get_manifest", return_value={})
+        mock_container = mocker.MagicMock()
+        mocker.patch.object(OrasClient, "get_container", return_value=mock_container)
         out, err = capture_console
         client = OrasClient()
         client.get_manifest("public.ecr.aws/g2n4p2m7/margo:1.0.0")
@@ -179,6 +183,8 @@ class TestOciAdapterDebugLogging:
         """get_manifest() should not emit debug output when debug=False."""
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
         mocker.patch("margot.infra.oci.OrasClientLib.get_manifest", return_value={})
+        mock_container = mocker.MagicMock()
+        mocker.patch.object(OrasClient, "get_container", return_value=mock_container)
         _out, err = capture_console
         client = OrasClient()
         client.get_manifest("public.ecr.aws/g2n4p2m7/margo:1.0.0")
@@ -204,6 +210,8 @@ class TestOciAdapterDebugLogging:
         console.set_debug(True)
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
         mocker.patch("margot.infra.oci.OrasClientLib.download_blob")
+        mock_container = mocker.MagicMock()
+        mocker.patch.object(OrasClient, "get_container", return_value=mock_container)
         _out, err = capture_console
         client = OrasClient()
         client.download_blob("public.ecr.aws/g2n4p2m7/margo:1.0.0", "sha256:abc", FAKE_BLOB_OUT)
