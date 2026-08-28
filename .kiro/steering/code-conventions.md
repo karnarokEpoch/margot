@@ -40,6 +40,8 @@ console.warning("--force is active. Safety checks bypassed.")
 console.info("Manifest fetched.")      # only shown with --verbose or --debug
 console.debug(f"GET manifest: {uri}")  # only shown with --debug
 console.fatal("Invalid URI.")          # prints error and raises Exit(1)
+console.finding(escaped_line, "ERROR")  # print a validation finding with severity color
+console.section("Schema A (Margo spec)")  # print a blue section separator
 
 # wrong
 from rich import print as rprint
@@ -48,9 +50,11 @@ echo("Error: ...", err=True)
 ```
 
 Rules:
-- `success` → stdout (pipeable). `warning`, `info`, `debug`, `fatal` → stderr.
+- `success` → stdout (pipeable). `warning`, `info`, `debug`, `fatal`, `finding`, `section` → stderr.
 - `domain/` must not import `console` — it raises `ValueError`, the calling layer logs the outcome.
 - `commands/` use `success`, `warning`, `fatal`. Never emit `info` or `debug` from a command directly.
+  - `finding(text, severity)` is for rendering validation findings with color matching severity (ERROR/WARNING/INFO).
+  - `section(label)` is for rendering blue section separators in validation output.
 - `services/` emit `info` at each significant step.
 - `infra/` emit `debug` per I/O call.
 - The one exception: `echo(f"margot {get_version()}")` in `global_options.py` — version output is not a log message.

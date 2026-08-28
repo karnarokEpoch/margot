@@ -105,17 +105,17 @@ def _render_both_schemas(result: VerifyResult, strict: bool) -> None:
     instead. As soon as either schema reports anything, both sections are shown — a reader must
     never have to guess which schema a finding came from, nor whether the other one ran.
 
-    Schema A errors go out as warning lines here rather than through `console.fatal`, because
+    Schema A errors go out as finding lines here rather than through `console.fatal`, because
     `fatal` exits and the Schema B section still has to be printed; the verdict below does the
     exiting. Schema A's own verdict is derived from its own findings — under `--strict` the run
     can fail on Schema B alone, which says nothing about Schema A.
     """
-    console.success(_section(SCHEMA_A_LABEL))
+    console.section(SCHEMA_A_LABEL)
     _emit(result.schema_a_results)
     schema_a_verdict = "FAIL" if has_errors(result.schema_a_results) else "PASS"
     console.success(f"{SCHEMA_A_LABEL}: {schema_a_verdict} — {summarize(result.schema_a_results)}")
 
-    console.success(_section(SCHEMA_B_LABEL))
+    console.section(SCHEMA_B_LABEL)
     _emit(result.schema_b_results)
     console.success(_schema_b_summary(result.schema_b_results, strict))
 
@@ -139,11 +139,15 @@ def _verdict(result: VerifyResult) -> None:
 
 
 def _emit(findings: Iterable[ValidationFinding]) -> None:
-    """Print findings as plain warning lines, with rich markup in messages escaped."""
+    """Print findings with color matching their severity (ERROR, WARNING, INFO).
+
+    Lines from format_findings() are assumed to start with severity (ERROR/WARNING/INFO),
+    followed by a space and the finding details. Each line is escaped to prevent
+    rich markup injection, then printed with the appropriate severity color applied.
+    """
     for line in format_findings(list(findings)):
-        console.warning(escape(line))
-
-
-def _section(label: str) -> str:
-    """Return a plain section separator for one schema's findings."""
-    return f"── {label} ──"
+        escaped_line = escape(line)
+        # Extract severity from the first token (ERROR/WARNING/INFO)
+        parts = escaped_line.split(" ", 1)
+        severity = parts[0] if parts[0] in ("ERROR", "WARNING", "INFO") else "INFO"
+        console.finding(escaped_line, severity)

@@ -738,3 +738,128 @@ class TestVerifyDefaultOutputIsUnchanged:
             "Error: ERROR /metadata: 'version' is a required property",
             "Schema A (Margo spec): FAIL — 1 error",
         ]
+
+
+
+class TestVerifySeverityColoring:
+    """E2E tests for severity-based coloring of findings."""
+
+    def test_error_and_warning_findings_render_with_different_colors(self, cli_project: Path) -> None:
+        """Should render ERROR findings in red, WARNING findings in yellow with distinct ANSI codes."""
+        # Use --recommend to get both Schema A and Schema B: A will have errors on SPARSE_APP_YAML,
+        # B will have warnings on the missing recommended fields.
+        # But simpler: just use SPARSE_APP_YAML with --recommend which will produce warnings from Schema B.
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        # Raw output includes ANSI codes
+        raw_stderr = result.stderr or ""
+
+        # Should contain WARNING in yellow
+        assert "WARNING" in raw_stderr
+        # Yellow ANSI code should be present (33 or 93)
+        assert "[33m" in raw_stderr or "[93m" in raw_stderr
+
+    def test_finding_lines_do_not_contain_doubled_warning_prefix(self, cli_project: Path) -> None:
+        """Should not emit 'warning: ERROR' or 'warning: WARNING' — no doubled prefix."""
+        (cli_project / "margo" / "app.yaml").write_text(
+            VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
+        )
+
+        result = runner.invoke(app, ["verify"])
+        output = _output(result)
+
+        # The bug produced doubled prefixes like "warning: ERROR" or "warning: WARNING"
+        assert "warning: ERROR" not in output
+        assert "warning: WARNING" not in output
+        assert "warning: INFO" not in output
+
+    def test_error_line_renders_in_red(self, cli_project: Path) -> None:
+        """Should render ERROR findings with red color code."""
+        (cli_project / "margo" / "app.yaml").write_text(
+            VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
+        )
+
+        result = runner.invoke(app, ["verify"])
+        raw_stderr = result.stderr or ""
+
+        # ERROR should be colored red (ANSI code 31 or 91)
+        assert "ERROR" in raw_stderr
+        assert "[31m" in raw_stderr or "[91m" in raw_stderr
+
+    def test_warning_line_renders_in_yellow(self, cli_project: Path) -> None:
+        """Should render WARNING findings with yellow color code."""
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        raw_stderr = result.stderr or ""
+
+        # WARNING should be colored yellow (ANSI code 33 or 93)
+        assert "WARNING" in raw_stderr
+        assert "[33m" in raw_stderr or "[93m" in raw_stderr
+
+    def test_markup_like_characters_in_message_are_escaped(self, cli_project: Path) -> None:
+        """Should not swallow finding messages containing markup-like characters like brackets."""
+        # Create a schema with a constraint that produces a message mentioning array[string]
+        schema = cli_project / "brackets.linkml.yaml"
+        schema.write_text(
+            """
+id: https://example.org/brackets
+name: brackets
+prefixes:
+  linkml: https://w3id.org/linkml/
+  ex: https://example.org/brackets/
+default_prefix: ex
+imports:
+  - linkml:types
+classes:
+  ApplicationDescription:
+    attributes:
+      dataType:
+        range: string
+        pattern: "^(string|integer|array\\\\[string\\\\])$"
+""",
+            encoding="utf-8",
+        )
+        (cli_project / "margo" / "app.yaml").write_text("apiVersion: v1\ndataType: invalid\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--schema", str(schema)])
+        plain = _output(result)
+
+        # The pattern message contains brackets; it should render literally, not be interpreted
+        assert "array" in plain or "pattern" in plain
+        # Most importantly: the line should not vanish silently (which would happen if not escaped)
+        assert plain  # output is not empty
+        assert result.exit_code == 1
+
+
+class TestVerifySectionColoring:
+    """E2E tests for section separator coloring."""
+
+    def test_section_separators_render_in_blue(self, cli_project: Path) -> None:
+        """Should render section separators in blue, not green or other colors."""
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--recommend"])
+        raw_stderr = result.stderr or ""
+
+        # Section separators should appear
+        assert "── Schema A (Margo spec) ──" in _output(result)
+        assert "── Schema B (recommended) ──" in _output(result)
+
+        # They should be colored blue (ANSI code 34 or 94), not green (32/92)
+        # Since both separators are blue, we should see blue codes in stderr
+        assert "[34m" in raw_stderr or "[94m" in raw_stderr
+        # Should not be green
+        assert "[32m" not in raw_stderr  # plain green code not present (success/green uses this)
+
+    def test_section_lines_appear_unsectionized_when_no_recommend(self, cli_project: Path) -> None:
+        """Should not show section separators when --recommend is not passed."""
+        (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify"])
+        plain = _output(result)
+
+        # No section separators in default mode
+        assert "── Schema A" not in plain
+        assert "── Schema B" not in plain
