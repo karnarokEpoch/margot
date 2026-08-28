@@ -114,7 +114,7 @@ deploymentProfiles:
     components:
       - name: {{ v.component }}
         properties:
-          repository: {{ v.repository }}
+          repository: oci://{{ v.repository }}
           revision: {{ v.tag }}
 {%- endfor %}
 {%- for v in manifest.quadlet.variants %}
@@ -123,7 +123,7 @@ deploymentProfiles:
     components:
       - name: {{ v.component }}
         properties:
-          repository: {{ v.repository }}
+          repository: oci://{{ v.repository }}
           revision: {{ v.tag }}
 {%- endfor %}
 
@@ -143,7 +143,9 @@ automatically. At build time, the context resolves to:
 
 - `{{ v.component }}` → `com-example-web-platform-compose-default`, etc. (derived: `<id>-<type>-<variant-name>`)
 - `{{ v.tag }}` → `2.1.0_compose-default`, etc. (OCI-safe form of the derived version)
-- `{{ v.repository }}` → `public.ecr.aws/g2n4p2m7/margo`
+- `{{ v.repository }}` → `public.ecr.aws/g2n4p2m7/margo` (bare registry/repository — the `oci://`
+  scheme required by `deploymentProfiles[].components[].properties.repository` is prepended in
+  the template, not part of the context value)
 
 ## Compose files
 
