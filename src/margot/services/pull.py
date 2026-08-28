@@ -64,22 +64,23 @@ def pull_artifact(
     For other types (margo, unknown): delegates to client.pull() for bulk download.
 
     Steps:
-    1. Validate URI (via domain/uri.py).
-    2. Guard: force_type requires force.
-    3. SemVer gate: reject non-SemVer tags unless force=True.
-    4. Create outdir.
-    5. Fetch manifest.
-    6. Detect artifact type via the artifactType field; override with force_type if set.
-    7. If package_type not in _PAYLOAD_MEDIA_TYPES: use client.pull() (margo, unknown types).
-    8. Otherwise: own the layer loop.
+    1. Normalize URI by stripping 'oci://' scheme if present.
+    2. Validate URI (via domain/uri.py).
+    3. Guard: force_type requires force.
+    4. SemVer gate: reject non-SemVer tags unless force=True.
+    5. Create outdir.
+    6. Fetch manifest.
+    7. Detect artifact type via the artifactType field; override with force_type if set.
+    8. If package_type not in _PAYLOAD_MEDIA_TYPES: use client.pull() (margo, unknown types).
+    9. Otherwise: own the layer loop.
        a. Get target mediaType for this package_type.
        b. Filter manifest layers by that mediaType.
        c. Hard-fail if no matching layers found.
        d. For each layer: resolve filename and download individually.
-    9. Return list of written file paths.
+    10. Return list of written file paths.
 
     Args:
-        uri: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0).
+        uri: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0 or oci://public.ecr.aws/g2n4p2m7/margo:1.0.0).
         outdir: Destination directory (created if needed).
         force: Bypass SemVer gate and malicious annotation checks.
         force_type: Override detected artifact type interpretation.
@@ -95,6 +96,9 @@ def pull_artifact(
         CredentialsExpiredError: If credentials for the registry have expired.
         Exception: If pull or manifest fetch fails.
     """
+    # Normalize URI by stripping scheme
+    uri = uri_domain.strip_scheme(uri)
+
     uri_domain.validate_uri(uri)
     console.info(f"URI validated: {uri}")
 

@@ -2,7 +2,7 @@
 
 from pytest import raises
 
-from margot.domain.uri import extract_hostname, extract_tag, validate_semver_tag, validate_uri
+from margot.domain.uri import extract_hostname, extract_tag, strip_scheme, validate_semver_tag, validate_uri
 
 
 class TestValidateUri:
@@ -31,6 +31,14 @@ class TestValidateUri:
         """Should not raise for a simple registry/repo:tag URI."""
         validate_uri("reg/repo:latest")
 
+    def test_oci_prefixed_uri_is_valid(self) -> None:
+        """Should validate correctly when oci:// scheme is present."""
+        validate_uri("oci://public.ecr.aws/g2n4p2m7/margo:1.0.0")
+
+    def test_oci_uppercase_prefixed_uri_is_valid(self) -> None:
+        """Should validate correctly when OCI:// (uppercase) scheme is present."""
+        validate_uri("OCI://public.ecr.aws/g2n4p2m7/margo:1.0.0")
+
 
 class TestExtractTag:
     """Tests for extract_tag()."""
@@ -46,6 +54,10 @@ class TestExtractTag:
     def test_extracts_prerelease_tag(self) -> None:
         """Should return the pre-release tag including hyphen and dot separators."""
         assert extract_tag("reg/repo:1.3.0-simple.1") == "1.3.0-simple.1"
+
+    def test_extracts_tag_with_oci_scheme(self) -> None:
+        """Should extract tag correctly even when oci:// scheme is present."""
+        assert extract_tag("oci://public.ecr.aws/g2n4p2m7/margo:1.0.0") == "1.0.0"
 
 
 class TestExtractHostname:
@@ -77,6 +89,10 @@ class TestExtractHostname:
         """Should raise ValueError when URI starts with '/' (empty hostname)."""
         with raises(ValueError, match="URI must contain a hostname"):
             extract_hostname("/repo:1.0.0")
+
+    def test_extracts_hostname_with_oci_scheme(self) -> None:
+        """Should extract hostname correctly even when oci:// scheme is present."""
+        assert extract_hostname("oci://public.ecr.aws/g2n4p2m7/margo:1.0.0") == "public.ecr.aws"
 
 
 class TestValidateSemverTag:
@@ -125,3 +141,35 @@ class TestValidateSemverTag:
     def test_v_prefix_is_invalid(self) -> None:
         """Should reject 'v1.0.0' (v-prefix is not canonical SemVer)."""
         assert validate_semver_tag("v1.0.0") is False
+
+
+class TestStripScheme:
+    """Tests for strip_scheme()."""
+
+    def test_strips_oci_lowercase_scheme(self) -> None:
+        """Should strip 'oci://' prefix (lowercase)."""
+        assert strip_scheme("oci://public.ecr.aws/org/repo:tag") == "public.ecr.aws/org/repo:tag"
+
+    def test_strips_oci_uppercase_scheme(self) -> None:
+        """Should strip 'OCI://' prefix (uppercase)."""
+        assert strip_scheme("OCI://public.ecr.aws/org/repo:tag") == "public.ecr.aws/org/repo:tag"
+
+    def test_strips_oci_mixed_case_scheme(self) -> None:
+        """Should strip 'Oci://' prefix (mixed case)."""
+        assert strip_scheme("Oci://public.ecr.aws/org/repo:tag") == "public.ecr.aws/org/repo:tag"
+
+    def test_no_scheme_unchanged(self) -> None:
+        """Should return URI unchanged when no scheme is present."""
+        assert strip_scheme("public.ecr.aws/org/repo:tag") == "public.ecr.aws/org/repo:tag"
+
+    def test_different_scheme_unchanged(self) -> None:
+        """Should return URI unchanged when a different scheme is present."""
+        assert strip_scheme("http://public.ecr.aws/org/repo:tag") == "http://public.ecr.aws/org/repo:tag"
+
+    def test_empty_string_unchanged(self) -> None:
+        """Should return empty string unchanged."""
+        assert strip_scheme("") == ""
+
+    def test_only_scheme_returns_empty(self) -> None:
+        """Should return empty string when only 'oci://' is provided."""
+        assert strip_scheme("oci://") == ""
