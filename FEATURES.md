@@ -301,9 +301,8 @@ during the tree copy step. One file per source dir; applies to that dir only.
 Build one or all package types into `build_dir`.
 
 ```
-margot build [--type margo|compose|quadlet|all] [--version VERSION]
-               [--registry REG] [--repository REPO] [--build-dir DIR]
-               [--variant VARIANT]
+margot build [--type margo|compose|quadlet|all] [--project-dir PATH]
+               [--version VERSION] [--build-dir DIR] [--variant VARIANT]
 ```
 
 **Logic per type:**
@@ -353,7 +352,7 @@ tasks is **removed**. Artifact type disambiguation happens via `artifactType` fi
 Push built artifacts to OCI registry via ORAS.
 
 ```
-margot push [--type margo|compose|quadlet|all]
+margot push [--type margo|compose|quadlet|all] [--project-dir PATH]
               [--registry REG] [--repository REPO] [--build-dir DIR]
               [--variant VARIANT]
 ```
