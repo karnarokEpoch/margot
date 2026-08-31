@@ -78,7 +78,7 @@ def _render_schema_a_only(result: VerifyResult) -> None:
     _emit(finding for finding in findings if finding.severity is not Severity.ERROR)
 
     if result.passed:
-        console.success(f"{SCHEMA_A_LABEL}: PASS — {summary}")
+        console.verdict(SCHEMA_A_LABEL, "PASS", summary)
         return
 
     errors = [finding for finding in findings if finding.severity is Severity.ERROR]
@@ -93,7 +93,8 @@ def _render_schema_b_only(result: VerifyResult, strict: bool) -> None:
     check that did not happen would be a lie.
     """
     _emit(result.schema_b_results)
-    console.success(_schema_b_summary(result.schema_b_results, strict))
+    b_verdict, b_detail = _schema_b_verdict_and_detail(result.schema_b_results, strict)
+    console.verdict(SCHEMA_B_LABEL, b_verdict, b_detail)
     _verdict(result)
 
 
@@ -105,29 +106,44 @@ def _render_both_schemas(result: VerifyResult, strict: bool) -> None:
     instead. As soon as either schema reports anything, both sections are shown — a reader must
     never have to guess which schema a finding came from, nor whether the other one ran.
 
-    Schema A errors go out as warning lines here rather than through `console.fatal`, because
+    Schema A errors go out as finding lines here rather than through `console.fatal`, because
     `fatal` exits and the Schema B section still has to be printed; the verdict below does the
     exiting. Schema A's own verdict is derived from its own findings — under `--strict` the run
     can fail on Schema B alone, which says nothing about Schema A.
     """
-    console.success(_section(SCHEMA_A_LABEL))
+    console.section(SCHEMA_A_LABEL)
     _emit(result.schema_a_results)
     schema_a_verdict = "FAIL" if has_errors(result.schema_a_results) else "PASS"
-    console.success(f"{SCHEMA_A_LABEL}: {schema_a_verdict} — {summarize(result.schema_a_results)}")
+    console.verdict(SCHEMA_A_LABEL, schema_a_verdict, summarize(result.schema_a_results))
 
-    console.success(_section(SCHEMA_B_LABEL))
+    console.section(SCHEMA_B_LABEL)
     _emit(result.schema_b_results)
-    console.success(_schema_b_summary(result.schema_b_results, strict))
+    b_verdict, b_detail = _schema_b_verdict_and_detail(result.schema_b_results, strict)
+    console.verdict(SCHEMA_B_LABEL, b_verdict, b_detail)
 
     _verdict(result)
 
 
-def _schema_b_summary(findings: Sequence[ValidationFinding], strict: bool) -> str:
-    """Return Schema B's summary line: a verdict under `--strict`, an advisory count otherwise."""
+def _schema_b_verdict_and_detail(findings: Sequence[ValidationFinding], strict: bool) -> tuple[str, str]:
+    """Return Schema B's verdict and detail for coloring.
+
+    Returns (outcome, detail) where:
+    - outcome: 'FAIL', 'PASS', or 'advisory'
+    - detail: the summary line (potentially with the advisory note included)
+
+    For 'advisory' outcome (not strict mode), the detail includes the advisory note and
+    'advisory' should not be repeated in the outcome. The detail is formatted exactly like
+    the old _schema_b_summary() output but without the label prefix.
+    """
     summary = summarize(findings)
     if not strict:
-        return f"{SCHEMA_B_LABEL}: {summary} — {ADVISORY_NOTE}"
-    return f"{SCHEMA_B_LABEL}: {'FAIL' if findings else 'PASS'} — {summary}"
+        # Advisory mode: warnings present but not failing
+        # Return 'advisory' as the outcome but include the advisory note in the detail
+        # (for backwards compat with old output format)
+        return ("advisory", f"{summary} — {ADVISORY_NOTE}")
+    # Strict mode: PASS/FAIL based on findings
+    outcome = "FAIL" if findings else "PASS"
+    return (outcome, summary)
 
 
 def _verdict(result: VerifyResult) -> None:
@@ -139,11 +155,15 @@ def _verdict(result: VerifyResult) -> None:
 
 
 def _emit(findings: Iterable[ValidationFinding]) -> None:
-    """Print findings as plain warning lines, with rich markup in messages escaped."""
+    """Print findings with color matching their severity (ERROR, WARNING, INFO).
+
+    Lines from format_findings() are assumed to start with severity (ERROR/WARNING/INFO),
+    followed by a space and the finding details. Each line is escaped to prevent
+    rich markup injection, then printed with the appropriate severity color applied.
+    """
     for line in format_findings(list(findings)):
-        console.warning(escape(line))
-
-
-def _section(label: str) -> str:
-    """Return a plain section separator for one schema's findings."""
-    return f"── {label} ──"
+        escaped_line = escape(line)
+        # Extract severity from the first token (ERROR/WARNING/INFO)
+        parts = escaped_line.split(" ", 1)
+        severity = parts[0] if parts[0] in ("ERROR", "WARNING", "INFO") else "INFO"
+        console.finding(escaped_line, severity)

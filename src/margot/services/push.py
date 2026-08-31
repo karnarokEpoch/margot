@@ -100,45 +100,50 @@ def _resolve_registry_repository(
     component_repository: str | None,
     cli_registry: str | None,
     cli_repository: str | None,
+    global_repository: str | None,
 ) -> tuple[str, str]:
     """Resolve registry and repository from CLI args and component config.
 
     Priority:
     1. CLI args (registry + repository) — highest priority.
     2. Component-level repository field from margo.yaml — parsed as <registry>/<rest>.
+    3. Global top-level repository field from margo.yaml — parsed as <registry>/<rest>.
 
     Args:
         component_repository: The component's repository field from margo.yaml.
         cli_registry: Registry from CLI --registry flag.
         cli_repository: Repository from CLI --repository flag.
+        global_repository: The global top-level repository field from margo.yaml.
 
     Returns:
         Tuple of (registry, repository).
 
     Raises:
-        ValueError: If neither CLI args nor component config provide registry/repository.
+        ValueError: If neither CLI args, component config, nor global repository provide registry/repository.
     """
     if cli_registry and cli_repository:
         return cli_registry, cli_repository
 
+    # Determine fallback repository source (component > global)
+    fallback_repo = component_repository or global_repository
+
     if cli_registry and not cli_repository:
-        # Registry given but no repository — try component
-        if component_repository:
-            # Component repository might be just the path part
-            _, repo = _parse_component_repository(component_repository)
+        # Registry given but no repository — use fallback repository
+        if fallback_repo:
+            _, repo = _parse_component_repository(fallback_repo)
             return cli_registry, repo
         raise ValueError("--repository is required when --registry is specified without a component repository in margo.yaml")
 
     if not cli_registry and cli_repository:
-        # Repository given but no registry — try component
-        if component_repository:
-            reg, _ = _parse_component_repository(component_repository)
+        # Repository given but no registry — use fallback repository
+        if fallback_repo:
+            reg, _ = _parse_component_repository(fallback_repo)
             return reg, cli_repository
         raise ValueError("--registry is required when --repository is specified without a component repository in margo.yaml")
 
-    # Neither CLI arg given — fall back to component repository
-    if component_repository:
-        return _parse_component_repository(component_repository)
+    # Neither CLI arg given — use fallback repository
+    if fallback_repo:
+        return _parse_component_repository(fallback_repo)
 
     raise ValueError("No registry/repository specified. Use --registry and --repository flags or set 'repository' in margo.yaml.")
 
@@ -169,6 +174,7 @@ def _push_margo(
 ) -> BuildTarget:
     """Push margo component."""
     version = meta.version
+    version = version.replace("+", "_")
 
     # Validate version
     validate_oci_tag(version)
@@ -176,7 +182,7 @@ def _push_margo(
 
     # Resolve registry/repository
     resolved_registry, resolved_repository = _resolve_registry_repository(
-        meta.repository, cli_registry, cli_repository
+        meta.repository, cli_registry, cli_repository, meta.repository
     )
 
     # Check credentials
@@ -191,7 +197,7 @@ def _push_margo(
 
     # Push
     console.info(f"Pushing margo: {resolved_registry}/{resolved_repository}:{version}")
-    client = oci.OrasClient()
+    client = oci.OrasClient(hostname=resolved_registry)
     client.push_margo(
         build_dir=build_dir,
         version=version,
@@ -208,6 +214,8 @@ def _push_margo(
         source_dir=str(margo_dir),
         output_dir=str(margo_dir),
         artifact_path=str(margo_dir),
+        registry=resolved_registry,
+        repository=resolved_repository,
     )
 
 
@@ -252,13 +260,15 @@ def _push_flat_component(  # noqa: PLR0913
     if version is None:
         raise ValueError(f"{component_name} version not specified in margo.yaml")
 
+    version = version.replace("+", "_")
+
     # Validate version
     validate_oci_tag(version)
     validate_semver(version)
 
     # Resolve registry/repository
     resolved_registry, resolved_repository = _resolve_registry_repository(
-        component.repository, cli_registry, cli_repository
+        component.repository, cli_registry, cli_repository, meta.repository
     )
 
     # Check credentials
@@ -272,7 +282,7 @@ def _push_flat_component(  # noqa: PLR0913
 
     # Push
     console.info(f"Pushing {component_name}: {resolved_registry}/{resolved_repository}:{version}")
-    client = oci.OrasClient()
+    client = oci.OrasClient(hostname=resolved_registry)
     push_method = client.push_compose if component_type == PackageType.COMPOSE else client.push_quadlet
     push_method(
         archive_path=str(archive_path),
@@ -291,6 +301,8 @@ def _push_flat_component(  # noqa: PLR0913
             source_dir=str(archive_path),
             output_dir=str(archive_path.parent),
             artifact_path=str(archive_path),
+            registry=resolved_registry,
+            repository=resolved_repository,
         )
     ]
 
@@ -333,7 +345,7 @@ def _push_variant_component(  # noqa: PLR0913
 
         # Resolve registry/repository
         resolved_registry, resolved_repository = _resolve_registry_repository(
-            component.repository, cli_registry, cli_repository
+            component.repository, cli_registry, cli_repository, meta.repository
         )
 
         # Check credentials
@@ -347,7 +359,7 @@ def _push_variant_component(  # noqa: PLR0913
 
         # Push
         console.info(f"Pushing {component_name} variant '{v.name}': {resolved_registry}/{resolved_repository}:{version}")
-        client = oci.OrasClient()
+        client = oci.OrasClient(hostname=resolved_registry)
         push_method = client.push_compose if component_type == PackageType.COMPOSE else client.push_quadlet
         push_method(
             archive_path=str(archive_path),
@@ -366,6 +378,8 @@ def _push_variant_component(  # noqa: PLR0913
                 source_dir=str(archive_path),
                 output_dir=str(archive_path.parent),
                 artifact_path=str(archive_path),
+                registry=resolved_registry,
+                repository=resolved_repository,
             )
         )
 

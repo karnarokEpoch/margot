@@ -151,3 +151,62 @@ def fatal(message: str) -> None:
     """
     _get_stderr().print(f"[red]Error:[/red] {message}")
     raise Exit(1)
+
+
+def finding(text: str, severity: str) -> None:
+    """Print a validation finding line to stderr with color matching severity.
+
+    Severity must be one of: 'ERROR' (red), 'WARNING' (yellow), 'INFO' (dim).
+    The text is assumed to be already formatted and escaped; this function applies
+    only the severity-specific color, with no prefix prepended.
+    """
+    style_map = {
+        "ERROR": "red",
+        "WARNING": "yellow",
+        "INFO": "dim",
+    }
+    style = style_map.get(severity, "dim")
+    _get_stderr().print(f"[{style}]{text}[/{style}]")
+
+
+def section(label: str) -> None:
+    """Print a section separator line to stderr in blue.
+
+    Used for visual separation between schema sections in validation output.
+    """
+    separator = f"── {label} ──"
+    _get_stderr().print(f"[blue]{separator}[/blue]")
+
+
+def verdict(label: str, outcome: str, detail: str) -> None:
+    """Print a validation verdict line to stdout with outcome-aware coloring.
+
+    Renders:
+    - label (e.g. "Schema A (Margo spec)") in white (neutral, header-like)
+    - outcome (PASS/FAIL/advisory) in outcome-specific color:
+      - PASS → green
+      - FAIL → red
+      - advisory → orange3 (but not printed as a word, just colors the detail)
+    - detail (e.g. summary counts or advisory note) in the outcome color
+
+    For "advisory" outcome, the detail already contains the advisory note string,
+    so we just color the whole line in orange3 to indicate advisory status.
+
+    Output goes to stdout (pipeable, like success()).
+    """
+    # Map outcome to appropriate color
+    outcome_color_map = {
+        "PASS": "green",
+        "FAIL": "red",
+        "advisory": "orange3",
+    }
+    outcome_color = outcome_color_map.get(outcome, "dim")
+
+    # For advisory, don't print the word "advisory" - just color the detail
+    if outcome == "advisory":
+        line = f"[white]{label}[/white][dim]: [/dim][{outcome_color}]{detail}[/{outcome_color}]"
+    else:
+        # For PASS/FAIL, print the outcome word in color, then the detail
+        line = f"[white]{label}[/white][dim]: [/dim][{outcome_color}]{outcome}[/{outcome_color}] — {detail}"
+
+    _get_stdout().print(line)

@@ -35,6 +35,7 @@ def _resolve_types(types: list[str] | None) -> tuple[list[str], bool]:
 def _invoke_push(  # noqa: PLR0913
     t: str,
     expanded_from_all: bool,
+    project_dir: str,
     build_dir: str,
     registry: str | None,
     repository: str | None,
@@ -45,7 +46,7 @@ def _invoke_push(  # noqa: PLR0913
     try:
         return push_service.push(
             package_type,
-            project_dir=".",
+            project_dir=project_dir,
             build_dir=build_dir,
             registry=registry,
             repository=repository,
@@ -58,7 +59,8 @@ def _invoke_push(  # noqa: PLR0913
         raise
 
 
-def push_cmd(
+def push_cmd(  # noqa: PLR0913
+    project_dir: str = Option(".", "--project-dir", help="Directory containing margo.yaml."),
     types: Annotated[
         list[str] | None,
         Option("--type", "-t", help="Package type(s) to push (margo|compose|quadlet|all). Repeatable."),
@@ -74,14 +76,18 @@ def push_cmd(
     all_targets: list[BuildTarget] = []
     try:
         for t in resolved:
-            all_targets.extend(_invoke_push(t, expanded_from_all, build_dir, registry, repository, variant))
+            all_targets.extend(_invoke_push(t, expanded_from_all, project_dir, build_dir, registry, repository, variant))
 
         if all_targets:
             for target in all_targets:
-                if target.variant_name:
-                    console.success(f"Pushed ({target.variant_name}): {target.version}")
+                if target.registry and target.repository:
+                    full_ref = f"{target.registry}/{target.repository}:{target.version}"
                 else:
-                    console.success(f"Pushed: {target.version}")
+                    full_ref = target.version
+                if target.variant_name:
+                    console.success(f"Pushed ({target.variant_name}): {full_ref}")
+                else:
+                    console.success(f"Pushed: {full_ref}")
         else:
             console.warning("Nothing was pushed.")
 

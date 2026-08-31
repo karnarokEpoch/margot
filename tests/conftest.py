@@ -1,6 +1,7 @@
 """Shared test fixtures."""
 
 from io import StringIO
+import sys
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -71,3 +72,35 @@ def reset_console():
     yield
     _console.set_verbose(False)
     _console.set_debug(False)
+
+
+@fixture
+def force_color():
+    """Force ANSI color output regardless of the runner's tty/environment detection.
+
+    Rich decides whether to emit ANSI codes — and which color system — by inspecting
+    `isatty()` and environment variables (`TERM`, `COLORTERM`). That decision is
+    deliberately environment-dependent in production (so piped/redirected output stays
+    plain), but it makes any test asserting on raw escape codes flaky across machines and
+    CI runners: `force_terminal=True` alone only pins the on/off decision, not the color
+    system, so a CI runner with no `TERM`/`COLORTERM` set still falls back to Rich's
+    "standard" 16-color palette and downgrades named colors like `orange3` (which needs
+    256-color `38;5;172`) to the nearest basic ANSI color. Pinning `color_system="256"`
+    fixes both the on/off decision and the palette, independent of where the test runs.
+    """
+    original_get_stdout = _console._get_stdout  # noqa: SLF001
+    original_get_stderr = _console._get_stderr  # noqa: SLF001
+
+    def forced_get_stdout():
+        return Console(file=sys.stdout, force_terminal=True, no_color=False, color_system="256")
+
+    def forced_get_stderr():
+        return Console(file=sys.stderr, force_terminal=True, no_color=False, color_system="256")
+
+    _console._get_stdout = forced_get_stdout  # noqa: SLF001
+    _console._get_stderr = forced_get_stderr  # noqa: SLF001
+
+    yield
+
+    _console._get_stdout = original_get_stdout  # noqa: SLF001
+    _console._get_stderr = original_get_stderr  # noqa: SLF001

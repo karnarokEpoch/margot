@@ -47,3 +47,5 @@ class BuildTarget:
     source_dir: str  # resolved source directory (absolute or relative)
     output_dir: str  # resolved output directory
     artifact_path: str  # primary artifact: margo directory or compose/quadlet .tgz file
+    registry: str | None = None  # OCI registry hostname (populated only during push)
+    repository: str | None = None  # Repository path (populated only during push)

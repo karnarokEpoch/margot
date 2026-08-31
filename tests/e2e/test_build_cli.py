@@ -7,7 +7,7 @@ from typing import Any
 from pytest import fixture
 from typer.testing import CliRunner
 
-from margot.domain.models import PackageType
+from margot.domain.models import BuildTarget, PackageType
 from margot.main import app
 
 runner = CliRunner()
@@ -85,6 +85,7 @@ class TestBuildCLI:
         assert result.exit_code == 0
         assert "Build Margo" in plain
         assert "--type" in plain
+        assert "--project-dir" in plain
         assert "--version" in plain
 
     def test_build_help_short_flag(self) -> None:
@@ -367,3 +368,32 @@ class TestBuildMultiType:
         result = runner.invoke(app, ["build", "--type", "margo", "--build-dir", str(cli_project / ".dist")])
         assert result.exit_code == 0
         assert (cli_project / ".dist" / "1.0.0" / "margo" / "app.yaml").read_text() == "name: unchanged-<app_tag>\n"
+
+    def test_build_with_project_dir_override(self, tmp_path: Path, mocker: Any) -> None:
+        """Should pass --project-dir to build service with non-default value."""
+        mock_build = mocker.patch(
+            "margot.commands.build.build_service.build",
+            return_value=[
+                BuildTarget(
+                    package_type=PackageType.MARGO,
+                    variant_name=None,
+                    version="1.0.0",
+                    source_dir="/some/other/dir",
+                    output_dir=".dist/1.0.0/margo",
+                    artifact_path=".dist/1.0.0/margo",
+                ),
+            ],
+        )
+
+        result = runner.invoke(app, ["build", "--type", "margo", "--project-dir", "/some/other/dir"])
+        plain = _strip_ansi(result.stdout)
+
+        assert result.exit_code == 0
+        assert "Built: .dist/1.0.0/margo" in plain
+        mock_build.assert_called_once_with(
+            PackageType.MARGO,
+            project_dir="/some/other/dir",
+            build_dir=".dist",
+            version_override=None,
+            variant=None,
+        )
