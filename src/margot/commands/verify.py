@@ -130,7 +130,7 @@ def _schema_b_verdict_and_detail(findings: Sequence[ValidationFinding], strict: 
     Returns (outcome, detail) where:
     - outcome: 'FAIL', 'PASS', or 'advisory'
     - detail: the summary line (potentially with the advisory note included)
-    
+
     For 'advisory' outcome (not strict mode), the detail includes the advisory note and
     'advisory' should not be repeated in the outcome. The detail is formatted exactly like
     the old _schema_b_summary() output but without the label prefix.

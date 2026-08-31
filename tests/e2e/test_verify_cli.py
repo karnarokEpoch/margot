@@ -744,7 +744,7 @@ class TestVerifyDefaultOutputIsUnchanged:
 class TestVerifySeverityColoring:
     """E2E tests for severity-based coloring of findings."""
 
-    def test_error_and_warning_findings_render_with_different_colors(self, cli_project: Path) -> None:
+    def test_error_and_warning_findings_render_with_different_colors(self, cli_project: Path, force_color: None) -> None:
         """Should render ERROR findings in red, WARNING findings in yellow with distinct ANSI codes."""
         # Use --recommend to get both Schema A and Schema B: A will have errors on SPARSE_APP_YAML,
         # B will have warnings on the missing recommended fields.
@@ -774,7 +774,7 @@ class TestVerifySeverityColoring:
         assert "warning: WARNING" not in output
         assert "warning: INFO" not in output
 
-    def test_error_line_renders_in_red(self, cli_project: Path) -> None:
+    def test_error_line_renders_in_red(self, cli_project: Path, force_color: None) -> None:
         """Should render ERROR findings with red color code."""
         (cli_project / "margo" / "app.yaml").write_text(
             VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
@@ -787,7 +787,7 @@ class TestVerifySeverityColoring:
         assert "ERROR" in raw_stderr
         assert "[31m" in raw_stderr or "[91m" in raw_stderr
 
-    def test_warning_line_renders_in_yellow(self, cli_project: Path) -> None:
+    def test_warning_line_renders_in_yellow(self, cli_project: Path, force_color: None) -> None:
         """Should render WARNING findings with yellow color code."""
         (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
 
@@ -836,7 +836,7 @@ classes:
 class TestVerifySectionColoring:
     """E2E tests for section separator coloring."""
 
-    def test_section_separators_render_in_blue(self, cli_project: Path) -> None:
+    def test_section_separators_render_in_blue(self, cli_project: Path, force_color: None) -> None:
         """Should render section separators in blue, not green or other colors."""
         (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
 
@@ -868,7 +868,7 @@ class TestVerifySectionColoring:
 class TestVerdictLineColoring:
     """E2E tests for verdict line coloring (Schema A/B summary lines)."""
 
-    def test_schema_a_pass_verdict_renders_green(self, cli_project: Path) -> None:
+    def test_schema_a_pass_verdict_renders_green(self, cli_project: Path, force_color: None) -> None:
         """Should render Schema A PASS verdict with green outcome."""
         (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
 
@@ -880,7 +880,7 @@ class TestVerdictLineColoring:
         # Should be colored green (ANSI code 32 or 92)
         assert "[32m" in raw_stdout or "[92m" in raw_stdout
 
-    def test_schema_a_fail_verdict_renders_red(self, cli_project: Path) -> None:
+    def test_schema_a_fail_verdict_renders_red(self, cli_project: Path, force_color: None) -> None:
         """Should render Schema A FAIL verdict with red outcome."""
         # Use a descriptor missing required field so it fails
         (cli_project / "margo" / "app.yaml").write_text(
@@ -895,7 +895,7 @@ class TestVerdictLineColoring:
         # Should be colored red (ANSI code 31 or 91)
         assert "[31m" in raw_stdout or "[91m" in raw_stdout
 
-    def test_schema_b_advisory_verdict_renders_orange(self, cli_project: Path) -> None:
+    def test_schema_b_advisory_verdict_renders_orange(self, cli_project: Path, force_color: None) -> None:
         """Should render Schema B advisory verdict (warnings without --strict) in orange."""
         (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
 
@@ -910,7 +910,7 @@ class TestVerdictLineColoring:
         # Note: orange3 is 38;5;172 in 256-color mode
         assert "[38;5;172m" in raw_stdout or "[172m" in raw_stdout
 
-    def test_schema_b_pass_verdict_under_strict_renders_green(self, cli_project: Path) -> None:
+    def test_schema_b_pass_verdict_under_strict_renders_green(self, cli_project: Path, force_color: None) -> None:
         """Should render Schema B PASS verdict under --strict in green."""
         # Use COMPLIANT_APP_YAML which satisfies all Schema B recommendations
         (cli_project / "margo" / "app.yaml").write_text(COMPLIANT_APP_YAML, encoding="utf-8")
@@ -923,7 +923,7 @@ class TestVerdictLineColoring:
         # Should be colored green
         assert "[32m" in raw_stdout or "[92m" in raw_stdout
 
-    def test_schema_b_fail_verdict_under_strict_renders_red(self, cli_project: Path) -> None:
+    def test_schema_b_fail_verdict_under_strict_renders_red(self, cli_project: Path, force_color: None) -> None:
         """Should render Schema B FAIL verdict under --strict in red."""
         (cli_project / "margo" / "app.yaml").write_text(SPARSE_APP_YAML, encoding="utf-8")
 
@@ -935,7 +935,7 @@ class TestVerdictLineColoring:
         # Should be colored red
         assert "[31m" in raw_stdout or "[91m" in raw_stdout
 
-    def test_verdict_label_renders_in_white(self, cli_project: Path) -> None:
+    def test_verdict_label_renders_in_white(self, cli_project: Path, force_color: None) -> None:
         """Should render Schema A/B labels in white, distinct from outcome color."""
         (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
 

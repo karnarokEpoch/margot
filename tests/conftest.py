@@ -1,6 +1,7 @@
 """Shared test fixtures."""
 
 from io import StringIO
+import sys
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -71,3 +72,31 @@ def reset_console():
     yield
     _console.set_verbose(False)
     _console.set_debug(False)
+
+
+@fixture
+def force_color():
+    """Force ANSI color output regardless of the runner's tty/environment detection.
+
+    Rich decides whether to emit ANSI codes by inspecting `isatty()` and environment
+    variables — a decision that is deliberately environment-dependent in production
+    (so piped/redirected output stays plain), but that makes any test asserting on raw
+    escape codes flaky across machines and CI runners. This fixture pins that decision
+    to "on" for the duration of a test, independent of where it runs.
+    """
+    original_get_stdout = _console._get_stdout  # noqa: SLF001
+    original_get_stderr = _console._get_stderr  # noqa: SLF001
+
+    def forced_get_stdout():
+        return Console(file=sys.stdout, force_terminal=True, no_color=False)
+
+    def forced_get_stderr():
+        return Console(file=sys.stderr, force_terminal=True, no_color=False)
+
+    _console._get_stdout = forced_get_stdout  # noqa: SLF001
+    _console._get_stderr = forced_get_stderr  # noqa: SLF001
+
+    yield
+
+    _console._get_stdout = original_get_stdout  # noqa: SLF001
+    _console._get_stderr = original_get_stderr  # noqa: SLF001

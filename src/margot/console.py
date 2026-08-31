@@ -191,7 +191,7 @@ def verdict(label: str, outcome: str, detail: str) -> None:
 
     For "advisory" outcome, the detail already contains the advisory note string,
     so we just color the whole line in orange3 to indicate advisory status.
-    
+
     Output goes to stdout (pipeable, like success()).
     """
     # Map outcome to appropriate color
@@ -208,5 +208,5 @@ def verdict(label: str, outcome: str, detail: str) -> None:
     else:
         # For PASS/FAIL, print the outcome word in color, then the detail
         line = f"[white]{label}[/white][dim]: [/dim][{outcome_color}]{outcome}[/{outcome_color}] — {detail}"
-    
+
     _get_stdout().print(line)
