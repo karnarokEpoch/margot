@@ -32,9 +32,10 @@ def _resolve_types(types: list[str] | None) -> tuple[list[str], bool]:
     return resolved, False
 
 
-def _invoke_build(
+def _invoke_build(  # noqa: PLR0913
     t: str,
     expanded_from_all: bool,
+    project_dir: str,
     build_dir: str,
     version: str | None,
     variant: str | None,
@@ -44,7 +45,7 @@ def _invoke_build(
     try:
         return build_service.build(
             package_type,
-            project_dir=".",
+            project_dir=project_dir,
             build_dir=build_dir,
             version_override=version,
             variant=variant,
@@ -57,6 +58,7 @@ def _invoke_build(
 
 
 def build_cmd(
+    project_dir: str = Option(".", "--project-dir", help="Directory containing margo.yaml."),
     types: Annotated[
         list[str] | None,
         Option("--type", "-t", help="Package type(s) to build (margo|compose|quadlet|all). Repeatable."),
@@ -71,7 +73,7 @@ def build_cmd(
     all_targets: list[BuildTarget] = []
     try:
         for t in resolved:
-            all_targets.extend(_invoke_build(t, expanded_from_all, build_dir, version, variant))
+            all_targets.extend(_invoke_build(t, expanded_from_all, project_dir, build_dir, version, variant))
 
         if all_targets:
             for target in all_targets:

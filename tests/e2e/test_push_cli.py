@@ -29,6 +29,7 @@ class TestPushHelp:
         assert result.exit_code == 0
         assert "Push built Margo" in plain
         assert "--type" in plain
+        assert "--project-dir" in plain
         assert "--registry" in plain
         assert "--repository" in plain
         assert "--build-dir" in plain
@@ -203,3 +204,33 @@ class TestPushCLI:
 
         assert result.exit_code == 1
         assert "invalid --type" in plain
+
+    def test_push_with_project_dir_override(self, mocker: Any) -> None:
+        """Should pass --project-dir to push service with non-default value."""
+        mock_push = mocker.patch(
+            "margot.commands.push.push_service.push",
+            return_value=[
+                BuildTarget(
+                    package_type=PackageType.MARGO,
+                    variant_name=None,
+                    version="1.0.0",
+                    source_dir="/some/other/dir",
+                    output_dir=".dist/1.0.0/margo",
+                    artifact_path=".dist/1.0.0/margo",
+                ),
+            ],
+        )
+
+        result = runner.invoke(app, ["push", "--type", "margo", "--project-dir", "/some/other/dir"])
+        plain = _strip_ansi(result.stdout)
+
+        assert result.exit_code == 0
+        assert "Pushed: 1.0.0" in plain
+        mock_push.assert_called_once_with(
+            PackageType.MARGO,
+            project_dir="/some/other/dir",
+            build_dir=".dist",
+            registry=None,
+            repository=None,
+            variant=None,
+        )
