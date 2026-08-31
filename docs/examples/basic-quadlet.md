@@ -53,7 +53,7 @@ deploymentProfiles:
     components:
       - name: {{ manifest.quadlet.component }}
         properties:
-          repository: {{ manifest.quadlet.repository }}
+          repository: oci://{{ manifest.quadlet.repository }}
           revision: {{ manifest.quadlet.tag }}
 ```
 
@@ -63,6 +63,9 @@ At build time:
 - `{{ manifest.version }}` → `1.0.0` (manifest version)
 - `{{ manifest.quadlet.component }}` → `com-example-nginx-quadlet` (derived: `<id>-<type>`)
 - `{{ manifest.quadlet.tag }}` → `1.0.0_quadlet` (OCI-safe form of `1.0.0+quadlet`)
+- `{{ manifest.quadlet.repository }}` → `public.ecr.aws/g2n4p2m7/margo` (bare registry/repository —
+  the `oci://` scheme required by `deploymentProfiles[].components[].properties.repository` is
+  prepended in the template, not part of the context value)
 
 ## Quadlet files
 

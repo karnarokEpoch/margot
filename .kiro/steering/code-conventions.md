@@ -40,6 +40,9 @@ console.warning("--force is active. Safety checks bypassed.")
 console.info("Manifest fetched.")      # only shown with --verbose or --debug
 console.debug(f"GET manifest: {uri}")  # only shown with --debug
 console.fatal("Invalid URI.")          # prints error and raises Exit(1)
+console.finding(escaped_line, "ERROR")  # print a validation finding with severity color
+console.section("Schema A (Margo spec)")  # print a blue section separator
+console.verdict("Schema A (Margo spec)", "PASS", "no findings")  # print a verdict with outcome coloring
 
 # wrong
 from rich import print as rprint
@@ -48,12 +51,72 @@ echo("Error: ...", err=True)
 ```
 
 Rules:
-- `success` → stdout (pipeable). `warning`, `info`, `debug`, `fatal` → stderr.
+- `success` → stdout (pipeable). `warning`, `info`, `debug`, `fatal`, `finding`, `section`, `verdict` → stderr (except `verdict` → stdout).
 - `domain/` must not import `console` — it raises `ValueError`, the calling layer logs the outcome.
-- `commands/` use `success`, `warning`, `fatal`. Never emit `info` or `debug` from a command directly.
+- `commands/` use `success`, `warning`, `fatal`, `verdict`. Never emit `info` or `debug` from a command directly.
+  - `finding(text, severity)` is for rendering validation findings with color matching severity (ERROR/WARNING/INFO) to stderr.
+  - `section(label)` is for rendering blue section separators in validation output to stderr.
+  - `verdict(label, outcome, detail)` is for rendering validation verdict lines (Schema A/B summaries) with outcome-aware coloring (PASS→green, FAIL→red, advisory→orange3) to stdout. Label renders white, outcome in color, detail plain.
 - `services/` emit `info` at each significant step.
 - `infra/` emit `debug` per I/O call.
 - The one exception: `echo(f"margot {get_version()}")` in `global_options.py` — version output is not a log message.
+
+## Overriding methods on a third-party base class
+
+When a class in `infra/` subclasses a third-party library class (e.g.
+`OrasClient(oras.client.OrasClient)`), an overridden method's signature must accept a
+**strict superset** of what the base class method accepts — same or wider parameter
+types, same or more optional parameters with defaults, never a narrowed type and never a
+dropped parameter. This holds even when every call site in margot's own code only ever
+uses the narrower form.
+
+**Why:** the base class's own internals can call the overridden method back on `self`
+polymorphically, with arguments margot's call sites never produce. `oras.provider.Registry
+.pull()` calls `self.get_manifest(container, allowed_media_type)` and
+`self.download_blob(container, ...)` internally with an already-built `Container` object
+and extra positional args — not the plain URI string margot's own services pass in. An
+override typed as `get_manifest(self, uri: str)` accepts margot's own calls fine but
+raises `TypeError` the moment `super().pull()` dispatches back into it. This is a Liskov
+Substitution Principle violation: a subclass must be substitutable for its base class from
+the point of view of *any* caller, including the base class's own methods calling back
+into `self`. See `src/margot/infra/oci.py` `get_manifest()` / `download_blob()` for the
+fixed shape — signature widened to `container: str | Container, allowed_media_type=None,
+validation_schema=None` (matching the base exactly), with the narrowing handled *inside*
+the method body via `isinstance` checks, not in the signature.
+
+```python
+# wrong — narrows the base class contract
+class OrasClient(OrasClientLib):
+    def get_manifest(self, uri: str) -> dict[str, Any]:
+        return super().get_manifest(uri)
+
+# correct — superset signature, normalize internally
+class OrasClient(OrasClientLib):
+    def get_manifest(
+        self,
+        container: str | Container,
+        allowed_media_type: list | None = None,
+        validation_schema: dict | None = None,
+    ) -> dict[str, Any]:
+        if isinstance(container, str):
+            container = self.get_container(container)
+        return super().get_manifest(container, allowed_media_type, validation_schema)
+```
+
+Checklist before narrowing or simplifying an override:
+
+- Read the base class's actual signature (`inspect.signature(Base.method)` or the source)
+  before assuming margot's own call site is the only caller.
+- Accept the union type and normalize inside the method body — don't reject the base
+  type to keep the override "simple."
+- Add a regression test that calls the override the way the *base class* calls it
+  internally (polymorphic dispatch via another base method, e.g. `super().pull()`), not
+  only the way margot's own services call it. That call path is what a signature-narrowing
+  bug hides behind.
+
+This is distinct from the `commands/` → `services/` → `domain/` + `infra/` layering rule
+(module dependency direction) — this rule is about inheritance contracts when `infra/`
+wraps a third-party class.
 
 ## Testing
 
