@@ -1,5 +1,6 @@
 """Pull service: orchestrate OCI artifact retrieval to disk."""
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,18 @@ _PAYLOAD_MEDIA_TYPES: dict[PackageType, str] = {
 }
 
 _MEDIA_TYPE_NAMES: dict[str, str] = {v: k.name.lower() for k, v in _PAYLOAD_MEDIA_TYPES.items()}
+
+
+@dataclass
+class _LayerContext:
+    """Context for downloading compose/quadlet layers."""
+
+    client: oci.OrasClient
+    uri: str
+    outdir: str
+    matching_layers: list[dict[str, Any]]
+    manifest_annotations: dict[str, Any] | None
+    force: bool
 
 
 def _available_layer_types(layers: list[dict]) -> str:
@@ -82,7 +95,7 @@ def _pull_recursive_components(outdir: str, root_paths: list[str], force: bool) 
 
     # Load and parse app.yaml
     try:
-        with open(app_yaml_path, encoding="utf-8") as f:
+        with Path(app_yaml_path).open(encoding="utf-8") as f:
             app_doc = yaml.safe_load(f)
         if not app_doc:
             console.warning("app.yaml is empty or unparseable; skipping component recursion.")
@@ -114,6 +127,165 @@ def _pull_recursive_components(outdir: str, root_paths: list[str], force: bool) 
         except Exception as e:  # noqa: BLE001
             console.warning(f"Failed to pull component '{comp_ref.name}': {e}")
 
+    return result
+
+
+def _handle_unknown_artifact(
+    client: oci.OrasClient,
+    uri: str,
+    outdir: str,
+    manifest: dict[str, Any],
+    force: bool,
+) -> list[str]:
+    """Handle pull of unknown artifact type.
+
+    Args:
+        client: OCI client.
+        uri: Full OCI reference.
+        outdir: Output directory.
+        manifest: Manifest dict.
+        force: Whether force mode is enabled.
+
+    Returns:
+        List of pulled paths.
+
+    Raises:
+        ValueError: If artifact type is unknown and force=False.
+    """
+    if not force:
+        artifact_type_str = manifest.get("artifactType") or "(none)"
+        supported = ", ".join(sorted(_ARTIFACT_TYPE_MAP.keys()))
+        raise ValueError(
+            f"Unknown artifact type: '{artifact_type_str}'. Supported types: {supported}. Use --force to attempt pull anyway."
+        )
+    # force=True: fall through to client.pull(), result may be empty
+    pulled_paths: list[str] = client.pull(uri=uri, outdir=outdir)
+    console.info(f"Pulled {len(pulled_paths)} layer(s).")
+    return pulled_paths or []
+
+
+def _handle_margo_artifact(
+    client: oci.OrasClient,
+    uri: str,
+    outdir: str,
+    recursive: bool,
+    force: bool,
+) -> list[str]:
+    """Handle pull of Margo artifact type (with optional component recursion).
+
+    Args:
+        client: OCI client.
+        uri: Full OCI reference.
+        outdir: Output directory.
+        recursive: Whether to recursively pull declared components.
+        force: Whether force mode is enabled.
+
+    Returns:
+        List of pulled paths (root + component paths).
+    """
+    pulled_paths = client.pull(uri=uri, outdir=outdir)
+    console.info(f"Pulled {len(pulled_paths)} layer(s).")
+    result = pulled_paths or []
+
+    # Handle recursive component pulling if requested
+    if recursive:
+        result = _pull_recursive_components(outdir, result, force)
+
+    return result
+
+
+def _download_compose_quadlet_layers(ctx: _LayerContext) -> list[str]:
+    """Download individual layers for compose/quadlet artifacts.
+
+    Args:
+        ctx: Layer download context.
+
+    Returns:
+        List of paths to downloaded files.
+    """
+    result: list[str] = []
+
+    for layer in ctx.matching_layers:
+        # Resolve desired filename
+        desired_name = resolve_filename(layer, ctx.manifest_annotations, force=ctx.force)
+
+        # Fall back to digest-based name if no name resolved
+        if desired_name is None:
+            digest_hex = layer["digest"].split(":", 1)[-1][:12]
+            desired_name = digest_hex
+        else:
+            console.info(f"Layer filename resolved: {desired_name}.")
+
+        outfile = str(Path(ctx.outdir) / desired_name)
+        ctx.client.download_blob(ctx.uri, layer["digest"], outfile)
+        result.append(outfile)
+
+    return result
+
+
+def _validate_and_filter_layers(
+    package_type: PackageType,
+    manifest: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Validate and filter layers for compose/quadlet artifacts.
+
+    Args:
+        package_type: PackageType (COMPOSE or QUADLET).
+        manifest: Manifest dict.
+
+    Returns:
+        Tuple of (matching_layers, manifest_annotations).
+
+    Raises:
+        ValueError: If no matching layers found.
+    """
+    target_media_type = _PAYLOAD_MEDIA_TYPES[package_type]
+    layers: list[dict[str, Any]] = manifest.get("layers") or []
+    matching_layers = [layer for layer in layers if layer.get("mediaType") == target_media_type]
+
+    if not matching_layers:
+        available = _available_layer_types(layers)
+        raise ValueError(f"No layer with mediaType '{target_media_type}' found.\n{available}")
+
+    manifest_annotations: dict[str, Any] | None = manifest.get("annotations")
+    return matching_layers, manifest_annotations
+
+
+def _handle_compose_or_quadlet_artifact(
+    client: oci.OrasClient,
+    uri: str,
+    outdir: str,
+    package_type_and_manifest: tuple[PackageType, dict[str, Any]],
+    force: bool = False,
+) -> list[str]:
+    """Handle pull of compose or quadlet artifact type.
+
+    Args:
+        client: OCI client.
+        uri: Full OCI reference.
+        outdir: Output directory.
+        package_type_and_manifest: Tuple of (PackageType, manifest dict).
+        force: Whether force mode is enabled (default: False).
+
+    Returns:
+        List of pulled paths.
+
+    Raises:
+        ValueError: If no matching layers found.
+    """
+    package_type, manifest = package_type_and_manifest
+    matching_layers, manifest_annotations = _validate_and_filter_layers(package_type, manifest)
+    ctx = _LayerContext(
+        client=client,
+        uri=uri,
+        outdir=outdir,
+        matching_layers=matching_layers,
+        manifest_annotations=manifest_annotations,
+        force=force,
+    )
+    result = _download_compose_quadlet_layers(ctx)
+
+    console.info(f"Pulled {len(result)} layer(s).")
     return result
 
 
@@ -201,56 +373,12 @@ def pull_artifact(
         package_type = force_type
         console.info(f"Artifact type overridden to: {force_type.value}")
 
-    # Step 7: Handle UNKNOWN type or known types
+    # Dispatch to type-specific handlers
     if package_type == PackageType.UNKNOWN:
-        if not force:
-            artifact_type_str = manifest.get("artifactType") or "(none)"
-            supported = ", ".join(sorted(_ARTIFACT_TYPE_MAP.keys()))
-            raise ValueError(
-                f"Unknown artifact type: '{artifact_type_str}'. Supported types: {supported}. Use --force to attempt pull anyway."
-            )
-        # force=True: fall through to client.pull(), result may be empty
-        pulled_paths: list[str] = client.pull(uri=uri, outdir=outdir)
-        console.info(f"Pulled {len(pulled_paths)} layer(s).")
-        return pulled_paths or []
+        return _handle_unknown_artifact(client, uri, outdir, manifest, force)
 
     if package_type == PackageType.MARGO:
-        pulled_paths = client.pull(uri=uri, outdir=outdir)
-        console.info(f"Pulled {len(pulled_paths)} layer(s).")
-        result = pulled_paths or []
+        return _handle_margo_artifact(client, uri, outdir, recursive, force)
 
-        # Handle recursive component pulling if requested
-        if recursive:
-            result = _pull_recursive_components(outdir, result, force)
-
-        return result
-
-    # Step 8: Own the layer loop for compose/quadlet
-    target_media_type = _PAYLOAD_MEDIA_TYPES[package_type]
-    layers: list[dict[str, Any]] = manifest.get("layers") or []
-    matching_layers = [layer for layer in layers if layer.get("mediaType") == target_media_type]
-
-    if not matching_layers:
-        available = _available_layer_types(layers)
-        raise ValueError(f"No layer with mediaType '{target_media_type}' found.\n{available}")
-
-    result: list[str] = []
-    manifest_annotations: dict[str, Any] | None = manifest.get("annotations")
-
-    for layer in matching_layers:
-        # Resolve desired filename
-        desired_name = resolve_filename(layer, manifest_annotations, force=force)
-
-        # Fall back to digest-based name if no name resolved
-        if desired_name is None:
-            digest_hex = layer["digest"].split(":", 1)[-1][:12]
-            desired_name = digest_hex
-        else:
-            console.info(f"Layer filename resolved: {desired_name}.")
-
-        outfile = str(Path(outdir) / desired_name)
-        client.download_blob(uri, layer["digest"], outfile)
-        result.append(outfile)
-
-    console.info(f"Pulled {len(result)} layer(s).")
-    return result
+    # Handle compose/quadlet
+    return _handle_compose_or_quadlet_artifact(client, uri, outdir, (package_type, manifest), force)

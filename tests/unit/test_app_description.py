@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pytest import fixture
+from pytest import fail, fixture
 import yaml
 
 from margot.domain.app_description import ComponentRef, extract_component_refs
@@ -17,28 +17,28 @@ def fixtures_dir() -> Path:
 @fixture
 def complex_doc(fixtures_dir: Path) -> dict:
     """Load the complex.yaml fixture."""
-    with open(fixtures_dir / "complex.yaml") as f:
+    with (fixtures_dir / "complex.yaml").open() as f:
         return yaml.safe_load(f)
 
 
 @fixture
 def minimal_doc(fixtures_dir: Path) -> dict:
     """Load the minimal.yaml fixture."""
-    with open(fixtures_dir / "minimal.yaml") as f:
+    with (fixtures_dir / "minimal.yaml").open() as f:
         return yaml.safe_load(f)
 
 
 @fixture
 def missing_recommended_doc(fixtures_dir: Path) -> dict:
     """Load the missing-recommended.yaml fixture."""
-    with open(fixtures_dir / "missing-recommended.yaml") as f:
+    with (fixtures_dir / "missing-recommended.yaml").open() as f:
         return yaml.safe_load(f)
 
 
 @fixture
 def unlinked_parameters_doc(fixtures_dir: Path) -> dict:
     """Load the unlinked-parameters.yaml fixture."""
-    with open(fixtures_dir / "unlinked-parameters.yaml") as f:
+    with (fixtures_dir / "unlinked-parameters.yaml").open() as f:
         return yaml.safe_load(f)
 
 
@@ -54,8 +54,8 @@ class TestComponentRefDataclass:
         """ComponentRef should be frozen (immutable)."""
         ref = ComponentRef(name="db", repository="quay.io/charts/db", tag="1.2.3")
         try:
-            ref.name = "new-name"  # type: ignore
-            assert False, "Should not be able to mutate frozen dataclass"
+            ref.name = "new-name"
+            fail("Should not be able to mutate frozen dataclass")
         except (AttributeError, TypeError):
             pass  # Expected
 

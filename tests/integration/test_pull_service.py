@@ -713,10 +713,9 @@ deploymentProfiles:
         def manifest_side_effect(uri: str) -> dict[str, Any]:
             if "postgres" in uri:
                 return component1_manifest
-            elif "redis" in uri:
+            if "redis" in uri:
                 return component2_manifest
-            else:
-                return root_manifest
+            return root_manifest
 
         mock_client.get_manifest.side_effect = manifest_side_effect
 
@@ -789,7 +788,7 @@ deploymentProfiles:
                 path = Path(outdir) / "app.yaml"
                 path.write_text(app_yaml_content)
                 return [str(path)]
-            elif "valid" in uri:
+            if "valid" in uri:
                 path = Path(outdir) / "valid-1.0.0.tgz"
                 path.write_bytes(b"valid tar")
                 return [str(path)]
@@ -960,7 +959,7 @@ deploymentProfiles:
 
         def manifest_side_effect(uri: str) -> dict[str, Any]:
             if "bad" in uri:
-                raise Exception("Registry error for bad component")
+                raise RuntimeError("Registry error for bad component")
             if "good" in uri:
                 return component_manifest
             return root_manifest
@@ -975,7 +974,7 @@ deploymentProfiles:
 
         def pull_side_effect(uri: str, outdir: str) -> list[str]:
             if "bad" in uri:
-                raise Exception("Registry error for bad component")
+                raise RuntimeError("Registry error for bad component")
             Path(outdir).mkdir(parents=True, exist_ok=True)
             if uri == "public.ecr.aws/g2n4p2m7/margo:1.0.0":
                 path = Path(outdir) / "app.yaml"
