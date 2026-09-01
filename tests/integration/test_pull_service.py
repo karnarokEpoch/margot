@@ -649,3 +649,354 @@ class TestPullArtifactAuth:
 
         mock_oras_client_cls.assert_called_once_with(hostname="public.ecr.aws")
         assert result == [pulled_file]
+
+
+class TestPullArtifactRecursive:
+    """Integration tests for recursive component pulling in margo artifacts."""
+
+    def test_recursive_pull_margo_with_components(self, mocker: Any, tmp_path: Any) -> None:
+        """recursive=True on margo artifact should pull components into subdirectories."""
+        # Root margo artifact manifest
+        root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json")
+
+        # Component refs from the app.yaml
+        component1_layers = [
+            {
+                "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                "digest": "sha256:comp1",
+                "annotations": {"org.opencontainers.image.title": "postgres-14.0.0.tgz"},
+            }
+        ]
+        component1_manifest = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=component1_layers,
+        )
+
+        component2_layers = [
+            {
+                "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                "digest": "sha256:comp2",
+                "annotations": {"org.opencontainers.image.title": "redis-7.0.0.tgz"},
+            }
+        ]
+        component2_manifest = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=component2_layers,
+        )
+
+        # Create a temporary app.yaml for the root
+        app_yaml_content = """\
+apiVersion: v1
+kind: ApplicationDescription
+id: test-app
+metadata:
+  name: Test App
+  version: 1.0.0
+deploymentProfiles:
+  - type: helm
+    id: default
+    components:
+      - name: database
+        properties:
+          repository: oci://quay.io/charts/postgres
+          revision: 14.0.0
+      - name: cache
+        properties:
+          repository: oci://quay.io/charts/redis
+          revision: 7.0.0
+"""
+
+        # Mock the client
+        mock_client = MagicMock()
+
+        # Return different manifests depending on the URI
+        def manifest_side_effect(uri: str) -> dict[str, Any]:
+            if "postgres" in uri:
+                return component1_manifest
+            if "redis" in uri:
+                return component2_manifest
+            return root_manifest
+
+        mock_client.get_manifest.side_effect = manifest_side_effect
+
+        # Mock download_blob to write fake data
+        def download_blob_side_effect(_uri: str, _digest: str, outfile: str) -> None:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake archive")
+
+        mock_client.download_blob.side_effect = download_blob_side_effect
+
+        # Mock pull to return app.yaml for root
+        def pull_side_effect(uri: str, outdir: str) -> list[str]:
+            Path(outdir).mkdir(parents=True, exist_ok=True)
+            if uri == "public.ecr.aws/g2n4p2m7/margo:1.0.0":
+                # Root pull
+                path = Path(outdir) / "app.yaml"
+                path.write_text(app_yaml_content)
+                return [str(path)]
+            return []
+
+        mock_client.pull.side_effect = pull_side_effect
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            recursive=True,
+        )
+
+        # Should have root + 2 components = 3 paths
+        assert len(result) == 3
+        assert any("app.yaml" in path for path in result)
+        assert any("database" in path and "postgres" in path for path in result)
+        assert any("cache" in path and "redis" in path for path in result)
+
+    def test_recursive_pull_margo_with_missing_component_properties(self, mocker: Any, tmp_path: Any) -> None:
+        """recursive=True should skip components with missing properties and emit warnings."""
+        root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json")
+
+        # App with one valid and one incomplete component
+        app_yaml_content = """\
+apiVersion: v1
+kind: ApplicationDescription
+id: test-app
+metadata:
+  name: Test App
+  version: 1.0.0
+deploymentProfiles:
+  - type: helm
+    id: default
+    components:
+      - name: valid-component
+        properties:
+          repository: oci://quay.io/charts/valid
+          revision: 1.0.0
+      - name: incomplete-component
+        properties:
+          revision: 2.0.0
+"""
+        app_yaml_path = tmp_path / "app.yaml"
+        app_yaml_path.write_text(app_yaml_content)
+
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = root_manifest
+
+        def pull_side_effect(uri: str, outdir: str) -> list[str]:
+            Path(outdir).mkdir(parents=True, exist_ok=True)
+            if uri == "public.ecr.aws/g2n4p2m7/margo:1.0.0":
+                path = Path(outdir) / "app.yaml"
+                path.write_text(app_yaml_content)
+                return [str(path)]
+            if "valid" in uri:
+                path = Path(outdir) / "valid-1.0.0.tgz"
+                path.write_bytes(b"valid tar")
+                return [str(path)]
+            return []
+
+        mock_client.pull.side_effect = pull_side_effect
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        # Capture warnings
+        warning_mock = mocker.patch("margot.services.pull.console.warning")
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            recursive=True,
+        )
+
+        # Should have root + 1 valid component
+        assert len(result) == 2
+        # Should have warned about incomplete-component
+        warning_mock.assert_any_call("Skipping component 'incomplete-component': missing repository or revision properties.")
+
+    def test_recursive_pull_margo_app_yaml_missing(self, mocker: Any, tmp_path: Any) -> None:
+        """recursive=True when app.yaml is missing should emit warning and return root paths only."""
+        root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json")
+
+        # Pulled paths without app.yaml
+        root_paths = [str(tmp_path / "README.md"), str(tmp_path / "resources.tar.gz")]
+        for path in root_paths:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_bytes(b"fake")
+
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = root_manifest
+        mock_client.pull.return_value = root_paths
+
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        warning_mock = mocker.patch("margot.services.pull.console.warning")
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            recursive=True,
+        )
+
+        # Should return root paths only
+        assert result == root_paths
+        # Should warn about missing app.yaml
+        warning_mock.assert_called_once()
+        assert "app.yaml" in warning_mock.call_args[0][0].lower()
+
+    def test_recursive_pull_margo_app_yaml_unparseable(self, mocker: Any, tmp_path: Any) -> None:
+        """recursive=True when app.yaml is unparseable should emit warning and return root paths only."""
+        root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json")
+
+        # Create invalid YAML
+        app_yaml_path = tmp_path / "app.yaml"
+        app_yaml_path.write_text("{ invalid: yaml: content:")
+
+        root_paths = [str(app_yaml_path)]
+
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = root_manifest
+        mock_client.pull.return_value = root_paths
+
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        warning_mock = mocker.patch("margot.services.pull.console.warning")
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            recursive=True,
+        )
+
+        # Should return root paths only
+        assert result == root_paths
+        # Should warn about parse error
+        warning_mock.assert_called_once()
+        assert "Failed to load app.yaml" in warning_mock.call_args[0][0]
+
+    def test_recursive_pull_non_margo_is_noop(self, mocker: Any, tmp_path: Any) -> None:
+        """recursive=True on non-margo (e.g., compose) should be a no-op, identical to recursive=False."""
+        layers = [
+            {
+                "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                "digest": "sha256:abc",
+                "annotations": {"org.opencontainers.image.title": "myapp.tgz"},
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=layers,
+        )
+
+        def _fake_download(_uri: str, _digest: str, outfile: str) -> str:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake")
+            return outfile
+
+        mock_client.download_blob.side_effect = _fake_download
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        result_recursive = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path / "recursive"),
+            recursive=True,
+        )
+
+        # Create a fresh tmp_path for non-recursive to compare
+        result_non_recursive = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path / "non_recursive"),
+            recursive=False,
+        )
+
+        # Both should have 1 file (no difference in behavior)
+        assert len(result_recursive) == 1
+        assert len(result_non_recursive) == 1
+        # Both files should exist at the same relative names
+        assert (tmp_path / "recursive" / "myapp.tgz").exists()
+        assert (tmp_path / "non_recursive" / "myapp.tgz").exists()
+
+    def test_recursive_pull_component_failure_does_not_crash_root(self, mocker: Any, tmp_path: Any) -> None:
+        """If one component fails to pull, warning is emitted but root and other components are returned."""
+        root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json")
+
+        good_layers = [
+            {
+                "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                "digest": "sha256:good",
+                "annotations": {"org.opencontainers.image.title": "good.tgz"},
+            }
+        ]
+        component_manifest = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=good_layers,
+        )
+
+        app_yaml_content = """\
+apiVersion: v1
+kind: ApplicationDescription
+id: test-app
+metadata:
+  name: Test App
+  version: 1.0.0
+deploymentProfiles:
+  - type: helm
+    id: default
+    components:
+      - name: good-comp
+        properties:
+          repository: oci://quay.io/charts/good
+          revision: 1.0.0
+      - name: bad-comp
+        properties:
+          repository: oci://quay.io/charts/bad
+          revision: 2.0.0
+"""
+
+        mock_client = MagicMock()
+
+        def manifest_side_effect(uri: str) -> dict[str, Any]:
+            if "bad" in uri:
+                raise RuntimeError("Registry error for bad component")
+            if "good" in uri:
+                return component_manifest
+            return root_manifest
+
+        mock_client.get_manifest.side_effect = manifest_side_effect
+
+        def download_blob_side_effect(_uri: str, _digest: str, outfile: str) -> None:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake tar")
+
+        mock_client.download_blob.side_effect = download_blob_side_effect
+
+        def pull_side_effect(uri: str, outdir: str) -> list[str]:
+            if "bad" in uri:
+                raise RuntimeError("Registry error for bad component")
+            Path(outdir).mkdir(parents=True, exist_ok=True)
+            if uri == "public.ecr.aws/g2n4p2m7/margo:1.0.0":
+                path = Path(outdir) / "app.yaml"
+                path.write_text(app_yaml_content)
+                return [str(path)]
+            return []
+
+        mock_client.pull.side_effect = pull_side_effect
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        warning_mock = mocker.patch("margot.services.pull.console.warning")
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            recursive=True,
+        )
+
+        # Should have root + good component
+        assert len(result) == 2
+        assert any("app.yaml" in path for path in result)
+        assert any("good" in path for path in result)
+        # Should have warned about bad-comp
+        assert any("bad-comp" in str(call) for call in warning_mock.call_args_list)
