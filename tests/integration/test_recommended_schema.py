@@ -374,6 +374,23 @@ class TestValueLevelChecks:
         assert [f.field_path for f in findings] == ["/deploymentProfiles/0/components/0/properties"]
         assert _messages(findings, Severity.ERROR) != []
 
+    def test_parameter_description_is_banned(self, compliant: str, tmp_path: Path) -> None:
+        """Should report an ERROR when a parameter declares a description.
+
+        `description` is not declared as an attribute on RecommendedParameter, so under
+        `closed=True` it surfaces as an unknown property — the same technique used to ban
+        packageLocation/keyLocation above.
+        """
+        descriptor = compliant.replace(
+            "x-placeholder-extensions:",
+            "parameters:\n  greeting:\n    description: A friendly greeting\n    value: hi\n    targets:\n"
+            '      - pointer: MESSAGE\n        components: ["hello-world-compose"]\nx-placeholder-extensions:',
+        )
+        findings = _findings(descriptor, tmp_path)
+
+        assert [f.field_path for f in findings] == ["/parameters/greeting"]
+        assert _messages(findings, Severity.ERROR) != []
+
     def test_timeout_accepts_the_documented_minutes_and_seconds_format(self, compliant: str, tmp_path: Path) -> None:
         """Should accept the "##m##s" format the spec documents."""
         descriptor = compliant.replace(

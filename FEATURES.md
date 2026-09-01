@@ -401,11 +401,12 @@ client.push(
 Pull OCI artifact layers to a local directory without extraction.
 
 ```
-margot pull <uri> [--output DIR]
+margot pull <uri> [--output DIR] [--recursive]
 ```
 
 `<uri>` is the full OCI reference (e.g. `public.ecr.aws/g2n4p2m7/margo:1.0.0`).
 `--output` / `-o` defaults to `.` (current directory).
+`--recursive` / `-r` (optional, margo-only): also pull declared components.
 
 No `--type` / `--version` / `--registry` / `--repository` flags — the URI is fully
 caller-provided, same shape as `fetch`. No SemVer validation: `pull` retrieves
@@ -425,9 +426,35 @@ arbitrary existing artifacts. Auth: anonymous only.
    from the layer's `org.opencontainers.image.title` annotation, or from
    manifest-level `org.opencontainers.image.title` + `org.opencontainers.image.version`
    annotations (`<title>-<version>.tgz`).
-6. Report each written file path. If no layers are pulled, report that.
+6. If `--recursive` is set and artifact is margo:
+   - Locate `app.yaml` in the pulled layers.
+   - Parse it and extract component references from `deploymentProfiles[].components[]`:
+     each component's `properties.repository` (strip `oci://` scheme) + `properties.revision`
+     form an OCI ref. Components missing either field are skipped with a warning.
+   - Deduplicate components by `(repository, tag)` pair, preserving first-seen order and name.
+   - For each component: recursively pull into `outdir/<component-name>/` using the
+     component's OCI ref (component pulls use `recursive=False` since components don't
+     nest).
+   - If `app.yaml` cannot be located, parsed, or recursion fails for a component,
+     log a warning but do not fail the root pull.
+7. If `--recursive` is set but artifact is compose/quadlet/unknown, it is a no-op —
+   behavior identical to `--recursive=False`.
+8. Report each written file path. If no layers are pulled, report that.
 
 No extraction — `.tgz` blobs are written as-is.
+
+**Output structure for recursive pulls:**
+
+```
+outdir/
+  app.yaml
+  [other root layers]
+  database/
+    postgres-14.0.0.tgz
+  cache/
+    redis-7.0.0.tgz
+  [... more components]
+```
 
 ---
 

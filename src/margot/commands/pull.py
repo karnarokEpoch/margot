@@ -20,11 +20,17 @@ def pull(
     force_type: Annotated[
         str | None, Option("--force-type", help="Force artifact type interpretation (margo|compose|quadlet).")
     ] = None,
+    recursive: bool = Option(
+        False, "--recursive", "-r", help="For margo artifacts: also pull declared components. No-op for other types."
+    ),
 ) -> None:
     """
     Pull OCI artifact layers to a local directory.
 
     URI is the full OCI reference: registry/repository:tag
+
+    For margo app descriptions, --recursive/-r also pulls declared components into
+    subdirectories named after each component. No-op for compose, quadlet, and unknown types.
     """
     resolved_force_type: PackageType | None = None
 
@@ -45,6 +51,7 @@ def pull(
             outdir=output,
             force=force,
             force_type=resolved_force_type,
+            recursive=recursive,
         )
         for path in paths:
             console.success(f"Pulled: {path}")
