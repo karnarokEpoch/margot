@@ -10,6 +10,7 @@ from margot.domain.describe import (
     component_index,
     unreferenced_parameters,
 )
+from margot.domain.metadata import MargoYaml
 
 
 class TestIdentityModel:
@@ -82,6 +83,134 @@ class TestIdentityModel:
 
         assert identity.name is None
         assert identity.version is None
+
+    def test_build_identity_oci_uri_with_repository_no_plus(self) -> None:
+        """Should compute oci_uri from meta with non-empty repository and version without +."""
+        doc = {
+            "id": "hello-world",
+            "apiVersion": "application.margo.org/v1alpha1",
+            "kind": "ApplicationDescription",
+            "metadata": {
+                "name": "Hello World",
+                "version": "1.0.0",
+            },
+        }
+        meta = MargoYaml(
+            api_version="v1",
+            id="hello-world",
+            name="Hello World",
+            description="Test",
+            app_version=None,
+            version="1.0.0",
+            annotations={},
+            compose=None,
+            quadlet=None,
+            repository="public.ecr.aws/g2n4p2m7/margo",
+        )
+
+        identity = build_identity(doc, meta)
+
+        assert identity.oci_uri == "public.ecr.aws/g2n4p2m7/margo:1.0.0"
+
+    def test_build_identity_oci_uri_with_plus_replaced_by_underscore(self) -> None:
+        """Should replace + with _ in version when computing oci_uri."""
+        doc = {
+            "id": "hello-world",
+            "apiVersion": "application.margo.org/v1alpha1",
+            "kind": "ApplicationDescription",
+            "metadata": {
+                "name": "Hello World",
+                "version": "1.0.0+compose-default",
+            },
+        }
+        meta = MargoYaml(
+            api_version="v1",
+            id="hello-world",
+            name="Hello World",
+            description="Test",
+            app_version=None,
+            version="1.0.0+compose-default",
+            annotations={},
+            compose=None,
+            quadlet=None,
+            repository="public.ecr.aws/org/app",
+        )
+
+        identity = build_identity(doc, meta)
+
+        assert identity.oci_uri == "public.ecr.aws/org/app:1.0.0_compose-default"
+
+    def test_build_identity_oci_uri_none_when_meta_none(self) -> None:
+        """Should set oci_uri to None when meta is None."""
+        doc = {
+            "id": "hello-world",
+            "apiVersion": "application.margo.org/v1alpha1",
+            "kind": "ApplicationDescription",
+            "metadata": {
+                "name": "Hello World",
+                "version": "1.0.0",
+            },
+        }
+
+        identity = build_identity(doc, meta=None)
+
+        assert identity.oci_uri is None
+
+    def test_build_identity_oci_uri_none_when_repository_none(self) -> None:
+        """Should set oci_uri to None when meta.repository is None."""
+        doc = {
+            "id": "hello-world",
+            "apiVersion": "application.margo.org/v1alpha1",
+            "kind": "ApplicationDescription",
+            "metadata": {
+                "name": "Hello World",
+                "version": "1.0.0",
+            },
+        }
+        meta = MargoYaml(
+            api_version="v1",
+            id="hello-world",
+            name="Hello World",
+            description="Test",
+            app_version=None,
+            version="1.0.0",
+            annotations={},
+            compose=None,
+            quadlet=None,
+            repository=None,
+        )
+
+        identity = build_identity(doc, meta)
+
+        assert identity.oci_uri is None
+
+    def test_build_identity_oci_uri_none_when_repository_empty_string(self) -> None:
+        """Should set oci_uri to None when meta.repository is an empty string."""
+        doc = {
+            "id": "hello-world",
+            "apiVersion": "application.margo.org/v1alpha1",
+            "kind": "ApplicationDescription",
+            "metadata": {
+                "name": "Hello World",
+                "version": "1.0.0",
+            },
+        }
+        meta = MargoYaml(
+            api_version="v1",
+            id="hello-world",
+            name="Hello World",
+            description="Test",
+            app_version=None,
+            version="1.0.0",
+            annotations={},
+            compose=None,
+            quadlet=None,
+            repository="",
+        )
+
+        identity = build_identity(doc, meta)
+
+        assert identity.oci_uri is None
 
 
 class TestCatalogModel:

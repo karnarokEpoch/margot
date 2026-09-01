@@ -1080,3 +1080,42 @@ class TestDescribeSensorDashboardFixture:
         # The unreferenced parameters heading should NOT appear
         # Check for the exact heading text
         assert "Unreferenced parameters" not in plain
+
+    def test_describe_oci_uri_renders_with_repository(self, cli_project: Path) -> None:
+        """Should render OCI URI when margo.yaml has repository field."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should contain the OCI label
+        assert "OCI:" in plain
+        # Should contain the computed OCI URI (repository:version from margo.yaml)
+        assert "public.ecr.aws/g2n4p2m7/margo:1.0.0" in plain
+
+    def test_describe_oci_uri_none_when_no_repository(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """Should render 'OCI: None' when margo.yaml has no repository field."""
+        # Create margo.yaml without repository
+        margo_yaml_no_repo = """apiVersion: v1
+id: hello-world
+name: Hello World
+description: A sample application
+version: 1.0.0
+compose:
+  directory: margo
+  version: 1.0.0
+"""
+        (tmp_path / "margo.yaml").write_text(margo_yaml_no_repo, encoding="utf-8")
+        (tmp_path / "margo").mkdir()
+        (tmp_path / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should render OCI: None
+        assert "OCI:" in plain
+        # Should not crash
+        assert result.exit_code == 0

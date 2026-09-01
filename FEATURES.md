@@ -582,10 +582,12 @@ margot describe [--project-dir PATH] [--manifest PATH]
 **Blocks rendered**, always in this order, each as a full-width stacked panel:
 
 1. **Identity + catalog** — `apiVersion` as the panel title, `id`, `metadata.version` and
-   `metadata.name` as a grid, then labeled `Description:` and `Catalog:` blocks. No
-   catalog at all renders as `Catalog: None`. `kind` is not printed: the load gate already
-   refuses anything that is not an `ApplicationDescription`. The panel subtitle is the
-   resolved descriptor path, marked `(rendered)` when it came from `app.yaml.jinja`.
+   `metadata.name` as a grid, then the margo app description artifact's OCI URI (`repository:tag`,
+   where `tag = version with '+' replaced by '_'`), then labeled `Description:` and `Catalog:` blocks.
+   The OCI line renders as `OCI: {repository}:{tag}` when `margo.yaml` has a `repository` field,
+   or `OCI: None` when no repository is configured. No catalog at all renders as `Catalog: None`.
+   `kind` is not printed: the load gate already refuses anything that is not an `ApplicationDescription`.
+   The panel subtitle is the resolved descriptor path, marked `(rendered)` when it came from `app.yaml.jinja`.
 2. **Deployment profiles** — one tree per entry: `type` and `id`, `description`, the
    profile's own `requiredResources` (`cpu`/`memory`/`storage` on one line, `peripherals`
    and `interfaces` as separate lines when present), then `components[]` → `properties`.
