@@ -354,10 +354,43 @@ Push built artifacts to OCI registry via ORAS.
 ```
 margot push [--type margo|compose|quadlet|all] [--project-dir PATH]
               [--registry REG] [--repository REPO] [--build-dir DIR]
-              [--variant VARIANT]
+              [--variant VARIANT] [--dry-run]
 ```
 
 **Prereq check:** validate the tag is SemVer before doing anything else. Fail fast.
+
+**`--dry-run`:** validate that a push would succeed without pushing anything. Runs the
+same checks as a real push — OCI tag / SemVer validation, built-artifact-exists-on-disk
+check, and local credential-expiry check (`credentials.check_credentials`) — plus one
+additional check a real push doesn't need on its own: a live **write-access probe**
+against the registry. No artifact content is ever inspected or uploaded.
+
+The probe reuses the OCI blob-upload-session handshake (the same one a real push starts
+before actually uploading a layer): `POST /v2/<repository>/blobs/uploads/` with the
+resolved registry credentials. The registry's response tells us what we need without
+writing anything:
+
+- `202 Accepted` (+ `Location` header) → write access confirmed. The opened upload
+  session is immediately cancelled with a best-effort `DELETE` on that location — if the
+  registry doesn't support cancellation, the session simply expires server-side on its
+  own; either way, nothing is committed.
+- `401` / `403` → no write access. Reported as a clear error, exit 1.
+- Any other status → surfaced as-is, exit 1 — not swallowed as a generic failure.
+
+The probe runs once per unique `(registry, repository)` pair per invocation — pushing
+`--type all --variant all` against components that share one repository does not open a
+session per variant.
+
+On success, each target that would be pushed is reported the same shape as a real push,
+prefixed to distinguish it from an actual push:
+
+```
+Dry run OK: public.ecr.aws/g2n4p2m7/margo:1.0.0
+Dry run OK (simple): public.ecr.aws/g2n4p2m7/margo:1.0.0_compose-simple
+```
+
+A real push (no `--dry-run`) reports `Pushed: ...` / `Pushed (<variant>): ...` exactly as
+before — `--dry-run` changes nothing about default push behavior.
 
 **margo push:**
 

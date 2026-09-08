@@ -67,6 +67,8 @@ Unordered within groups; sequencing decided at sprint planning.
 
 ### Cross-cutting
 
+* ~~`margot push --dry-run` — validate readiness without pushing, `Dry run OK: ...` output~~
+  ✓ done (post-Sprint 4, unplanned addition — see `FEATURES.md` → `margot push`)
 * ~~`domain/tags.py` OCI tag + SemVer validation~~ ✓ done (Sprint 3)
 * ~~`domain/metadata.py` `margo.yaml` project descriptor parsing~~ ✓ done (Sprint 3)
 * ~~`config.py` full dynaconf layering~~ ✓ done (Sprint 3)
