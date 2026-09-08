@@ -150,6 +150,26 @@ margot fetch public.ecr.aws/g2n4p2m7/margo:1.0.0
 `pull` writes the artifact's layers to disk as-is (no extraction). `fetch` prints the
 raw manifest JSON for a quick remote inspection, without pulling anything.
 
+### Shell completion
+
+Enable shell tab completion for margot commands and flags:
+
+```bash
+# Quick setup — appends to your shell's rc file directly
+margot --install-completion
+
+# Manual setup — prints the script; redirect it wherever you source completions from
+margot --show-completion bash > ~/.local/share/bash-completion/completions/margot
+```
+
+Both methods require a shell restart or re-sourcing the rc file to take effect.
+`--show-completion` takes a shell argument (`bash`, `zsh`, `fish`, `powershell`, or `pwsh`)
+and prints the completion script to stdout.
+
+`--install-completion` has no `--path` option — it always appends to the shell's default rc file (e.g. `~/.bashrc`).
+If you curate your own rc includes rather than a raw rc append, use
+`--show-completion` instead and redirect the output to your preferred location.
+
 ## Learn more
 
 - [Documentation](https://karnarokepoch.github.io/margot/) — full command reference,
