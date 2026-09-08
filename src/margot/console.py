@@ -99,7 +99,7 @@ def is_debug() -> bool:
 
 def success(message: str) -> None:
     """Print a green success message to stdout. Always shown."""
-    _get_stdout().print(f"[green]{message}[/green]")
+    _get_stdout().print(f"[green]{message}[/green]", highlight=False)
 
 
 def print_json(data: dict | list) -> None:
@@ -121,10 +121,11 @@ def warning(message: str) -> None:
     """Print a yellow warning to stderr. Always shown."""
     if _debug:
         _get_stderr().print(
-            f"[dim]{_now_ms()}[/dim] [yellow]warning:[/yellow] [dim cyan][{_caller_location()}][/dim cyan] {message}"
+            f"[dim]{_now_ms()}[/dim] [yellow]warning:[/yellow] [dim cyan][{_caller_location()}][/dim cyan] {message}",
+            highlight=False,
         )
     else:
-        _get_stderr().print(f"[yellow]warning:[/yellow] {message}")
+        _get_stderr().print(f"[yellow]warning:[/yellow] {message}", highlight=False)
 
 
 def info(message: str) -> None:
@@ -132,16 +133,16 @@ def info(message: str) -> None:
     if not _verbose:
         return
     if _debug:
-        _get_stderr().print(f"[dim]{_now_ms()} info: [{_caller_location()}] {message}[/dim]")
+        _get_stderr().print(f"[dim]{_now_ms()} info: [{_caller_location()}] {message}[/dim]", highlight=False)
     else:
-        _get_stderr().print(f"[dim]info: {message}[/dim]")
+        _get_stderr().print(f"[dim]info: {message}[/dim]", highlight=False)
 
 
 def debug(message: str) -> None:
     """Print a debug message to stderr. Only shown if debug=True."""
     if not _debug:
         return
-    _get_stderr().print(f"[dim]{_now_ms()} debug: [{_caller_location()}] {message}[/dim]")
+    _get_stderr().print(f"[dim]{_now_ms()} debug: [{_caller_location()}] {message}[/dim]", highlight=False)
 
 
 def fatal(message: str) -> None:
@@ -149,7 +150,7 @@ def fatal(message: str) -> None:
 
     Use for unrecoverable errors in commands.
     """
-    _get_stderr().print(f"[red]Error:[/red] {message}")
+    _get_stderr().print(f"[red]Error:[/red] {message}", highlight=False)
     raise Exit(1)
 
 
@@ -166,7 +167,7 @@ def finding(text: str, severity: str) -> None:
         "INFO": "dim",
     }
     style = style_map.get(severity, "dim")
-    _get_stderr().print(f"[{style}]{text}[/{style}]")
+    _get_stderr().print(f"[{style}]{text}[/{style}]", highlight=False)
 
 
 def section(label: str) -> None:
@@ -175,7 +176,7 @@ def section(label: str) -> None:
     Used for visual separation between schema sections in validation output.
     """
     separator = f"── {label} ──"
-    _get_stderr().print(f"[blue]{separator}[/blue]")
+    _get_stderr().print(f"[blue]{separator}[/blue]", highlight=False)
 
 
 def verdict(label: str, outcome: str, detail: str) -> None:
@@ -209,4 +210,4 @@ def verdict(label: str, outcome: str, detail: str) -> None:
         # For PASS/FAIL, print the outcome word in color, then the detail
         line = f"[white]{label}[/white][dim]: [/dim][{outcome_color}]{outcome}[/{outcome_color}] — {detail}"
 
-    _get_stdout().print(line)
+    _get_stdout().print(line, highlight=False)
