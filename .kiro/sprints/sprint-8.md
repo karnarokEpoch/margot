@@ -106,7 +106,9 @@ below).
 - `src/margot/commands/describe.py` — rendering.
 - Unit + e2e tests, `FEATURES.md`.
 
-### Item 4 — Remote descriptor support: `margot describe <uri>`
+### Item 4 — Remote descriptor support: `margot describe <uri>` ✅ DONE
+
+**Status:** Implemented on `feat/add-oci-to-describe` (`margot describe <uri>`).
 
 **Goal:** let `describe` render a `margo`-type OCI artifact's application description
 directly from a registry, without a local project checkout. Today `describe` only reads
