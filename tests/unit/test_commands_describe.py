@@ -122,6 +122,61 @@ class TestIdentityCatalogPanel:
         assert "array" in text
         assert "string" in text
 
+    def test_identity_panel_oci_uri_renders_when_set(self) -> None:
+        """Should render OCI URI line when identity.oci_uri is set."""
+        identity = Identity(
+            id="hello",
+            api_version="v1alpha1",
+            name="Hello App",
+            version="1.0.0",
+            oci_uri="public.ecr.aws/g2n4p2m7/margo:1.0.0",
+        )
+
+        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml")
+        text = _render_to_text(panel)
+
+        assert "OCI:" in text
+        assert "public.ecr.aws/g2n4p2m7/margo:1.0.0" in text
+
+    def test_identity_panel_oci_uri_none_renders_none_marker(self) -> None:
+        """Should render 'OCI: None' when identity.oci_uri is None."""
+        identity = Identity(
+            id="hello",
+            api_version="v1alpha1",
+            name="Hello App",
+            version="1.0.0",
+            oci_uri=None,
+        )
+
+        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml")
+        text = _render_to_text(panel)
+
+        assert "OCI:" in text
+        # The text should contain "None" (even if dim'd)
+        assert "None" in text
+
+    def test_identity_panel_oci_uri_ordering(self) -> None:
+        """Should render OCI line after id/version/name grid and before Description."""
+        identity = Identity(
+            id="hello",
+            api_version="v1alpha1",
+            name="Hello App",
+            version="1.0.0",
+            description="A test app",
+            oci_uri="public.ecr.aws/org/app:1.0.0",
+        )
+
+        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml")
+        text = _render_to_text(panel)
+
+        # Get positions of key elements
+        oci_pos = text.find("OCI:")
+        desc_pos = text.find("Description:")
+        id_pos = text.find("id")
+
+        # OCI should come after id and before Description
+        assert id_pos < oci_pos < desc_pos
+
 
 class TestDeploymentProfilesPanel:
     """Tests for build_deployment_profiles_panel."""

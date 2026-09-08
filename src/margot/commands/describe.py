@@ -126,7 +126,7 @@ def build_identity_catalog_panel(identity: Identity, catalog: Catalog | None, re
     """Build the identity+catalog panel.
 
     Title is apiVersion. Subtitle is resolved path, suffixed with (rendered) if templated.
-    Grid shows id/version/name. Description and Catalog follow.
+    Grid shows id/version/name. OCI URI line follows. Description and Catalog follow.
     """
     # Detect if path looks like a temporary file (ends in .yaml or similar, with temp markers)
     is_rendered = "/margot-" in resolved_path and resolved_path.endswith(".yaml")
@@ -145,6 +145,18 @@ def build_identity_catalog_panel(identity: Identity, catalog: Catalog | None, re
     grid.add_row("name", _plain(identity.name), "", "")
     body.append(grid)
     body.append(Text())
+
+    # OCI URI line
+    if identity.oci_uri is None:
+        oci_line = Text("OCI: ", style="bold")
+        oci_line.append("None", style="dim")
+        body.append(oci_line)
+    else:
+        oci_table = Table.grid(padding=(0, 1))
+        oci_table.add_column(style="bold")
+        oci_table.add_column(overflow="fold")
+        oci_table.add_row("OCI:", _plain(identity.oci_uri))
+        body.append(oci_table)
 
     # Description
     desc_table = Table.grid(padding=(0, 1))
@@ -477,8 +489,14 @@ def describe_cmd(
     except (ValueError, TypeError) as e:
         console.fatal(f"{e!s} Run 'margot verify' to debug.")
 
-    # Build display model from dict
-    identity = build_identity(descriptor_dict)
+    # Resolve descriptor to get meta for OCI URI computation
+    try:
+        resolved = describe_service.resolve_descriptor(project_dir or ".", manifest)
+    except ValueError as e:
+        console.fatal(f"{e!s}")
+
+    # Build display model from dict, threading meta into build_identity for OCI URI
+    identity = build_identity(descriptor_dict, resolved.meta)
     catalog = build_catalog(descriptor_dict)
     profiles = build_deployment_profiles(descriptor_dict)
     index = component_index(descriptor_dict)
@@ -497,7 +515,6 @@ def describe_cmd(
     sections_to_render = [s for s in canonical_order if s in requested_sections]
 
     # Get resolved path for subtitle
-    resolved = describe_service.resolve_descriptor(project_dir or ".", manifest)
     resolved_path = resolved.source_path
 
     # Render panels in order

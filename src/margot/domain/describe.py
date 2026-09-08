@@ -6,6 +6,8 @@ and transformation functions. All formatting and rendering happens in commands/.
 
 from dataclasses import dataclass, field
 
+from margot.domain.metadata import MargoYaml
+
 
 @dataclass(frozen=True)
 class Identity:
@@ -17,6 +19,7 @@ class Identity:
     name: str | None = None
     version: str | None = None
     description: str | None = None
+    oci_uri: str | None = None
 
 
 @dataclass(frozen=True)
@@ -137,23 +140,34 @@ class Configuration:
     unreferenced: list[str] = field(default_factory=list)
 
 
-def build_identity(doc: dict) -> Identity:
+def build_identity(doc: dict, meta: MargoYaml | None = None) -> Identity:
     """Transform the loaded descriptor into an Identity dataclass.
 
     Args:
         doc: The parsed descriptor dict.
+        meta: Optional MargoYaml metadata to compute OCI URI. If provided and
+            meta.repository is non-empty, oci_uri is set to
+            f"{meta.repository}:{meta.version.replace('+', '_')}".
 
     Returns:
-        An Identity with top-level id/apiVersion/kind and metadata fields.
+        An Identity with top-level id/apiVersion/kind and metadata fields,
+        plus oci_uri if meta is provided.
     """
-    meta = doc.get("metadata") or {}
+    meta_data = doc.get("metadata") or {}
+
+    # Compute OCI URI if meta is provided
+    oci_uri: str | None = None
+    if meta is not None and meta.repository:
+        oci_uri = f"{meta.repository}:{meta.version.replace('+', '_')}"
+
     return Identity(
         id=doc.get("id"),
         api_version=doc.get("apiVersion"),
         kind=doc.get("kind"),
-        name=meta.get("name"),
-        version=meta.get("version"),
-        description=meta.get("description"),
+        name=meta_data.get("name"),
+        version=meta_data.get("version"),
+        description=meta_data.get("description"),
+        oci_uri=oci_uri,
     )
 
 
