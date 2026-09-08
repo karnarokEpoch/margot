@@ -323,9 +323,7 @@ def _add_targets_to_node(param_node: Any, param: Parameter, total_components: in
             pointer_line = Text("Pointer: ", style="cyan")
             pointer_line.append(_literal(target.pointer))
             n_components = len(target.components or [])
-            pointer_line.append(
-                f"  ({n_components}/{total_components} components)", style="dim"
-            )
+            pointer_line.append(f"  ({n_components}/{total_components} components)", style="dim")
             pointer_node = param_node.add(pointer_line)
 
             comps = target.components or []
@@ -363,18 +361,14 @@ def _build_section_tree(section: ConfigurationSection, total_components: int, in
 
         # Add targets and components if parameter is resolved
         if setting.parameter_resolved:
-            _add_targets_to_node(
-                param_node, setting.parameter_resolved, total_components, index
-            )
+            _add_targets_to_node(param_node, setting.parameter_resolved, total_components, index)
 
     return section_tree
 
 
 def _build_unreferenced_tree(unreferenced: list[str]) -> Tree:
     """Build the tree for unreferenced parameters."""
-    orphan_root = Text(
-        f"Unreferenced parameters ({len(unreferenced)})", style="bold yellow"
-    )
+    orphan_root = Text(f"Unreferenced parameters ({len(unreferenced)})", style="bold yellow")
     orphan_tree = Tree(orphan_root)
     for param_name in unreferenced:
         param_node = orphan_tree.add(Text(escape(param_name)))
@@ -443,7 +437,8 @@ def build_component_first_panel(config: Configuration, index: list[str]) -> Pane
 
     for comp_node in component_first_view.components:
         # Component root
-        root_text = Text(escape(comp_node.name or ""), style="bold magenta")
+        root_text = Text(escape(comp_node.name or ""), style="bold")
+        root_text.append("  [Component]", style="dim")
         tree = Tree(root_text)
 
         if not comp_node.parameters:
@@ -453,9 +448,10 @@ def build_component_first_panel(config: Configuration, index: list[str]) -> Pane
             # Build parameter edges
             for edge in comp_node.parameters:
                 # Parameter line: parameter name → pointer
-                param_line = Text(escape(edge.parameter_name or ""), style="cyan")
+                param_line = Text(escape(edge.parameter_name or ""), style="bold")
                 param_line.append("  ")
                 param_line.append(_literal(edge.pointer))
+                param_line.append("  [Parameter]", style="dim")
                 param_node = tree.add(param_line)
 
                 # Value line
@@ -598,6 +594,4 @@ def describe_cmd(
     # Render panels in order
     # Render sections
     for section_name in sections_to_render:
-        _render_section(
-            section_name, identity, catalog, profiles, index, config, descriptor_dict, resolved_path
-        )
+        _render_section(section_name, identity, catalog, profiles, index, config, descriptor_dict, resolved_path)
