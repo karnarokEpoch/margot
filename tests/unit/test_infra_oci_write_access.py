@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, PropertyMock
 
 from pytest import raises
 
-from margot.infra.oci import OrasClient
+from margot.infra.oci import OciRegistryError, OrasClient
 
 
 class TestCheckWriteAccess:
@@ -49,7 +49,7 @@ class TestCheckWriteAccess:
 
     def test_check_write_access_401_raises_permission_error(self, mocker: Any) -> None:
         """Should raise PermissionError on 401 response."""
-        client, auth_mock, _ = self._setup_client_mocks(mocker)
+        client, _auth_mock, _ = self._setup_client_mocks(mocker)
 
         container_mock = MagicMock()
         mocker.patch.object(client, "get_container", return_value=container_mock)
@@ -60,12 +60,12 @@ class TestCheckWriteAccess:
         response_mock.text = "Unauthorized"
         mocker.patch.object(client, "do_request", return_value=response_mock)
 
-        with raises(PermissionError, match="public.ecr.aws.*g2n4p2m7/margo"):
+        with raises(PermissionError, match=r"public\.ecr\.aws.*g2n4p2m7/margo"):
             client.check_write_access("public.ecr.aws", "g2n4p2m7/margo")
 
     def test_check_write_access_403_raises_permission_error(self, mocker: Any) -> None:
         """Should raise PermissionError on 403 response."""
-        client, auth_mock, _ = self._setup_client_mocks(mocker)
+        client, _auth_mock, _ = self._setup_client_mocks(mocker)
 
         container_mock = MagicMock()
         mocker.patch.object(client, "get_container", return_value=container_mock)
@@ -76,12 +76,12 @@ class TestCheckWriteAccess:
         response_mock.text = "Forbidden"
         mocker.patch.object(client, "do_request", return_value=response_mock)
 
-        with raises(PermissionError, match="public.ecr.aws.*g2n4p2m7/margo"):
+        with raises(PermissionError, match=r"public\.ecr\.aws.*g2n4p2m7/margo"):
             client.check_write_access("public.ecr.aws", "g2n4p2m7/margo")
 
     def test_check_write_access_500_raises_generic_exception(self, mocker: Any) -> None:
-        """Should raise generic Exception on unexpected status like 500."""
-        client, auth_mock, _ = self._setup_client_mocks(mocker)
+        """Should raise OciRegistryError on unexpected status like 500."""
+        client, _auth_mock, _ = self._setup_client_mocks(mocker)
 
         container_mock = MagicMock()
         mocker.patch.object(client, "get_container", return_value=container_mock)
@@ -92,12 +92,12 @@ class TestCheckWriteAccess:
         response_mock.text = "Internal Server Error"
         mocker.patch.object(client, "do_request", return_value=response_mock)
 
-        with raises(Exception, match="500"):
+        with raises(OciRegistryError, match="500"):
             client.check_write_access("public.ecr.aws", "g2n4p2m7/margo")
 
     def test_check_write_access_delete_cleanup_failure_does_not_raise(self, mocker: Any) -> None:
         """Should not raise when DELETE cleanup of upload session fails."""
-        client, auth_mock, _ = self._setup_client_mocks(mocker)
+        client, _auth_mock, _ = self._setup_client_mocks(mocker)
 
         container_mock = MagicMock()
         mocker.patch.object(client, "get_container", return_value=container_mock)
@@ -116,7 +116,7 @@ class TestCheckWriteAccess:
 
     def test_check_write_access_calls_get_container(self, mocker: Any) -> None:
         """Should call get_container with probe tag."""
-        client, auth_mock, _ = self._setup_client_mocks(mocker)
+        client, _auth_mock, _ = self._setup_client_mocks(mocker)
 
         container_mock = MagicMock()
         get_container = mocker.patch.object(client, "get_container", return_value=container_mock)
@@ -134,7 +134,7 @@ class TestCheckWriteAccess:
 
     def test_check_write_access_uses_upload_blob_url(self, mocker: Any) -> None:
         """Should use container.upload_blob_url() for POST request."""
-        client, auth_mock, _ = self._setup_client_mocks(mocker)
+        client, _auth_mock, _ = self._setup_client_mocks(mocker)
 
         container_mock = MagicMock()
         container_mock.upload_blob_url.return_value = "v2/g2n4p2m7/margo/blobs/uploads/"
@@ -156,7 +156,7 @@ class TestCheckWriteAccess:
 
     def test_check_write_access_emits_debug_logs(self, mocker: Any) -> None:
         """Should emit debug logs during the probe."""
-        client, auth_mock, console_mock = self._setup_client_mocks(mocker)
+        client, _auth_mock, console_mock = self._setup_client_mocks(mocker)
 
         container_mock = MagicMock()
         mocker.patch.object(client, "get_container", return_value=container_mock)
@@ -174,7 +174,7 @@ class TestCheckWriteAccess:
 
     def test_check_write_access_handles_200_response(self, mocker: Any) -> None:
         """Should succeed on 200 response without cleanup."""
-        client, auth_mock, _ = self._setup_client_mocks(mocker)
+        client, _auth_mock, _ = self._setup_client_mocks(mocker)
 
         container_mock = MagicMock()
         mocker.patch.object(client, "get_container", return_value=container_mock)
@@ -188,7 +188,7 @@ class TestCheckWriteAccess:
 
     def test_check_write_access_handles_201_response(self, mocker: Any) -> None:
         """Should succeed on 201 response."""
-        client, auth_mock, _ = self._setup_client_mocks(mocker)
+        client, _auth_mock, _ = self._setup_client_mocks(mocker)
 
         container_mock = MagicMock()
         mocker.patch.object(client, "get_container", return_value=container_mock)

@@ -4,9 +4,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, call
 
-from pytest import fixture
+from pytest import fixture, raises
 
 from margot.domain.models import PackageType
+from margot.infra.credentials import CredentialsExpiredError
 from margot.services import push
 
 
@@ -160,8 +161,6 @@ repository: public.ecr.aws/g2n4p2m7/margo-app
 
         mocker.patch("margot.services.push.credentials.check_credentials")
 
-        from pytest import raises
-
         with raises(ValueError, match="Built margo artifact not found"):
             push.push(
                 PackageType.MARGO,
@@ -172,14 +171,10 @@ repository: public.ecr.aws/g2n4p2m7/margo-app
 
     def test_dry_run_checks_credentials(self, mocker: Any, dry_run_project: Path) -> None:
         """Should check credentials even in dry_run mode."""
-        from margot.infra.credentials import CredentialsExpiredError
-
         mocker.patch(
             "margot.services.push.credentials.check_credentials",
             side_effect=CredentialsExpiredError("Credentials expired"),
         )
-
-        from pytest import raises
 
         with raises(CredentialsExpiredError, match="Credentials expired"):
             push.push(
@@ -202,8 +197,6 @@ repository: public.ecr.aws/g2n4p2m7/margo-app
         (tmp_path / "margo.yaml").write_text(margo_yaml_content)
 
         mocker.patch("margot.services.push.credentials.check_credentials")
-
-        from pytest import raises
 
         with raises(ValueError, match="not valid SemVer"):
             push.push(

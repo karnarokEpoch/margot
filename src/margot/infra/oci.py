@@ -14,6 +14,13 @@ from oras.oci import ManifestConfig, NewLayer, NewManifest
 from margot import console
 from margot.infra import credentials
 
+# HTTP status code constants
+_HTTP_ACCEPTED = 202
+
+
+class OciRegistryError(Exception):
+    """Raised when an OCI registry returns an unexpected error response."""
+
 
 class _OrasLogHandler(Handler):
     """Route oras-py log records to margot's console."""
@@ -424,13 +431,13 @@ class OrasClient(OrasClientLib):
 
         if response.status_code not in (200, 201, 202):
             console.debug(f"  {response.status_code} — unexpected error")
-            raise Exception(
+            raise OciRegistryError(
                 f"Failed to probe write access to {registry}/{repository}: "
                 f"{response.status_code} {response.text}"
             )
 
         # On 202 (or any 2xx), attempt best-effort DELETE to cancel the session
-        if response.status_code == 202:
+        if response.status_code == _HTTP_ACCEPTED:
             try:
                 location = self._get_location(response, container)
                 if location:

@@ -75,7 +75,7 @@ def push(  # noqa: PLR0913
     return targets
 
 
-def _push_all(
+def _push_all(  # noqa: PLR0913
     meta: MargoYaml,
     build_dir: str,
     registry: str | None,
@@ -90,7 +90,9 @@ def _push_all(
     targets.append(_push_margo(meta, build_dir, registry, repository, dry_run, probed_pairs))
 
     try:
-        targets.extend(_push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.COMPOSE, dry_run, probed_pairs))
+        targets.extend(
+            _push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.COMPOSE, dry_run, probed_pairs)
+        )
     except ValueError as e:
         if "not defined in margo.yaml" in str(e):
             console.info("Skipping compose: not defined in margo.yaml")
@@ -98,7 +100,9 @@ def _push_all(
             raise
 
     try:
-        targets.extend(_push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.QUADLET, dry_run, probed_pairs))
+        targets.extend(
+            _push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.QUADLET, dry_run, probed_pairs)
+        )
     except ValueError as e:
         if "not defined in margo.yaml" in str(e):
             console.info("Skipping quadlet: not defined in margo.yaml")
@@ -178,7 +182,7 @@ def _parse_component_repository(repo_field: str) -> tuple[str, str]:
     return registry, rest
 
 
-def _push_margo(
+def _push_margo(  # noqa: PLR0913
     meta: MargoYaml,
     build_dir: str,
     cli_registry: str | None,
@@ -260,10 +264,14 @@ def _push_compose_or_quadlet(  # noqa: PLR0913
 
     if not component.variants:
         # Flat layout (no variants)
-        return _push_flat_component(meta, component, build_dir, cli_registry, cli_repository, variant, component_type, dry_run, probed_pairs)
+        return _push_flat_component(
+            meta, component, build_dir, cli_registry, cli_repository, variant, component_type, dry_run, probed_pairs
+        )
 
     # Variant layout
-    return _push_variant_component(meta, component, build_dir, cli_registry, cli_repository, variant, component_type, dry_run, probed_pairs)
+    return _push_variant_component(
+        meta, component, build_dir, cli_registry, cli_repository, variant, component_type, dry_run, probed_pairs
+    )
 
 
 def _push_flat_component(  # noqa: PLR0913

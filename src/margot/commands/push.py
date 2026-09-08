@@ -61,6 +61,24 @@ def _invoke_push(  # noqa: PLR0913
         raise
 
 
+def _report_target(target: BuildTarget, dry_run: bool) -> None:
+    """Report the result of pushing/probing a target."""
+    if target.registry and target.repository:
+        full_ref = f"{target.registry}/{target.repository}:{target.version}"
+    else:
+        full_ref = target.version
+
+    if target.variant_name:
+        if dry_run:
+            console.success(f"Dry run OK ({target.variant_name}): {full_ref}")
+        else:
+            console.success(f"Pushed ({target.variant_name}): {full_ref}")
+    elif dry_run:
+        console.success(f"Dry run OK: {full_ref}")
+    else:
+        console.success(f"Pushed: {full_ref}")
+
+
 def push_cmd(  # noqa: PLR0913
     project_dir: str = Option(".", "--project-dir", help="Directory containing margo.yaml."),
     types: Annotated[
@@ -72,7 +90,10 @@ def push_cmd(  # noqa: PLR0913
     build_dir: str = Option(".dist", "--build-dir", help="Directory containing built artifacts."),
     variant: str | None = Option(None, "--variant", help="Push a specific variant (compose/quadlet only)."),
     dry_run: bool = Option(
-        False, "--dry-run", help="Validate readiness without pushing: check artifacts exist and registry write access, then report OCI refs."
+        False,
+        "--dry-run",
+        help="Validate readiness without pushing: check artifacts exist and registry write access, "
+        "then report OCI refs.",
     ),
 ) -> None:
     """Push built Margo application artifacts to an OCI registry."""
@@ -85,25 +106,11 @@ def push_cmd(  # noqa: PLR0913
 
         if all_targets:
             for target in all_targets:
-                if target.registry and target.repository:
-                    full_ref = f"{target.registry}/{target.repository}:{target.version}"
-                else:
-                    full_ref = target.version
-                if target.variant_name:
-                    if dry_run:
-                        console.success(f"Dry run OK ({target.variant_name}): {full_ref}")
-                    else:
-                        console.success(f"Pushed ({target.variant_name}): {full_ref}")
-                else:
-                    if dry_run:
-                        console.success(f"Dry run OK: {full_ref}")
-                    else:
-                        console.success(f"Pushed: {full_ref}")
+                _report_target(target, dry_run)
+        elif dry_run:
+            console.warning("Nothing to validate.")
         else:
-            if dry_run:
-                console.warning("Nothing to validate.")
-            else:
-                console.warning("Nothing was pushed.")
+            console.warning("Nothing was pushed.")
 
     except PermissionError as e:
         console.fatal(str(e))
