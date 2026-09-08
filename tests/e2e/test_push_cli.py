@@ -99,6 +99,7 @@ class TestPushCLI:
             registry=None,
             repository=None,
             variant=None,
+            dry_run=False,
         )
 
     def test_push_type_compose_with_variant(self, mocker: Any) -> None:
@@ -129,6 +130,7 @@ class TestPushCLI:
             registry=None,
             repository=None,
             variant="simple",
+            dry_run=False,
         )
 
     def test_push_with_registry_and_repository(self, mocker: Any) -> None:
@@ -159,6 +161,7 @@ class TestPushCLI:
             registry="public.ecr.aws",
             repository="org/repo",
             variant=None,
+            dry_run=False,
         )
 
     def test_push_service_value_error_exits_1(self, mocker: Any) -> None:
@@ -233,4 +236,5 @@ class TestPushCLI:
             registry=None,
             repository=None,
             variant=None,
+            dry_run=False,
         )
