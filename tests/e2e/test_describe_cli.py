@@ -195,10 +195,10 @@ class TestDescribeCLI:
         """Should always render sections in canonical order regardless of flag order."""
         (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
 
-        # Request config then metadata
-        result1 = runner.invoke(app, ["describe", "--section", "config", "--section", "metadata"])
-        # Request metadata then config
-        result2 = runner.invoke(app, ["describe", "--section", "metadata", "--section", "config"])
+        # Request config-first then metadata
+        result1 = runner.invoke(app, ["describe", "--section", "config-first", "--section", "metadata"])
+        # Request metadata then config-first
+        result2 = runner.invoke(app, ["describe", "--section", "metadata", "--section", "config-first"])
         plain1 = _output(result1)
         plain2 = _output(result2)
 
@@ -253,6 +253,47 @@ class TestDescribeCLI:
         assert result.exit_code == 0
         # Should show profiles panel with profile type and id
         assert "compose" in plain or "default" in plain
+
+    def test_describe_section_config_first_only(self, cli_project: Path) -> None:
+        """Should render only config-first section when requested."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "config-first"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should have configuration section
+        assert "Configuration" in plain
+        # Should not have metadata
+        assert "application.margo.org" not in plain
+
+    def test_describe_section_component_first_renders(self, cli_project: Path) -> None:
+        """Should render component-first section when explicitly requested."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "component-first"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should have component panel
+        assert "Components" in plain or "components" in plain
+        # Should show the component name
+        assert "hello-compose" in plain
+
+    def test_describe_old_config_section_name_not_recognized(self, cli_project: Path) -> None:
+        """Should not recognize old 'config' section name (breaking rename)."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "config"])
+        plain = _output(result)
+
+        # The command should exit 0 (no error), but render nothing for unrecognized section
+        assert result.exit_code == 0
+        # Should not have configuration section (since 'config' is not a valid section)
+        # and only metadata/profiles/extensions would show if in default set
+        # Since we only requested 'config', nothing relevant should show
+        # The safest assertion is that Configuration is NOT shown
+        assert "Configuration" not in plain
 
 
 SENSOR_DASHBOARD_APP_YAML = """apiVersion: margo.org/v1alpha1

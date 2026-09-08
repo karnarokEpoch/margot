@@ -26,6 +26,7 @@ from margot.domain.describe import (
     Schema,
     Setting,
     build_catalog,
+    build_component_first,
     build_configuration,
     build_deployment_profiles,
     build_identity,
@@ -417,6 +418,80 @@ def build_configuration_panel(config: Configuration, index: list[str]) -> Panel:
     return Panel(Group(*interleaved), title=title)
 
 
+def build_component_first_panel(config: Configuration, index: list[str]) -> Panel:
+    """Build the component-first panel with component-indexed parameter edges.
+
+    Title includes component count. Each component is a tree root with its incoming
+    parameters as edges: parameter (via pointer) → Setting: <name> → Schema.
+
+    Args:
+        config: The Configuration dataclass.
+        index: The component index (in declaration order).
+
+    Returns:
+        A Panel with the component-first view.
+    """
+    title = f"Components ({len(index)} components)"
+
+    if not index:
+        return Panel(Text("none", style="dim"), title=title)
+
+    # Build the component-first view from domain layer
+    component_first_view = build_component_first(config, index)
+
+    blocks: list = []
+
+    for comp_node in component_first_view.components:
+        # Component root
+        root_text = Text(escape(comp_node.name or ""), style="bold magenta")
+        tree = Tree(root_text)
+
+        if not comp_node.parameters:
+            # No parameters targeting this component
+            tree.add(Text("no parameters", style="dim"))
+        else:
+            # Build parameter edges
+            for edge in comp_node.parameters:
+                # Parameter line: parameter name → pointer
+                param_line = Text(escape(edge.parameter_name or ""), style="cyan")
+                param_line.append("  ")
+                param_line.append(_literal(edge.pointer))
+                param_node = tree.add(param_line)
+
+                # Value line
+                value_line = Text("Value: ", style="cyan")
+                value_line.append(_literal(edge.value))
+                param_node.add(value_line)
+
+                # Setting line
+                setting_line = Text("Setting: ", style="cyan")
+                setting_line.append(escape(edge.setting_name or ""))
+                param_node.add(setting_line)
+
+                # Schema line (reuse the existing formatter)
+                # Create a minimal Setting object for schema line formatting
+                if edge.schema:
+                    schema_line = Text("Schema: ", style="cyan")
+                    schema_line.append(escape(edge.schema.name or ""))
+                    schema_line.append("  ")
+                    schema_line.append(escape(edge.schema.data_type or ""))
+                    if edge.schema.data_type:
+                        schema_line.append("  ")
+                        schema_line.append(_constraint_format(edge.schema))
+                    param_node.add(schema_line)
+
+        blocks.append(tree)
+
+    # Interleave with blank lines
+    interleaved: list = []
+    for block in blocks:
+        interleaved.extend([block, Text()])
+    if interleaved:
+        interleaved.pop()  # Remove trailing blank
+
+    return Panel(Group(*interleaved), title=title)
+
+
 def build_extensions_panel(extensions: dict) -> Panel | None:
     """Build extensions panel when x-placeholder-extensions is present.
 
@@ -455,8 +530,11 @@ def _render_section(  # noqa: PLR0913
     elif section_name == "profiles":
         panel = build_deployment_profiles_panel(profiles, index)
         console.print_renderable(panel)
-    elif section_name == "config":
+    elif section_name == "config-first":
         panel = build_configuration_panel(config, index)
+        console.print_renderable(panel)
+    elif section_name == "component-first":
+        panel = build_component_first_panel(config, index)
         console.print_renderable(panel)
     elif section_name == "extensions":
         extensions = descriptor_dict.get("x-placeholder-extensions")
@@ -474,7 +552,7 @@ def describe_cmd(
         list[str] | None,
         Option(
             "--section",
-            help="Render only this section (metadata|profiles|config|extensions). Repeatable.",
+            help="Render only this section (metadata|profiles|config-first|component-first|extensions). Repeatable.",
         ),
     ] = None,
 ) -> None:
@@ -506,12 +584,12 @@ def describe_cmd(
     requested_sections = set(section or []) if section else set()
     if not requested_sections:
         # All sections by default, but extensions only when present
-        requested_sections = {"metadata", "profiles", "config"}
+        requested_sections = {"metadata", "profiles", "config-first"}
         if descriptor_dict.get("x-placeholder-extensions"):
             requested_sections.add("extensions")
 
     # Canonical order, regardless of flag order
-    canonical_order = ["metadata", "profiles", "config", "extensions"]
+    canonical_order = ["metadata", "profiles", "config-first", "component-first", "extensions"]
     sections_to_render = [s for s in canonical_order if s in requested_sections]
 
     # Get resolved path for subtitle

@@ -2,8 +2,14 @@
 
 
 from margot.domain.describe import (
+    Configuration,
+    ConfigurationSection,
+    Parameter,
+    ParameterTarget,
     Schema,
+    Setting,
     build_catalog,
+    build_component_first,
     build_configuration,
     build_deployment_profiles,
     build_identity,
@@ -903,6 +909,215 @@ class TestConfigurationModel:
         )
 
         assert schema.allow_empty is True
+
+
+class TestComponentFirstView:
+    """Tests for build_component_first function."""
+
+    def test_component_first_basic_structure(self) -> None:
+        """Should build a component-first view with per-component parameter edges."""
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Param 1",
+                            description="Test",
+                            immutable=False,
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value="default1",
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="path.to.param1",
+                                        components=["comp-a", "comp-b"],
+                                    )
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp-a", "comp-b"]
+
+        view = build_component_first(config, index)
+
+        assert view is not None
+        assert len(view.components) == 2
+        # Find comp-a
+        comp_a = next((c for c in view.components if c.name == "comp-a"), None)
+        assert comp_a is not None
+        assert len(comp_a.parameters) == 1
+        assert comp_a.parameters[0].parameter_name == "param1"
+
+    def test_component_first_empty_components(self) -> None:
+        """Should include components with no parameters."""
+        config = Configuration(sections=[], unreferenced=[])
+        index = ["comp-a", "comp-b"]
+
+        view = build_component_first(config, index)
+
+        assert len(view.components) == 2
+        # Each component should have empty parameters list
+        for comp in view.components:
+            assert comp.parameters == []
+
+    def test_component_first_multiple_targets_same_component(self) -> None:
+        """Should aggregate multiple targets targeting the same component."""
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Param 1",
+                            immutable=False,
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value="default1",
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="path1",
+                                        components=["comp-a"],
+                                    ),
+                                    ParameterTarget(
+                                        pointer="path2",
+                                        components=["comp-a"],
+                                    ),
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp-a"]
+
+        view = build_component_first(config, index)
+
+        comp_a = view.components[0]
+        # Both targets should be included
+        assert len(comp_a.parameters) == 2
+
+    def test_component_first_ordering_matches_component_index(self) -> None:
+        """Should order components by the component_index order."""
+        config = Configuration(sections=[], unreferenced=[])
+        index = ["zebra", "apple", "banana"]
+
+        view = build_component_first(config, index)
+
+        assert [c.name for c in view.components] == ["zebra", "apple", "banana"]
+
+    def test_component_first_setting_ordering_preserved(self) -> None:
+        """Should preserve setting/section order in parameter edges."""
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Section A",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Param 1",
+                            immutable=False,
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value="v1",
+                                targets=[ParameterTarget(pointer="p1", components=["comp-a"])],
+                            ),
+                        ),
+                        Setting(
+                            parameter="param2",
+                            name="Param 2",
+                            immutable=False,
+                            schema=Schema(name="schema2", data_type="integer"),
+                            parameter_resolved=Parameter(
+                                value=42,
+                                targets=[ParameterTarget(pointer="p2", components=["comp-a"])],
+                            ),
+                        ),
+                    ],
+                ),
+                ConfigurationSection(
+                    name="Section B",
+                    settings=[
+                        Setting(
+                            parameter="param3",
+                            name="Param 3",
+                            immutable=False,
+                            schema=Schema(name="schema3", data_type="boolean"),
+                            parameter_resolved=Parameter(
+                                value=True,
+                                targets=[ParameterTarget(pointer="p3", components=["comp-a"])],
+                            ),
+                        ),
+                    ],
+                ),
+            ],
+            unreferenced=[],
+        )
+        index = ["comp-a"]
+
+        view = build_component_first(config, index)
+
+        comp_a = view.components[0]
+        # Parameters should be in declaration order: param1, param2, param3
+        assert [p.parameter_name for p in comp_a.parameters] == [
+            "param1",
+            "param2",
+            "param3",
+        ]
+
+    def test_component_first_parameter_details_preserved(self) -> None:
+        """Should preserve parameter details in the view."""
+        schema = Schema(
+            name="testSchema",
+            data_type="string",
+            min_length=1,
+            max_length=100,
+        )
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="testParam",
+                            name="Test Parameter",
+                            description="A test parameter",
+                            immutable=True,
+                            schema=schema,
+                            parameter_resolved=Parameter(
+                                value="test-value",
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="config.test",
+                                        components=["comp-a"],
+                                    )
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp-a"]
+
+        view = build_component_first(config, index)
+
+        comp_a = view.components[0]
+        param_edge = comp_a.parameters[0]
+        assert param_edge.parameter_name == "testParam"
+        assert param_edge.setting_name == "Test Parameter"
+        assert param_edge.schema.name == "testSchema"
+        assert param_edge.value == "test-value"
+        assert param_edge.pointer == "config.test"
 
 
 class TestUnreferencedParametersFunction:

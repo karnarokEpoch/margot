@@ -140,6 +140,32 @@ class Configuration:
     unreferenced: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ComponentParameterEdge:
+    """A parameter edge from component perspective: parameter → setting → schema."""
+
+    parameter_name: str | None = None
+    pointer: str | None = None
+    value: object = None
+    setting_name: str | None = None
+    schema: Schema | None = None
+
+
+@dataclass(frozen=True)
+class ComponentFirstNode:
+    """A component node in the component-first view with its parameter edges."""
+
+    name: str | None = None
+    parameters: list[ComponentParameterEdge] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ComponentFirstView:
+    """Component-first traversal: all components with their incoming parameters."""
+
+    components: list[ComponentFirstNode] = field(default_factory=list)
+
+
 def build_identity(doc: dict, meta: MargoYaml | None = None) -> Identity:
     """Transform the loaded descriptor into an Identity dataclass.
 
@@ -406,3 +432,54 @@ def unreferenced_parameters(all_params: set[str], referenced: set[str]) -> list[
         A list of unreferenced parameter names, in iteration order.
     """
     return [name for name in all_params if name not in referenced]
+
+
+def build_component_first(config: Configuration, index: list[str]) -> ComponentFirstView:
+    """Build a component-first view from the configuration.
+
+    Walks through each component in index order and collects all parameters that target
+    that component via their pointers, preserving the declaration order of sections
+    and settings from the configuration.
+
+    Args:
+        config: The Configuration dataclass (already built via build_configuration).
+        index: The component index from component_index(doc), in declaration order.
+
+    Returns:
+        A ComponentFirstView with one ComponentFirstNode per component, each containing
+        its incoming parameter edges in section/setting declaration order.
+    """
+    nodes: list[ComponentFirstNode] = []
+
+    for comp_name in index:
+        # Collect all parameter edges targeting this component
+        edges: list[ComponentParameterEdge] = []
+
+        # Walk sections in order
+        for section in config.sections:
+            # Walk settings in order
+            for setting in section.settings:
+                # Check if this setting's parameter targets this component
+                if setting.parameter_resolved:
+                    param = setting.parameter_resolved
+                    # Check each target
+                    for target in param.targets:
+                        if comp_name in (target.components or []):
+                            # Add edge for this target
+                            edge = ComponentParameterEdge(
+                                parameter_name=setting.parameter,
+                                pointer=target.pointer,
+                                value=param.value,
+                                setting_name=setting.name,
+                                schema=setting.schema,
+                            )
+                            edges.append(edge)
+
+        # Create node for this component
+        node = ComponentFirstNode(
+            name=comp_name,
+            parameters=edges,
+        )
+        nodes.append(node)
+
+    return ComponentFirstView(components=nodes)
