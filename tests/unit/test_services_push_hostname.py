@@ -43,7 +43,7 @@ class TestPushMargoClientHostname:
         self, mocker: Any, test_project_minimal: Path
     ) -> None:
         """Should construct OrasClient with hostname=resolved_registry."""
-        mock_oras_client_class = mocker.patch("margot.services.push.oci.OrasClient")
+        mock_oras_client_class = mocker.patch("margot.services.push.OrasClient")
         mock_oras_instance = MagicMock()
         mock_oras_client_class.return_value = mock_oras_instance
         mocker.patch("margot.services.push.credentials.check_credentials")
@@ -61,7 +61,7 @@ class TestPushMargoClientHostname:
         self, mocker: Any, test_project_minimal: Path
     ) -> None:
         """Should use CLI registry as hostname when --registry flag provided."""
-        mock_oras_client_class = mocker.patch("margot.services.push.oci.OrasClient")
+        mock_oras_client_class = mocker.patch("margot.services.push.OrasClient")
         mock_oras_instance = MagicMock()
         mock_oras_client_class.return_value = mock_oras_instance
         mocker.patch("margot.services.push.credentials.check_credentials")
@@ -101,7 +101,7 @@ compose:
         dist.mkdir(parents=True)
         (dist / "testapp-1.0.0.tgz").write_bytes(b"fake-archive")
 
-        mock_oras_client_class = mocker.patch("margot.services.push.oci.OrasClient")
+        mock_oras_client_class = mocker.patch("margot.services.push.OrasClient")
         mock_oras_instance = MagicMock()
         mock_oras_client_class.return_value = mock_oras_instance
         mocker.patch("margot.services.push.credentials.check_credentials")
@@ -135,7 +135,7 @@ quadlet:
         dist.mkdir(parents=True)
         (dist / "testapp-1.0.0.tgz").write_bytes(b"fake-archive")
 
-        mock_oras_client_class = mocker.patch("margot.services.push.oci.OrasClient")
+        mock_oras_client_class = mocker.patch("margot.services.push.OrasClient")
         mock_oras_instance = MagicMock()
         mock_oras_client_class.return_value = mock_oras_instance
         mocker.patch("margot.services.push.credentials.check_credentials")
@@ -180,7 +180,7 @@ compose:
         (dist / "1.0.0_minimal").mkdir(parents=True)
         (dist / "1.0.0_minimal" / "testapp-1.0.0_minimal.tgz").write_bytes(b"fake-minimal")
 
-        mock_oras_client_class = mocker.patch("margot.services.push.oci.OrasClient")
+        mock_oras_client_class = mocker.patch("margot.services.push.OrasClient")
         mock_oras_instance = MagicMock()
         mock_oras_client_class.return_value = mock_oras_instance
         mocker.patch("margot.services.push.credentials.check_credentials")
@@ -224,7 +224,7 @@ quadlet:
         (dist / "1.0.0_staging").mkdir(parents=True)
         (dist / "1.0.0_staging" / "testapp-1.0.0_staging.tgz").write_bytes(b"fake-staging")
 
-        mock_oras_client_class = mocker.patch("margot.services.push.oci.OrasClient")
+        mock_oras_client_class = mocker.patch("margot.services.push.OrasClient")
         mock_oras_instance = MagicMock()
         mock_oras_client_class.return_value = mock_oras_instance
         mocker.patch("margot.services.push.credentials.check_credentials")
@@ -266,7 +266,7 @@ compose:
         (dist / "1.0.0_lite").mkdir(parents=True)
         (dist / "1.0.0_lite" / "testapp-1.0.0_lite.tgz").write_bytes(b"fake-lite")
 
-        mock_oras_client_class = mocker.patch("margot.services.push.oci.OrasClient")
+        mock_oras_client_class = mocker.patch("margot.services.push.OrasClient")
         mock_oras_instance = MagicMock()
         mock_oras_client_class.return_value = mock_oras_instance
         mocker.patch("margot.services.push.credentials.check_credentials")

@@ -6,7 +6,8 @@ from margot import console
 from margot.domain.metadata import ComponentConfig, MargoYaml, load_margo_yaml
 from margot.domain.models import BuildTarget, PackageType
 from margot.domain.tags import validate_oci_tag, validate_semver
-from margot.infra import credentials, oci
+from margot.infra import credentials
+from margot.infra.oci import OrasClient
 
 
 def push(  # noqa: PLR0913
@@ -17,6 +18,7 @@ def push(  # noqa: PLR0913
     registry: str | None = None,
     repository: str | None = None,
     variant: str | None = None,
+    dry_run: bool = False,
 ) -> list[BuildTarget]:
     """
     Push built artifacts from build_dir to OCI registry.
@@ -25,7 +27,7 @@ def push(  # noqa: PLR0913
     1. Load margo.yaml from project_dir.
     2. Resolve registry/repository.
     3. Resolve push targets based on package_type.
-    4. For each target: validate, check credentials, verify artifact, push.
+    4. For each target: validate, check credentials, verify artifact, push or probe.
     5. Return list of BuildTarget describing what was pushed.
 
     Args:
@@ -35,6 +37,7 @@ def push(  # noqa: PLR0913
         registry: OCI registry base URL (overrides margo.yaml).
         repository: Repository path (overrides margo.yaml).
         variant: For COMPOSE/QUADLET, push specific variant only (optional).
+        dry_run: When True, probe write access instead of pushing (default False).
 
     Returns:
         List of BuildTarget objects representing pushed artifacts.
@@ -47,17 +50,24 @@ def push(  # noqa: PLR0913
     meta = load_margo_yaml(margo_yaml_path)
     console.info(f"Loaded margo.yaml: {margo_yaml_path}")
 
+    # Track which (registry, repository) pairs have been probed in dry_run mode
+    probed_pairs: set[tuple[str, str]] = set()
+
     # Step 2 & 3: Resolve and push targets
     targets: list[BuildTarget] = []
 
     if package_type == PackageType.ALL:
-        targets = _push_all(meta, build_dir, registry, repository, variant)
+        targets = _push_all(meta, build_dir, registry, repository, variant, dry_run, probed_pairs)
     elif package_type == PackageType.MARGO:
-        targets.append(_push_margo(meta, build_dir, registry, repository))
+        targets.append(_push_margo(meta, build_dir, registry, repository, dry_run, probed_pairs))
     elif package_type == PackageType.COMPOSE:
-        targets.extend(_push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.COMPOSE))
+        targets.extend(
+            _push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.COMPOSE, dry_run, probed_pairs)
+        )
     elif package_type == PackageType.QUADLET:
-        targets.extend(_push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.QUADLET))
+        targets.extend(
+            _push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.QUADLET, dry_run, probed_pairs)
+        )
     else:
         raise ValueError(f"Unsupported package_type: {package_type}")  # pragma: no cover
 
@@ -71,14 +81,16 @@ def _push_all(
     registry: str | None,
     repository: str | None,
     variant: str | None,
+    dry_run: bool,
+    probed_pairs: set[tuple[str, str]],
 ) -> list[BuildTarget]:
     """Push all components, skipping any not defined in margo.yaml."""
     targets: list[BuildTarget] = []
 
-    targets.append(_push_margo(meta, build_dir, registry, repository))
+    targets.append(_push_margo(meta, build_dir, registry, repository, dry_run, probed_pairs))
 
     try:
-        targets.extend(_push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.COMPOSE))
+        targets.extend(_push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.COMPOSE, dry_run, probed_pairs))
     except ValueError as e:
         if "not defined in margo.yaml" in str(e):
             console.info("Skipping compose: not defined in margo.yaml")
@@ -86,7 +98,7 @@ def _push_all(
             raise
 
     try:
-        targets.extend(_push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.QUADLET))
+        targets.extend(_push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.QUADLET, dry_run, probed_pairs))
     except ValueError as e:
         if "not defined in margo.yaml" in str(e):
             console.info("Skipping quadlet: not defined in margo.yaml")
@@ -171,6 +183,8 @@ def _push_margo(
     build_dir: str,
     cli_registry: str | None,
     cli_repository: str | None,
+    dry_run: bool,
+    probed_pairs: set[tuple[str, str]],
 ) -> BuildTarget:
     """Push margo component."""
     version = meta.version
@@ -195,17 +209,26 @@ def _push_margo(
     if not app_yaml.exists():
         raise ValueError(f"Built margo artifact not found: {app_yaml}")
 
-    # Push
-    console.info(f"Pushing margo: {resolved_registry}/{resolved_repository}:{version}")
-    client = oci.OrasClient(hostname=resolved_registry)
-    client.push_margo(
-        build_dir=build_dir,
-        version=version,
-        registry=resolved_registry,
-        repository=resolved_repository,
-        name=meta.name,
-        description=meta.description,
-    )
+    # Push or probe
+    if dry_run:
+        # Probe write access (once per unique registry/repository pair)
+        pair = (resolved_registry, resolved_repository)
+        if pair not in probed_pairs:
+            console.info(f"Probing write access: {resolved_registry}/{resolved_repository}")
+            client = OrasClient(hostname=resolved_registry)
+            client.check_write_access(resolved_registry, resolved_repository)
+            probed_pairs.add(pair)
+    else:
+        console.info(f"Pushing margo: {resolved_registry}/{resolved_repository}:{version}")
+        client = OrasClient(hostname=resolved_registry)
+        client.push_margo(
+            build_dir=build_dir,
+            version=version,
+            registry=resolved_registry,
+            repository=resolved_repository,
+            name=meta.name,
+            description=meta.description,
+        )
 
     return BuildTarget(
         package_type=PackageType.MARGO,
@@ -226,6 +249,8 @@ def _push_compose_or_quadlet(  # noqa: PLR0913
     cli_repository: str | None,
     variant: str | None,
     component_type: PackageType,
+    dry_run: bool,
+    probed_pairs: set[tuple[str, str]],
 ) -> list[BuildTarget]:
     """Push compose or quadlet component(s)."""
     component_name = component_type.value
@@ -235,10 +260,10 @@ def _push_compose_or_quadlet(  # noqa: PLR0913
 
     if not component.variants:
         # Flat layout (no variants)
-        return _push_flat_component(meta, component, build_dir, cli_registry, cli_repository, variant, component_type)
+        return _push_flat_component(meta, component, build_dir, cli_registry, cli_repository, variant, component_type, dry_run, probed_pairs)
 
     # Variant layout
-    return _push_variant_component(meta, component, build_dir, cli_registry, cli_repository, variant, component_type)
+    return _push_variant_component(meta, component, build_dir, cli_registry, cli_repository, variant, component_type, dry_run, probed_pairs)
 
 
 def _push_flat_component(  # noqa: PLR0913
@@ -249,6 +274,8 @@ def _push_flat_component(  # noqa: PLR0913
     cli_repository: str | None,
     variant: str | None,
     component_type: PackageType,
+    dry_run: bool,
+    probed_pairs: set[tuple[str, str]],
 ) -> list[BuildTarget]:
     """Push component with flat layout (no variants)."""
     component_name = component_type.value
@@ -280,18 +307,27 @@ def _push_flat_component(  # noqa: PLR0913
     if not archive_path.exists():
         raise ValueError(f"Built {component_name} artifact not found: {archive_path}")
 
-    # Push
-    console.info(f"Pushing {component_name}: {resolved_registry}/{resolved_repository}:{version}")
-    client = oci.OrasClient(hostname=resolved_registry)
-    push_method = client.push_compose if component_type == PackageType.COMPOSE else client.push_quadlet
-    push_method(
-        archive_path=str(archive_path),
-        version=version,
-        registry=resolved_registry,
-        repository=resolved_repository,
-        name=meta.name,
-        description=meta.description,
-    )
+    # Push or probe
+    if dry_run:
+        # Probe write access (once per unique registry/repository pair)
+        pair = (resolved_registry, resolved_repository)
+        if pair not in probed_pairs:
+            console.info(f"Probing write access: {resolved_registry}/{resolved_repository}")
+            client = OrasClient(hostname=resolved_registry)
+            client.check_write_access(resolved_registry, resolved_repository)
+            probed_pairs.add(pair)
+    else:
+        console.info(f"Pushing {component_name}: {resolved_registry}/{resolved_repository}:{version}")
+        client = OrasClient(hostname=resolved_registry)
+        push_method = client.push_compose if component_type == PackageType.COMPOSE else client.push_quadlet
+        push_method(
+            archive_path=str(archive_path),
+            version=version,
+            registry=resolved_registry,
+            repository=resolved_repository,
+            name=meta.name,
+            description=meta.description,
+        )
 
     return [
         BuildTarget(
@@ -315,6 +351,8 @@ def _push_variant_component(  # noqa: PLR0913
     cli_repository: str | None,
     variant: str | None,
     component_type: PackageType,
+    dry_run: bool,
+    probed_pairs: set[tuple[str, str]],
 ) -> list[BuildTarget]:
     """Push component with variant layout."""
     component_name = component_type.value
@@ -333,9 +371,7 @@ def _push_variant_component(  # noqa: PLR0913
         version = v.version
         if version is None:
             if component.version is None:
-                raise ValueError(
-                    f"{component_name} base version is required when variant '{v.name}' omits version"
-                )
+                raise ValueError(f"{component_name} base version is required when variant '{v.name}' omits version")
             version = f"{component.version}+{component_type.value}-{v.name}"
         version = version.replace("+", "_")
 
@@ -357,18 +393,27 @@ def _push_variant_component(  # noqa: PLR0913
         if not archive_path.exists():
             raise ValueError(f"Built {component_name} artifact not found: {archive_path}")
 
-        # Push
-        console.info(f"Pushing {component_name} variant '{v.name}': {resolved_registry}/{resolved_repository}:{version}")
-        client = oci.OrasClient(hostname=resolved_registry)
-        push_method = client.push_compose if component_type == PackageType.COMPOSE else client.push_quadlet
-        push_method(
-            archive_path=str(archive_path),
-            version=version,
-            registry=resolved_registry,
-            repository=resolved_repository,
-            name=meta.name,
-            description=meta.description,
-        )
+        # Push or probe
+        if dry_run:
+            # Probe write access (once per unique registry/repository pair)
+            pair = (resolved_registry, resolved_repository)
+            if pair not in probed_pairs:
+                console.info(f"Probing write access: {resolved_registry}/{resolved_repository}")
+                client = OrasClient(hostname=resolved_registry)
+                client.check_write_access(resolved_registry, resolved_repository)
+                probed_pairs.add(pair)
+        else:
+            console.info(f"Pushing {component_name} variant '{v.name}': {resolved_registry}/{resolved_repository}:{version}")
+            client = OrasClient(hostname=resolved_registry)
+            push_method = client.push_compose if component_type == PackageType.COMPOSE else client.push_quadlet
+            push_method(
+                archive_path=str(archive_path),
+                version=version,
+                registry=resolved_registry,
+                repository=resolved_repository,
+                name=meta.name,
+                description=meta.description,
+            )
 
         targets.append(
             BuildTarget(

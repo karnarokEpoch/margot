@@ -77,7 +77,7 @@ class TestPushMargo:
     def test_push_margo_calls_infra_push_margo(self, mocker: Any, fake_push_project: Path) -> None:
         """Should call OrasClient.push_margo with correct arguments."""
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
         mocker.patch("margot.services.push.credentials.check_credentials")
 
         targets = push.push(
@@ -103,7 +103,7 @@ class TestPushMargo:
     def test_push_margo_with_cli_registry_overrides(self, mocker: Any, fake_push_project: Path) -> None:
         """Should use CLI registry/repository over margo.yaml values."""
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
         mocker.patch("margot.services.push.credentials.check_credentials")
 
         push.push(
@@ -144,7 +144,7 @@ compose:
         (dist / "testapp-1.0.0.tgz").write_bytes(b"fake-archive")
 
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
         mocker.patch("margot.services.push.credentials.check_credentials")
 
         targets = push.push(
@@ -174,7 +174,7 @@ class TestPushComposeVariant:
     def test_push_compose_variant(self, mocker: Any, fake_push_project: Path) -> None:
         """Should call OrasClient.push_compose with correct archive path for specific variant."""
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
         mocker.patch("margot.services.push.credentials.check_credentials")
 
         targets = push.push(
@@ -204,7 +204,7 @@ class TestPushQuadlet:
     def test_push_quadlet_calls_infra_push_quadlet(self, mocker: Any, fake_push_project: Path) -> None:
         """Should call OrasClient.push_quadlet with correct arguments."""
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
         mocker.patch("margot.services.push.credentials.check_credentials")
 
         targets = push.push(
@@ -234,7 +234,7 @@ class TestPushAll:
     def test_push_all_calls_all_push_methods(self, mocker: Any, fake_push_project: Path) -> None:
         """Should push margo + all compose variants + all quadlet variants."""
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
         mocker.patch("margot.services.push.credentials.check_credentials")
 
         targets = push.push(
@@ -309,7 +309,7 @@ repository: public.ecr.aws/g2n4p2m7/margo-app
 
         mocker.patch("margot.services.push.credentials.check_credentials")
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
 
         with raises(ValueError, match="not valid SemVer"):
             push.push(
@@ -361,7 +361,7 @@ class TestPushAllReRaise:
         """Should re-raise ValueError from compose push if it's not 'not defined'."""
         mocker.patch("margot.services.push.credentials.check_credentials")
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
         mocker.patch(
             "margot.services.push._push_compose_or_quadlet",
             side_effect=ValueError("compose network error"),
@@ -402,13 +402,13 @@ quadlet:
 
         mocker.patch("margot.services.push.credentials.check_credentials")
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
 
         # Make _push_compose_or_quadlet raise only for QUADLET
         original = push._push_compose_or_quadlet  # noqa: SLF001
 
         def side_effect(*args: Any, **kwargs: Any) -> Any:
-            if args[-1] == PackageType.QUADLET:
+            if args[-3] == PackageType.QUADLET:
                 raise ValueError("quadlet permission denied")
             return original(*args, **kwargs)
 
@@ -490,7 +490,7 @@ repository: public.ecr.aws/g2n4p2m7/margo-app
 
         mocker.patch("margot.services.push.credentials.check_credentials")
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
 
         push.push(
             PackageType.MARGO,
@@ -520,7 +520,7 @@ repository: public.ecr.aws/g2n4p2m7/margo-app
 
         mocker.patch("margot.services.push.credentials.check_credentials")
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
 
         push.push(
             PackageType.MARGO,
@@ -637,7 +637,7 @@ compose:
 
         check_creds = mocker.patch("margot.services.push.credentials.check_credentials")
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
 
         push.push(
             PackageType.COMPOSE,
@@ -656,7 +656,7 @@ class TestPushVariantComponentCredentials:
         """Should call credentials.check_credentials for each variant push."""
         check_creds = mocker.patch("margot.services.push.credentials.check_credentials")
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
 
         push.push(
             PackageType.COMPOSE,
@@ -691,7 +691,7 @@ quadlet:
 
         mocker.patch("margot.services.push.credentials.check_credentials")
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
 
         targets = push.push(
             PackageType.QUADLET,
@@ -731,7 +731,7 @@ quadlet:
 
         mocker.patch("margot.services.push.credentials.check_credentials")
         mock_client = MagicMock()
-        mocker.patch("margot.services.push.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.push.OrasClient", return_value=mock_client)
 
         targets = push.push(
             PackageType.ALL,

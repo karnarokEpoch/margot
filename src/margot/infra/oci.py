@@ -386,3 +386,59 @@ class OrasClient(OrasClientLib):
         console.debug(f"  manifest uploaded ({response.status_code})")
         response = self.upload_manifest(manifest=manifest, container=container)
         self._check_200_response(response)
+
+    def check_write_access(self, registry: str, repository: str) -> None:
+        """Probe push permission via a POST-then-cancel blob-upload session. No data is written.
+
+        Initiates an OCI blob-upload session for the repository (this is what triggers the
+        registry's auth challenge for push scope) and immediately cancels it. No blob or
+        manifest is ever uploaded.
+
+        Args:
+            registry: OCI registry hostname (e.g. public.ecr.aws).
+            repository: Repository path within registry (e.g. g2n4p2m7/margo).
+
+        Raises:
+            PermissionError: If the registry responds 401 or 403 (no write access).
+            Exception: On other unexpected registry errors.
+        """
+        # Build a container for the probe target
+        target = f"{registry}/{repository}:probe"
+        console.debug(f"Probing write access: POST {target}/blobs/uploads/")
+
+        container = self.get_container(target)
+        self.auth.load_configs(container)
+
+        # Initiate blob upload session (POST to upload endpoint)
+        upload_url = container.upload_blob_url()
+        console.debug(f"  POST {upload_url}")
+
+        response = self.do_request(upload_url, "POST")
+
+        # Check response status
+        if response.status_code in (401, 403):
+            console.debug(f"  {response.status_code} — no write access")
+            raise PermissionError(
+                f"No write access to {registry}/{repository}: registry returned {response.status_code}"
+            )
+
+        if response.status_code not in (200, 201, 202):
+            console.debug(f"  {response.status_code} — unexpected error")
+            raise Exception(
+                f"Failed to probe write access to {registry}/{repository}: "
+                f"{response.status_code} {response.text}"
+            )
+
+        # On 202 (or any 2xx), attempt best-effort DELETE to cancel the session
+        if response.status_code == 202:
+            try:
+                location = self._get_location(response, container)
+                if location:
+                    console.debug(f"  DELETE {location}")
+                    delete_response = self.do_request(location, "DELETE")
+                    console.debug(f"  {delete_response.status_code} — cleanup complete")
+            except Exception as e:  # noqa: BLE001
+                # Cleanup failure is best-effort — log but don't raise
+                console.debug(f"  cleanup failed (best-effort, ignoring): {e}")
+
+        console.debug(f"Write access OK: {registry}/{repository}")
