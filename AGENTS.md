@@ -33,6 +33,8 @@ with `python-dev`, and public-site changes with `docs-writer`.
   fixes.
 - **`sprint-workflow`** (`.kiro/skills/sprint-workflow/SKILL.md`) — use only when planning a sprint, opening a release,
   or closing one out; not during doc or code work.
+- **`agent-workspace`** (`.kiro/skills/agent-workspace/SKILL.md`) — use only when splitting a sprint into parallel
+  `.wk-<name>/` git worktrees and orchestrating multi-agent work across them; not for single-branch tasks.
 
 ## Detailed steering
 

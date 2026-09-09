@@ -63,26 +63,32 @@ At sprint planning, one or more ROADMAP items are selected and moved from "Backl
 
 ### Sprint → feature branches → `release/<version>` branch
 
-Git orchestration is **owner-owned**. The agent implements; it does **not** manage branches, remotes, or reviews.
+Git orchestration is split across three roles, gated by two owner checkpoints. Parallel-worktree mechanics live in the **`agent-workspace`** skill; this is the summary.
 
 **The project owner:**
 
 1. Creates the `release/<version>` branch (e.g. `release/0.2.0`).
-2. Creates a feature branch per sprint item and checks the agent out onto it.
-3. Pushes commits, opens the PR onto the release branch, reviews, and merges.
-4. Merges the release branch to `main`, which triggers the GitHub release workflow (auto tag, build, publish).
+2. **Gate 1:** validates the planner's item → branch → worktree split before any branch is created.
+3. **Gate 2:** reviews the completed, committed work before it is pushed.
+4. Opens the PR onto the release branch, reviews, and merges. Merging the release branch to `main` triggers the GitHub release workflow (auto tag, build, publish).
 
-**The agent (on a feature branch the owner has already set up):**
+**The planner** (see `agent-workspace` for the full flow and commands):
 
-1. Implements the sprint items following the sprint file as authoritative design.
-2. Commits its work with conventional-commit messages — **one or more commits per task**, never one bulk commit for the whole sprint. Each task (a checkable step / sprint item) lands as at least one self-contained commit, so the history is reviewable task-by-task and the owner can drop or reorder tasks cleanly.
+1. Proposes the item → branch → `.wk-<name>/` worktree split for owner validation (Gate 1).
+2. After Gate 1: creates each branch + worktree (`git worktree add -b`) and launches a dev agent into each.
+3. After Gate 2: pushes each branch and removes the worktrees. **Never** opens or merges PRs.
+
+**The dev agent (inside its assigned `.wk-<name>/` worktree):**
+
+1. Implements its item following the sprint file as authoritative design.
+2. Commits its work with conventional-commit messages — **one or more commits per task**, never one bulk commit for the whole sprint. Each task (a checkable step / sprint item) lands as at least one self-contained commit, so history is reviewable task-by-task and the owner can drop or reorder tasks cleanly.
 3. Runs close-out tasks it is responsible for — updating ROADMAP, docs, deleting the sprint file (see Close-out checklist below).
 
-The agent **must not**: create `release/` or feature branches, `git push`, open or merge PRs, or merge to `main`. If a step requires any of those, the agent stops and hands back to the owner. Commit — never push — is the agent's boundary.
+The dev agent **must not**: create branches or worktrees, `git push`, `git worktree remove`, or open/merge PRs. **Commit — never push — is the dev agent's boundary.** If a step requires more, it hands back to the planner (who acts only after the owner's gates).
 
 ### Release → Close-out
 
-Close-out work is done by the agent **on the feature branch, before the owner pushes and opens the PR**. The agent commits these changes; the owner handles push/PR/merge:
+Close-out work is done by the dev agent **on its worktree branch, before Gate 2 review**. The agent commits these changes; after the owner's review the planner pushes, and the owner opens the PR and merges:
 
 - [ ] **Docs updated.** `make docs-check` passes (strict build). User-facing behavior is documented in `docs/`.
 - [ ] **ROADMAP updated.** Completed sprint moved to the Completed Sprints table **with the GitHub release link** (e.g. `[0.2.0](https://github.com/karnarokEpoch/margot/releases/tag/0.2.0)`). Backlog reviewed and trimmed if needed.
@@ -127,9 +133,9 @@ Sprint 9 ships remote describe/verify. Sprint 10 ships exit codes. Three fixes l
 
 Both releases use the same `release/<version>` branch and auto-release workflow; the cardinality is transparent.
 
-## Close-out checklist (agent commits on the feature branch; owner merges)
+## Close-out checklist (dev agent commits; planner pushes after review; owner merges)
 
-Use this for every release. The agent completes and commits these on its feature branch; the owner then pushes, opens the PR, and merges. It is the gate to green.
+Use this for every release. The dev agent completes and commits these on its worktree branch; after Gate 2 review the planner pushes, and the owner opens the PR and merges. It is the gate to green.
 
 ### Documentation
 
@@ -159,5 +165,6 @@ Use this for every release. The agent completes and commits these on its feature
 ## See also
 
 - `sprint-template.md` — uniform sprint-file shape (copy into `.kiro/sprints/sprint-N.md`).
+- `agent-workspace` skill — parallel `.wk-<name>/` worktree orchestration: split, gates, `git worktree` commands, and in-worktree agent rules.
 - `ROADMAP.md` — current queue of work.
 - `CONTRIBUTING.md` — release branch mechanics and CI flow.

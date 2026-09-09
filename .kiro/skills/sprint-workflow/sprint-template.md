@@ -75,7 +75,7 @@ What "done" looks like for this sprint. Checklist format:
 - [ ] Docs updated and `make docs-check` passes.
 - [ ] No TODOs left (or explicitly deferred to next sprint in a comment).
 - [ ] Each task committed as one or more commits on the feature branch (conventional-commit messages) — no bulk end-of-sprint commit.
-- [ ] Handed back to the owner for push, PR onto the release branch, review, and merge (agent does not push or open PRs).
+- [ ] Handed back for review (Gate 2). After approval the planner pushes; the owner opens the PR onto the release branch and merges. The agent does not push, open PRs, or manage worktrees.
 
 ---
 
