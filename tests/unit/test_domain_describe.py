@@ -1148,7 +1148,6 @@ class TestOrphanReportBuilder:
 
     def test_build_orphan_report_all_clean_returns_empty(self) -> None:
         """Should return all-empty report when configuration is fully connected."""
-        from margot.domain.describe import build_orphan_report
 
         # Fully connected config: all params referenced, all schemas used, no dangling components
         config = Configuration(
@@ -1203,7 +1202,6 @@ class TestOrphanReportBuilder:
 
     def test_build_orphan_report_unreferenced_parameters(self) -> None:
         """Should detect parameters not referenced by any setting."""
-        from margot.domain.describe import build_orphan_report
 
         config = Configuration(
             sections=[],
@@ -1221,7 +1219,6 @@ class TestOrphanReportBuilder:
 
     def test_build_orphan_report_unresolved_schema_references(self) -> None:
         """Should detect settings referencing non-existent schemas."""
-        from margot.domain.describe import build_orphan_report
 
         config = Configuration(
             sections=[
@@ -1270,7 +1267,6 @@ class TestOrphanReportBuilder:
 
     def test_build_orphan_report_unreferenced_schemas(self) -> None:
         """Should detect schemas declared but not used by any setting."""
-        from margot.domain.describe import build_orphan_report
 
         config = Configuration(
             sections=[
@@ -1322,7 +1318,6 @@ class TestOrphanReportBuilder:
 
     def test_build_orphan_report_dangling_component_references(self) -> None:
         """Should detect targets naming components not in the index."""
-        from margot.domain.describe import build_orphan_report
 
         config = Configuration(
             sections=[
@@ -1376,7 +1371,6 @@ class TestOrphanReportBuilder:
 
     def test_build_orphan_report_all_four_categories(self) -> None:
         """Should detect all four categories of orphans in a complex configuration."""
-        from margot.domain.describe import build_orphan_report
 
         config = Configuration(
             sections=[
@@ -1449,7 +1443,6 @@ class TestOrphanReportBuilder:
 
     def test_build_orphan_report_multiple_dangling_refs_same_parameter(self) -> None:
         """Should report all dangling component refs, even multiple in same parameter."""
-        from margot.domain.describe import build_orphan_report
 
         config = Configuration(
             sections=[
@@ -1502,7 +1495,6 @@ class TestOrphanReportBuilder:
 
     def test_build_orphan_report_handles_missing_configuration_key(self) -> None:
         """Should gracefully handle missing configuration key in doc."""
-        from margot.domain.describe import build_orphan_report
 
         config = Configuration(
             sections=[],
