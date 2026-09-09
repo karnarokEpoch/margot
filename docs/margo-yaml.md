@@ -43,16 +43,26 @@ quadlet:
 | Field | Required | Description |
 | ------- | ---------- | ------------- |
 | `apiVersion` | Yes | Config schema version. Currently `v1`. |
-| `id` | Yes | Margo application identifier. Lowercase letters, digits, and dashes only. Used as the base for derived component names and deployment profile IDs. |
-| `name` | Yes | Application name. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation. |
-| `version` | Yes | Manifest/package version (like Helm's chart version). Exposed as `manifest.version` in templates. |
-| `appVersion` | No | Version of the deployed application (like Helm's `appVersion`). Not validated as SemVer. Exposed as `manifest.appVersion` in templates. Useful for passing as a parameter to deployment profiles (e.g. `image.tag`). |
-| `description` | Yes | Short description. Used in OCI description annotation and exposed as `manifest.description` in templates. |
-| `annotations` | No | Arbitrary key/value pairs passed as OCI annotations. |
+| `id` | Yes | Margo application identifier. Stable machine identifier — must not change across releases. Used as the base for derived component names and deployment profile IDs. Exposed as `manifest.id` in templates. |
+| `name` | Yes | Application name. Used in tarball filenames (`<name>-<version>.tgz`) and OCI title annotation. Exposed as `manifest.name` in templates. |
+| `version` | Yes | Margo artifact OCI tag and manifest version. Must be a valid OCI tag; SemVer recommended. Exposed as `manifest.version` in templates. |
+| `appVersion` | No | Version of the deployed application (like Helm's `appVersion`). Not validated as SemVer. Exposed as `manifest.appVersion` in templates (empty string if absent). Useful for passing as a parameter to deployment profiles (e.g. `image.tag`). |
+| `description` | Yes | Short description. Used in OCI description annotation. Exposed as `manifest.description` in templates. |
+| `directory` | No | Path to the margo artifact source directory. Default: `margo`. Exposed as `manifest.directory` in templates. |
+| `repository` | No | Default OCI repository for all artifacts. Overridable per component. Falls back to tool config / CLI / env var. Exposed as `manifest.repository` in templates. |
+| `annotations` | No | Arbitrary key/value pairs. Exposed as `manifest.annotations` dict in templates. |
 | `author` | No | List of authors, each with `name` (optional) and `email` (optional). Maps to `metadata.catalog.author` in the Margo spec. |
 | `organization` | No | List of organizations, each with `name` (required) and `site` (optional). Maps to `metadata.catalog.organization` in the Margo spec. |
-| `directory` | No | Path to the margo artifact source directory. Default: `margo`. |
-| `repository` | No | Default OCI repository for all artifacts. Overridable per component. Can also be set via tool config / CLI / env. |
+
+### Missing `margo.yaml`
+
+If `margo.yaml` is absent from the current directory, margot fails with:
+
+```
+margo.yaml not found in current directory. Run margot init or create it manually.
+```
+
+Use `--project-dir` to point at a different directory.
 
 ## Components
 
@@ -71,11 +81,16 @@ A systemd Quadlet deployment artifact. Same structure and variant support as `co
 
 | Field | Required | Default | Description |
 | ------- | ---------- | --------- | ------------- |
-| `version` | Yes | — | Base version for the component. Used directly as OCI tag in flat mode; used as the derivation base for variant versions. |
-| `repository` | No | Global `repository` from tool config / CLI / env | OCI repository for this component. |
-| `component` | No | `<id>-<type>` | Margo component name (developer-owned). Flat mode only. |
+| `version` | Yes | — | Base version for the component. Used directly as OCI tag in flat mode; used as the derivation base for variant versions when `variants` is declared. |
+| `repository` | No | Global `repository` from tool config / CLI / env | OCI repository for this component. Overrides the global `repository`. |
+| `component` | No | `<id>-<type>` (flat) | Margo component name (developer-owned). margot computes the default but never overwrites an explicitly set value. |
 | `directory` | No | `<type>` (i.e. `compose` or `quadlet`) | Path (relative to project root) to the component source directory. |
 | `image` | No | — | `{search, replace}` block — swaps a dev-local image reference for the target one at build time. See [Image search-and-replace](#image-search-and-replace). Not available for `margo`. |
+
+#### Component name defaults
+
+- **Flat (no `variants`):** `{id}-{type}` — e.g. `com-example-nginx-quadlet`
+- **With variants:** `{id}-{type}-{variant-name}` — e.g. `myapp-compose-default`
 
 ## Image search-and-replace
 
@@ -167,6 +182,7 @@ With the example above (`version: 2.1.0`, compose variants `default` and `minima
   any other variant.
 - When `variants` is present, the component-level `version` is used as the derivation base, not as a direct OCI tag.
 - `--variant all` builds every declared variant. `--variant NAME` selects one.
+- Variant names that collide with reserved field names (`directory`, `repository`, `variants`, `version`, `tag`, `ref`, `component`) are rejected at parse time with a clear error.
 
 ## Version strings and OCI tags
 

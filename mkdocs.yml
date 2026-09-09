@@ -24,6 +24,16 @@ theme:
 nav:
   - Home: index.md
   - margo.yaml: margo-yaml.md
+  - Configuration: config.md
+  - Concepts: concepts.md
+  - Commands:
+    - build: commands/build.md
+    - push: commands/push.md
+    - pull: commands/pull.md
+    - fetch: commands/fetch.md
+    - verify: commands/verify.md
+    - describe: commands/describe.md
+    - auth: commands/auth.md
   - Examples:
     - Minimal (Helm): examples/minimal.md
     - Basic (Quadlet): examples/basic-quadlet.md
