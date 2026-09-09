@@ -1,11 +1,12 @@
 # margot — Roadmap
 
-Agile, vertical-slice roadmap. Each sprint ships one working, end-to-end capability
-through all layers rather than building layers horizontally.
+Forward register: planned features, fixes to make, ideas, and backlog. A queue of intent, not a spec.
 
-See [FEATURES.md](FEATURES.md) for the full spec and [TESTING.md](TESTING.md) for the
-test plan. Where this roadmap diverges from FEATURES.md, this roadmap wins for
-sequencing; FEATURES.md is updated as items land (see backlog).
+The authority model:
+- **ROADMAP.md** (this file) — what to build next.
+- **`.kiro/sprints/sprint-N.md`** — authoritative design while a release is being built; deleted on close-out.
+- **`docs/`** — standing source of truth for shipped behavior.
+- **Git history** — archives of each sprint's design decisions via close-out commits.
 
 ---
 
@@ -55,11 +56,11 @@ Unordered within groups; sequencing decided at sprint planning.
 ### Cross-cutting
 
 * ~~`margot push --dry-run` — validate readiness without pushing, `Dry run OK: ...` output~~
-  ✓ done (post-Sprint 4, unplanned addition — see `FEATURES.md` → `margot push`)
+  ✓ done (post-Sprint 4, unplanned addition)
 * ~~`domain/tags.py` OCI tag + SemVer validation~~ ✓ done (Sprint 3)
 * ~~`domain/metadata.py` `margo.yaml` project descriptor parsing~~ ✓ done (Sprint 3)
 * ~~`config.py` full dynaconf layering~~ ✓ done (Sprint 3)
-* ~~**Update FEATURES.md** `fetch` section: positional URI + raw JSON~~ ✓ done
+* ~~**Update docs** `fetch` section: positional URI + raw JSON~~ ✓ done
 
 ---
 

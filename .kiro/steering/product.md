@@ -27,5 +27,4 @@ The shipped CLI provides `build`, `push`, `pull`, `fetch`, `verify`, `describe`,
 application artifacts plus compose and quadlet components. `verify` is a schema-validation gate; `describe` is a
 read-only human review view.
 
-`FEATURES.md` is authoritative for user-visible behavior, command contracts, OCI media types, and configuration.
-`ROADMAP.md` is authoritative for planned work and sequencing.
+`docs/` (MkDocs) is the standing source of truth for shipped behavior. `ROADMAP.md` is authoritative for planned work and sequencing. When a release is being built, `.kiro/sprints/sprint-N.md` is the authoritative design for that sprint's features.

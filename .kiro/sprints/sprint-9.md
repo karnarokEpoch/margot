@@ -25,7 +25,7 @@ ______________________________________________________________________
   checks credential expiry, and obtains a manifest through `infra/oci.py::OrasClient`.
 - `services/pull.py::pull_artifact` performs the same registry checks and downloads artifact layers. Margo artifacts use
   the ORAS pull path and write their layers, including `app.yaml`, to the caller-provided output directory.
-- `pull_artifact` currently adds a SemVer gate that conflicts with `FEATURES.md`'s documented behavior: `pull` and
+- `pull_artifact` currently adds a SemVer gate that conflicts with the documented behavior: `pull` and
   `fetch` are inspection commands and must retrieve arbitrary existing OCI references, including legacy tags. This
   defect would reject remote inspection references such as `public.ecr.aws/g2n4p2m7/margo:1.1.0_legacy-manifest`.
 - `artifact_type_to_package_type` maps the OCI manifest's `artifactType` to `PackageType`. Only `PackageType.MARGO`
@@ -178,7 +178,7 @@ test contacts a live registry.
 
 ### Documentation and definition of done
 
-- Update `FEATURES.md` command contracts for `describe` and `verify`: optional URI, local-vs-remote behavior, mutual
+- Update the relevant docs command-reference pages for `describe` and `verify`: optional URI, local-vs-remote behavior, mutual
   exclusion, margo-only type gate, arbitrary existing OCI tags, temporary/non-persistent pull, remote subtitle/OCI line,
   and unchanged verification flags.
 - Update the relevant user documentation (`README.md`, `docs/index.md`, and command documentation when introduced) with

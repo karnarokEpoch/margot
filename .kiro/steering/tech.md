@@ -16,6 +16,14 @@ description: >
   OCI registry operations, and LinkML validates Margo application descriptions.
 - Use `uv sync` for setup and invoke project tools through `uv run` or Make targets.
 
+### Design choices
+
+**Typer over raw Click:** Type annotations become CLI args automatically, keeping code minimal. Rich output integration is first-class.
+
+**dynaconf over custom config parser:** Supports `settings.toml` + `settings.local.toml` + env vars (`MARGOT_` prefix) + CLI flags with priority layering, no bespoke code needed.
+
+**oras-py over ORAS CLI subprocess:** The official Python SDK from the ORAS project (CNCF sandbox). Actively maintained, programmatic control of credential lifecycle, and no external binary dependency.
+
 ## Standard checks
 
 - `make test` — pytest with the required coverage threshold.

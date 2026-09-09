@@ -9,11 +9,10 @@ stays pure.
 - [Product context](.kiro/steering/product.md) — purpose, users, and current surface.
 - [Structure context](.kiro/steering/structure.md) — repository map and placement rules.
 - [Technology context](.kiro/steering/tech.md) — runtime, commands, constraints, and releases.
-- [FEATURES.md](FEATURES.md) — authoritative behavior, architecture, configuration, and OCI media types.
+- [ROADMAP.md](ROADMAP.md) — forward register: planned features, fixes, ideas, and backlog.
 - [TESTING.md](TESTING.md) — test strategy and coverage requirements.
-- [ROADMAP.md](ROADMAP.md) — accepted delivery sequence and planned work.
 
-Read the context relevant to the task; `FEATURES.md` wins over user documentation when behavior disagrees.
+**Authority chain:** `ROADMAP.md` (future) → `.kiro/sprints/sprint-N.md` (in-flight design, while actively building) → `docs/` (shipped behavior).
 
 ## Route work to the right agent
 
