@@ -354,10 +354,43 @@ Push built artifacts to OCI registry via ORAS.
 ```
 margot push [--type margo|compose|quadlet|all] [--project-dir PATH]
               [--registry REG] [--repository REPO] [--build-dir DIR]
-              [--variant VARIANT]
+              [--variant VARIANT] [--dry-run]
 ```
 
 **Prereq check:** validate the tag is SemVer before doing anything else. Fail fast.
+
+**`--dry-run`:** validate that a push would succeed without pushing anything. Runs the
+same checks as a real push — OCI tag / SemVer validation, built-artifact-exists-on-disk
+check, and local credential-expiry check (`credentials.check_credentials`) — plus one
+additional check a real push doesn't need on its own: a live **write-access probe**
+against the registry. No artifact content is ever inspected or uploaded.
+
+The probe reuses the OCI blob-upload-session handshake (the same one a real push starts
+before actually uploading a layer): `POST /v2/<repository>/blobs/uploads/` with the
+resolved registry credentials. The registry's response tells us what we need without
+writing anything:
+
+- `202 Accepted` (+ `Location` header) → write access confirmed. The opened upload
+  session is immediately cancelled with a best-effort `DELETE` on that location — if the
+  registry doesn't support cancellation, the session simply expires server-side on its
+  own; either way, nothing is committed.
+- `401` / `403` → no write access. Reported as a clear error, exit 1.
+- Any other status → surfaced as-is, exit 1 — not swallowed as a generic failure.
+
+The probe runs once per unique `(registry, repository)` pair per invocation — pushing
+`--type all --variant all` against components that share one repository does not open a
+session per variant.
+
+On success, each target that would be pushed is reported the same shape as a real push,
+prefixed to distinguish it from an actual push:
+
+```
+Dry run OK: public.ecr.aws/g2n4p2m7/margo:1.0.0
+Dry run OK (simple): public.ecr.aws/g2n4p2m7/margo:1.0.0_compose-simple
+```
+
+A real push (no `--dry-run`) reports `Pushed: ...` / `Pushed (<variant>): ...` exactly as
+before — `--dry-run` changes nothing about default push behavior.
 
 **margo push:**
 
@@ -401,11 +434,12 @@ client.push(
 Pull OCI artifact layers to a local directory without extraction.
 
 ```
-margot pull <uri> [--output DIR]
+margot pull <uri> [--output DIR] [--recursive]
 ```
 
 `<uri>` is the full OCI reference (e.g. `public.ecr.aws/g2n4p2m7/margo:1.0.0`).
 `--output` / `-o` defaults to `.` (current directory).
+`--recursive` / `-r` (optional, margo-only): also pull declared components.
 
 No `--type` / `--version` / `--registry` / `--repository` flags — the URI is fully
 caller-provided, same shape as `fetch`. No SemVer validation: `pull` retrieves
@@ -425,9 +459,35 @@ arbitrary existing artifacts. Auth: anonymous only.
    from the layer's `org.opencontainers.image.title` annotation, or from
    manifest-level `org.opencontainers.image.title` + `org.opencontainers.image.version`
    annotations (`<title>-<version>.tgz`).
-6. Report each written file path. If no layers are pulled, report that.
+6. If `--recursive` is set and artifact is margo:
+   - Locate `app.yaml` in the pulled layers.
+   - Parse it and extract component references from `deploymentProfiles[].components[]`:
+     each component's `properties.repository` (strip `oci://` scheme) + `properties.revision`
+     form an OCI ref. Components missing either field are skipped with a warning.
+   - Deduplicate components by `(repository, tag)` pair, preserving first-seen order and name.
+   - For each component: recursively pull into `outdir/<component-name>/` using the
+     component's OCI ref (component pulls use `recursive=False` since components don't
+     nest).
+   - If `app.yaml` cannot be located, parsed, or recursion fails for a component,
+     log a warning but do not fail the root pull.
+7. If `--recursive` is set but artifact is compose/quadlet/unknown, it is a no-op —
+   behavior identical to `--recursive=False`.
+8. Report each written file path. If no layers are pulled, report that.
 
 No extraction — `.tgz` blobs are written as-is.
+
+**Output structure for recursive pulls:**
+
+```
+outdir/
+  app.yaml
+  [other root layers]
+  database/
+    postgres-14.0.0.tgz
+  cache/
+    redis-7.0.0.tgz
+  [... more components]
+```
 
 ---
 
@@ -572,7 +632,7 @@ validation, no network.
 
 ```
 margot describe [--project-dir PATH] [--manifest PATH]
-                [--section metadata|profiles|config|extensions]
+                [--section metadata|profiles|config-first|component-first|extensions|orphans]
 ```
 
 **Descriptor resolution:** identical to `verify` — `--manifest`, else `margo.yaml`
@@ -582,14 +642,17 @@ margot describe [--project-dir PATH] [--manifest PATH]
 **Blocks rendered**, always in this order, each as a full-width stacked panel:
 
 1. **Identity + catalog** — `apiVersion` as the panel title, `id`, `metadata.version` and
-   `metadata.name` as a grid, then labeled `Description:` and `Catalog:` blocks. No
-   catalog at all renders as `Catalog: None`. `kind` is not printed: the load gate already
-   refuses anything that is not an `ApplicationDescription`. The panel subtitle is the
-   resolved descriptor path, marked `(rendered)` when it came from `app.yaml.jinja`.
+   `metadata.name` as a grid, then the margo app description artifact's OCI URI (`repository:tag`,
+   where `tag = version with '+' replaced by '_'`), then labeled `Description:` and `Catalog:` blocks.
+   The OCI line renders as `OCI: {repository}:{tag}` when `margo.yaml` has a `repository` field,
+   or `OCI: None` when no repository is configured. No catalog at all renders as `Catalog: None`.
+   `kind` is not printed: the load gate already refuses anything that is not an `ApplicationDescription`.
+   The panel subtitle is the resolved descriptor path, marked `(rendered)` when it came from `app.yaml.jinja`.
 2. **Deployment profiles** — one tree per entry: `type` and `id`, `description`, the
    profile's own `requiredResources` (`cpu`/`memory`/`storage` on one line, `peripherals`
    and `interfaces` as separate lines when present), then `components[]` → `properties`.
-3. **Configuration** — a single tree carrying everything configurable:
+3. **Configuration (config-first)** — a single tree carrying everything configurable, walked
+   top-down from configuration sections:
 
    ```text
    section → setting (+ immutable) → Schema: <name> <dataType> · <constraints>
@@ -601,15 +664,27 @@ margot describe [--project-dir PATH] [--manifest PATH]
    Each pointer reports how many components it targets against the total number of
    distinct components declared across all deployment profiles. Parameters that no
    `Setting` references are listed in a trailing subtree so they stay visible.
-4. **Extensions** — `x-placeholder-extensions`, rendered only when present.
+4. **Components (component-first)** — an alternative view of configuration walked
+   component-first: each component lists its incoming parameters (via their pointers)
+   with their values, setting names, and schemas. This is useful for understanding what
+   a specific component needs to be configured. Rendered only when explicitly requested
+   via `--section component-first`; not in the default view.
+5. **Extensions** — `x-placeholder-extensions`, rendered only when present.
+6. **Orphans/dead-ends** — coherence checks for dangling or unreferenced descriptor elements.
+   Detects four categories (opt-in via `--section orphans`, not in default view):
+   - Unreferenced parameters: a `Parameter` not referenced by any `Setting`.
+   - Unresolved schema references: a `Setting` whose `schema` name doesn't resolve to a declared schema.
+   - Unreferenced schemas: a `Schema` declared but not referenced by any `Setting`.
+   - Dangling component references: a `Parameter.targets[].components` entry naming a component absent from the component index (across all deployment profiles).
+   All checks are purely local, no network calls. These are observations only; `describe` always exits 0. Use `margot verify` for validation gates.
 
 There is **no parameters block**: parameters are reached through configuration, which is
 the order a reviewer thinks in — what can be configured, what validates it, what it
 defaults to, where it lands.
 
-Panel titles carry counts (`7 profiles · 9 components`, `6 sections · 22 settings`).
-`--section` **filters** which blocks appear; it never reorders them, so flag order does
-not change the output. `metadata` covers identity and catalog together.
+Panel titles carry counts (`7 profiles · 9 components`, `6 sections · 22 settings`,
+`8 components`). `--section` **filters** which blocks appear; it never reorders them, so
+flag order does not change the output. `metadata` covers identity and catalog together.
 
 `type` and component `properties` keys are printed verbatim — no enum check, no fixed
 property lookup. This is deliberate: margot supports a `quadlet` deployment profile ahead

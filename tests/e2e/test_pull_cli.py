@@ -449,3 +449,93 @@ class TestPullCLIVerbosity:
         assert "warning:" in stderr_text
         # Pulled file path should be in stdout, not stderr
         assert pulled_file in stdout_text
+
+
+class TestPullCLIRecursive:
+    """E2E tests for --recursive/-r flag on pull command."""
+
+    def test_recursive_flag_in_help(self) -> None:
+        """--recursive/-r flag should appear in pull --help."""
+        result = runner.invoke(app, ["pull", "--help"])
+        plain = _strip_ansi(result.stdout)
+
+        assert result.exit_code == 0
+        assert "--recursive" in plain or "-r" in plain
+
+    def test_recursive_flag_basic_wiring(self, mocker: Any, tmp_path: Any) -> None:
+        """--recursive flag should pass through to pull_artifact."""
+        pulled_file = str(tmp_path / "margo.yaml")
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_margo_manifest()
+        mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        # Mock pull_artifact to capture the recursive parameter
+        pull_artifact_mock = mocker.patch(
+            "margot.commands.pull.pull_service.pull_artifact",
+            return_value=[pulled_file],
+        )
+
+        result = runner.invoke(
+            app,
+            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--recursive"],
+        )
+
+        assert result.exit_code == 0
+        # Verify recursive=True was passed to pull_artifact
+        pull_artifact_mock.assert_called_once()
+        call_kwargs = pull_artifact_mock.call_args[1]
+        assert call_kwargs.get("recursive") is True
+
+    def test_recursive_short_flag(self, mocker: Any, tmp_path: Any) -> None:
+        """--recursive should work with short flag -r."""
+        pulled_file = str(tmp_path / "margo.yaml")
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_margo_manifest()
+        mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        # Mock pull_artifact to capture the recursive parameter
+        pull_artifact_mock = mocker.patch(
+            "margot.commands.pull.pull_service.pull_artifact",
+            return_value=[pulled_file],
+        )
+
+        result = runner.invoke(
+            app,
+            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "-r"],
+        )
+
+        assert result.exit_code == 0
+        # Verify recursive=True was passed to pull_artifact
+        pull_artifact_mock.assert_called_once()
+        call_kwargs = pull_artifact_mock.call_args[1]
+        assert call_kwargs.get("recursive") is True
+
+    def test_no_recursive_flag_defaults_false(self, mocker: Any, tmp_path: Any) -> None:
+        """Without --recursive flag, recursive should default to False."""
+        pulled_file = str(tmp_path / "margo.yaml")
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_margo_manifest()
+        mock_client.pull.return_value = [pulled_file]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        # Mock pull_artifact to capture the recursive parameter
+        pull_artifact_mock = mocker.patch(
+            "margot.commands.pull.pull_service.pull_artifact",
+            return_value=[pulled_file],
+        )
+
+        result = runner.invoke(
+            app,
+            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0"],
+        )
+
+        assert result.exit_code == 0
+        # Verify recursive=False was passed (default)
+        pull_artifact_mock.assert_called_once()
+        call_kwargs = pull_artifact_mock.call_args[1]
+        assert call_kwargs.get("recursive") is False

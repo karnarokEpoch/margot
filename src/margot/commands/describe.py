@@ -22,13 +22,16 @@ from margot.domain.describe import (
     ConfigurationSection,
     DeploymentProfile,
     Identity,
+    OrphanReport,
     Parameter,
     Schema,
     Setting,
     build_catalog,
+    build_component_first,
     build_configuration,
     build_deployment_profiles,
     build_identity,
+    build_orphan_report,
     component_index,
 )
 from margot.services import describe as describe_service
@@ -126,7 +129,7 @@ def build_identity_catalog_panel(identity: Identity, catalog: Catalog | None, re
     """Build the identity+catalog panel.
 
     Title is apiVersion. Subtitle is resolved path, suffixed with (rendered) if templated.
-    Grid shows id/version/name. Description and Catalog follow.
+    Grid shows id/version/name. OCI URI line follows. Description and Catalog follow.
     """
     # Detect if path looks like a temporary file (ends in .yaml or similar, with temp markers)
     is_rendered = "/margot-" in resolved_path and resolved_path.endswith(".yaml")
@@ -145,6 +148,18 @@ def build_identity_catalog_panel(identity: Identity, catalog: Catalog | None, re
     grid.add_row("name", _plain(identity.name), "", "")
     body.append(grid)
     body.append(Text())
+
+    # OCI URI line
+    if identity.oci_uri is None:
+        oci_line = Text("OCI: ", style="bold")
+        oci_line.append("None", style="dim")
+        body.append(oci_line)
+    else:
+        oci_table = Table.grid(padding=(0, 1))
+        oci_table.add_column(style="bold")
+        oci_table.add_column(overflow="fold")
+        oci_table.add_row("OCI:", _plain(identity.oci_uri))
+        body.append(oci_table)
 
     # Description
     desc_table = Table.grid(padding=(0, 1))
@@ -310,9 +325,7 @@ def _add_targets_to_node(param_node: Any, param: Parameter, total_components: in
             pointer_line = Text("Pointer: ", style="cyan")
             pointer_line.append(_literal(target.pointer))
             n_components = len(target.components or [])
-            pointer_line.append(
-                f"  ({n_components}/{total_components} components)", style="dim"
-            )
+            pointer_line.append(f"  ({n_components}/{total_components} components)", style="dim")
             pointer_node = param_node.add(pointer_line)
 
             comps = target.components or []
@@ -350,18 +363,14 @@ def _build_section_tree(section: ConfigurationSection, total_components: int, in
 
         # Add targets and components if parameter is resolved
         if setting.parameter_resolved:
-            _add_targets_to_node(
-                param_node, setting.parameter_resolved, total_components, index
-            )
+            _add_targets_to_node(param_node, setting.parameter_resolved, total_components, index)
 
     return section_tree
 
 
 def _build_unreferenced_tree(unreferenced: list[str]) -> Tree:
     """Build the tree for unreferenced parameters."""
-    orphan_root = Text(
-        f"Unreferenced parameters ({len(unreferenced)})", style="bold yellow"
-    )
+    orphan_root = Text(f"Unreferenced parameters ({len(unreferenced)})", style="bold yellow")
     orphan_tree = Tree(orphan_root)
     for param_name in unreferenced:
         param_node = orphan_tree.add(Text(escape(param_name)))
@@ -405,6 +414,82 @@ def build_configuration_panel(config: Configuration, index: list[str]) -> Panel:
     return Panel(Group(*interleaved), title=title)
 
 
+def build_component_first_panel(config: Configuration, index: list[str]) -> Panel:
+    """Build the component-first panel with component-indexed parameter edges.
+
+    Title includes component count. Each component is a tree root with its incoming
+    parameters as edges: parameter (via pointer) → Setting: <name> → Schema.
+
+    Args:
+        config: The Configuration dataclass.
+        index: The component index (in declaration order).
+
+    Returns:
+        A Panel with the component-first view.
+    """
+    title = f"Components ({len(index)} components)"
+
+    if not index:
+        return Panel(Text("none", style="dim"), title=title)
+
+    # Build the component-first view from domain layer
+    component_first_view = build_component_first(config, index)
+
+    blocks: list = []
+
+    for comp_node in component_first_view.components:
+        # Component root
+        root_text = Text(escape(comp_node.name or ""), style="bold")
+        root_text.append("  [Component]", style="dim")
+        tree = Tree(root_text)
+
+        if not comp_node.parameters:
+            # No parameters targeting this component
+            tree.add(Text("no parameters", style="dim"))
+        else:
+            # Build parameter edges
+            for edge in comp_node.parameters:
+                # Parameter line: parameter name → pointer
+                param_line = Text(escape(edge.parameter_name or ""), style="bold")
+                param_line.append("  ")
+                param_line.append(_literal(edge.pointer))
+                param_line.append("  [Parameter]", style="dim")
+                param_node = tree.add(param_line)
+
+                # Value line
+                value_line = Text("Value: ", style="cyan")
+                value_line.append(_literal(edge.value))
+                param_node.add(value_line)
+
+                # Setting line
+                setting_line = Text("Setting: ", style="cyan")
+                setting_line.append(escape(edge.setting_name or ""))
+                param_node.add(setting_line)
+
+                # Schema line (reuse the existing formatter)
+                # Create a minimal Setting object for schema line formatting
+                if edge.schema:
+                    schema_line = Text("Schema: ", style="cyan")
+                    schema_line.append(escape(edge.schema.name or ""))
+                    schema_line.append("  ")
+                    schema_line.append(escape(edge.schema.data_type or ""))
+                    if edge.schema.data_type:
+                        schema_line.append("  ")
+                        schema_line.append(_constraint_format(edge.schema))
+                    param_node.add(schema_line)
+
+        blocks.append(tree)
+
+    # Interleave with blank lines
+    interleaved: list = []
+    for block in blocks:
+        interleaved.extend([block, Text()])
+    if interleaved:
+        interleaved.pop()  # Remove trailing blank
+
+    return Panel(Group(*interleaved), title=title)
+
+
 def build_extensions_panel(extensions: dict) -> Panel | None:
     """Build extensions panel when x-placeholder-extensions is present.
 
@@ -426,6 +511,95 @@ def build_extensions_panel(extensions: dict) -> Panel | None:
     return Panel(grid, title="Extensions")
 
 
+def build_orphans_panel(orphan_report: OrphanReport) -> Panel:  # noqa: PLR0912, PLR0915, C901
+    """Build the orphans/dead-ends panel.
+
+    Args:
+        orphan_report: An OrphanReport dataclass from build_orphan_report.
+
+    Returns:
+        A Panel with the orphan report organized into four category subtrees.
+    """
+    total_orphans = (
+        len(orphan_report.unreferenced_params)
+        + len(orphan_report.unresolved_schema_refs)
+        + len(orphan_report.unreferenced_schemas)
+        + len(orphan_report.dangling_component_refs)
+    )
+
+    title = f"Orphans/dead-ends ({total_orphans} total)"
+
+    if total_orphans == 0:
+        return Panel(Text("none", style="dim"), title=title)
+
+    blocks: list = []
+
+    # 1. Unreferenced parameters
+    unreferenced_root = Text("Unreferenced parameters", style="bold")
+    unreferenced_root.append(f"  ({len(orphan_report.unreferenced_params)})", style="dim")
+    unreferenced_tree = Tree(unreferenced_root)
+    if not orphan_report.unreferenced_params:
+        unreferenced_tree.add(Text("none", style="dim"))
+    else:
+        for param_name in orphan_report.unreferenced_params:
+            unreferenced_tree.add(Text(escape(param_name)))
+    blocks.append(unreferenced_tree)
+
+    # 2. Unresolved schema references
+    unresolved_root = Text("Unresolved schema references", style="bold")
+    unresolved_root.append(f"  ({len(orphan_report.unresolved_schema_refs)})", style="dim")
+    unresolved_tree = Tree(unresolved_root)
+    if not orphan_report.unresolved_schema_refs:
+        unresolved_tree.add(Text("none", style="dim"))
+    else:
+        for setting_name, schema_name in orphan_report.unresolved_schema_refs:
+            line = Text(escape(setting_name))
+            line.append("  ")
+            line.append(DASH, style="dim")
+            line.append("  ")
+            line.append(escape(schema_name), style="yellow")
+            unresolved_tree.add(line)
+    blocks.append(unresolved_tree)
+
+    # 3. Unreferenced schemas
+    unreferenced_schemas_root = Text("Unreferenced schemas", style="bold")
+    unreferenced_schemas_root.append(f"  ({len(orphan_report.unreferenced_schemas)})", style="dim")
+    unreferenced_schemas_tree = Tree(unreferenced_schemas_root)
+    if not orphan_report.unreferenced_schemas:
+        unreferenced_schemas_tree.add(Text("none", style="dim"))
+    else:
+        for schema_name in orphan_report.unreferenced_schemas:
+            unreferenced_schemas_tree.add(Text(escape(schema_name)))
+    blocks.append(unreferenced_schemas_tree)
+
+    # 4. Dangling component references
+    dangling_root = Text("Dangling component references", style="bold")
+    dangling_root.append(f"  ({len(orphan_report.dangling_component_refs)})", style="dim")
+    dangling_tree = Tree(dangling_root)
+    if not orphan_report.dangling_component_refs:
+        dangling_tree.add(Text("none", style="dim"))
+    else:
+        for param_name, pointer, comp_name in orphan_report.dangling_component_refs:
+            line = Text(escape(param_name))
+            line.append("  ")
+            line.append(_literal(pointer))
+            line.append("  ")
+            line.append(DASH, style="dim")
+            line.append("  ")
+            line.append(escape(comp_name), style="yellow")
+            dangling_tree.add(line)
+    blocks.append(dangling_tree)
+
+    # Interleave with blank lines
+    interleaved: list = []
+    for block in blocks:
+        interleaved.extend([block, Text()])
+    if interleaved:
+        interleaved.pop()  # Remove trailing blank
+
+    return Panel(Group(*interleaved), title=title)
+
+
 def _render_section(  # noqa: PLR0913
     section_name: str,
     identity: Identity,
@@ -443,8 +617,11 @@ def _render_section(  # noqa: PLR0913
     elif section_name == "profiles":
         panel = build_deployment_profiles_panel(profiles, index)
         console.print_renderable(panel)
-    elif section_name == "config":
+    elif section_name == "config-first":
         panel = build_configuration_panel(config, index)
+        console.print_renderable(panel)
+    elif section_name == "component-first":
+        panel = build_component_first_panel(config, index)
         console.print_renderable(panel)
     elif section_name == "extensions":
         extensions = descriptor_dict.get("x-placeholder-extensions")
@@ -452,6 +629,10 @@ def _render_section(  # noqa: PLR0913
             panel = build_extensions_panel(extensions)
             if panel:
                 console.print_renderable(panel)
+    elif section_name == "orphans":
+        orphan_report = build_orphan_report(config, index, descriptor_dict)
+        panel = build_orphans_panel(orphan_report)
+        console.print_renderable(panel)
 
 
 # CLI command function
@@ -462,7 +643,7 @@ def describe_cmd(
         list[str] | None,
         Option(
             "--section",
-            help="Render only this section (metadata|profiles|config|extensions). Repeatable.",
+            help="Render only this section (metadata|profiles|config-first|component-first|extensions|orphans). Repeatable.",
         ),
     ] = None,
 ) -> None:
@@ -477,8 +658,14 @@ def describe_cmd(
     except (ValueError, TypeError) as e:
         console.fatal(f"{e!s} Run 'margot verify' to debug.")
 
-    # Build display model from dict
-    identity = build_identity(descriptor_dict)
+    # Resolve descriptor to get meta for OCI URI computation
+    try:
+        resolved = describe_service.resolve_descriptor(project_dir or ".", manifest)
+    except ValueError as e:
+        console.fatal(f"{e!s}")
+
+    # Build display model from dict, threading meta into build_identity for OCI URI
+    identity = build_identity(descriptor_dict, resolved.meta)
     catalog = build_catalog(descriptor_dict)
     profiles = build_deployment_profiles(descriptor_dict)
     index = component_index(descriptor_dict)
@@ -487,22 +674,19 @@ def describe_cmd(
     # Determine which sections to render
     requested_sections = set(section or []) if section else set()
     if not requested_sections:
-        # All sections by default, but extensions only when present
-        requested_sections = {"metadata", "profiles", "config"}
+        # All sections by default, but extensions and orphans only when present
+        requested_sections = {"metadata", "profiles", "config-first"}
         if descriptor_dict.get("x-placeholder-extensions"):
             requested_sections.add("extensions")
 
     # Canonical order, regardless of flag order
-    canonical_order = ["metadata", "profiles", "config", "extensions"]
+    canonical_order = ["metadata", "profiles", "config-first", "component-first", "extensions", "orphans"]
     sections_to_render = [s for s in canonical_order if s in requested_sections]
 
     # Get resolved path for subtitle
-    resolved = describe_service.resolve_descriptor(project_dir or ".", manifest)
     resolved_path = resolved.source_path
 
     # Render panels in order
     # Render sections
     for section_name in sections_to_render:
-        _render_section(
-            section_name, identity, catalog, profiles, index, config, descriptor_dict, resolved_path
-        )
+        _render_section(section_name, identity, catalog, profiles, index, config, descriptor_dict, resolved_path)

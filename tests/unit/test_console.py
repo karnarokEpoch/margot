@@ -370,6 +370,108 @@ class TestInteraction:
         assert "Debug" in err_text
 
 
+class TestNoUnwantedHighlighting:
+    """Regression tests for Rich auto-highlighting bug fix (issue: version strings bolded).
+
+    Rich's console.print() by default runs ReprHighlighter on output, which auto-bolds
+    substrings that look like version numbers, paths, UUIDs, etc. This produces unwanted
+    styling in plain log messages. We verify that highlight=False is in place to disable this.
+    """
+
+    def test_success_no_bold_in_version_string(self, capture_console, reset_console):
+        """success() should not bold version numbers like '1.0.0' in message."""
+        out, _err = capture_console
+        _console.success("Pushed: public.ecr.aws/g2n4p2m7/margo:1.0.0")
+        output = out.getvalue()
+
+        # Ensure the message appears
+        assert "Pushed:" in output
+        assert "1.0.0" in output
+
+        # Ensure no bold ANSI codes (\x1b[1 or \x1b[1;...) are present
+        # Bold is applied via \x1b[1m or \x1b[1;...m sequences
+        assert "\x1b[1m" not in output, "Output contains unwanted bold ANSI code"
+        assert not re.search(r"\x1b\[1;", output), "Output contains unwanted bold+color ANSI code"
+
+    def test_warning_no_bold_in_version_string(self, capture_console, reset_console):
+        """warning() should not bold version numbers in message."""
+        _out, err = capture_console
+        _console.warning("Version mismatch: expected 2.0.0, got 1.5.5")
+        output = err.getvalue()
+
+        assert "2.0.0" in output
+        assert "1.5.5" in output
+        # Check for unwanted bold
+        assert "\x1b[1m" not in output
+        assert not re.search(r"\x1b\[1;", output)
+
+    def test_info_no_bold_in_version_string(self, capture_console, reset_console):
+        """info() should not bold version numbers in message."""
+        _out, err = capture_console
+        _console.set_verbose(True)
+        _console.info("Artifact version: 3.2.1")
+        output = err.getvalue()
+
+        assert "3.2.1" in output
+        assert "\x1b[1m" not in output
+        assert not re.search(r"\x1b\[1;", output)
+
+    def test_debug_no_bold_in_version_string(self, capture_console, reset_console):
+        """debug() should not bold version numbers in message."""
+        _out, err = capture_console
+        _console.set_debug(True)
+        _console.debug("Pulled layer v0.9.8 from registry")
+        output = err.getvalue()
+
+        assert "0.9.8" in output
+        assert "\x1b[1m" not in output
+        assert not re.search(r"\x1b\[1;", output)
+
+    def test_fatal_no_bold_in_version_string(self, capture_console, reset_console):
+        """fatal() should not bold version numbers in message."""
+        _out, err = capture_console
+        with raises(Exit):
+            _console.fatal("Registry rejected artifact version 1.2.3")
+        output = err.getvalue()
+
+        assert "1.2.3" in output
+        assert "\x1b[1m" not in output
+        assert not re.search(r"\x1b\[1;", output)
+
+    def test_finding_no_bold_in_version_string(self, capture_console, reset_console):
+        """finding() should not bold version numbers in message."""
+        _out, err = capture_console
+        _console.finding("Invalid schema version 2.1.0 in descriptor", "ERROR")
+        output = err.getvalue()
+
+        assert "2.1.0" in output
+        # finding() applies explicit colors, but should not add bold
+        assert "\x1b[1m" not in output
+        assert not re.search(r"\x1b\[1;", output)
+
+    def test_section_no_bold_in_version_string(self, capture_console, reset_console):
+        """section() should not bold version numbers in label."""
+        _out, err = capture_console
+        _console.section("Validation v1.0.0")
+        output = err.getvalue()
+
+        assert "1.0.0" in output
+        assert "\x1b[1m" not in output
+        assert not re.search(r"\x1b\[1;", output)
+
+    def test_verdict_no_bold_in_version_string(self, capture_console, reset_console):
+        """verdict() should not bold version numbers in label or detail."""
+        out, _err = capture_console
+        _console.verdict("Schema v2.5.3", "PASS", "compatible with 1.8.0")
+        output = out.getvalue()
+
+        assert "2.5.3" in output
+        assert "1.8.0" in output
+        # verdict() applies explicit colors, but should not add bold
+        assert "\x1b[1m" not in output
+        assert not re.search(r"\x1b\[1;", output)
+
+
 class TestPrintJson:
     """Tests for print_json() output."""
 

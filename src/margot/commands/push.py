@@ -40,6 +40,7 @@ def _invoke_push(  # noqa: PLR0913
     registry: str | None,
     repository: str | None,
     variant: str | None,
+    dry_run: bool,
 ) -> list[BuildTarget]:
     """Call push service for one type. Returns targets or [] if component is missing and expanded_from_all."""
     package_type = PackageType(t)
@@ -51,12 +52,31 @@ def _invoke_push(  # noqa: PLR0913
             registry=registry,
             repository=repository,
             variant=variant,
+            dry_run=dry_run,
         )
     except ValueError as e:
         if expanded_from_all and "not defined in margo.yaml" in str(e):
             console.info(f"Skipping {t}: not defined in margo.yaml")
             return []
         raise
+
+
+def _report_target(target: BuildTarget, dry_run: bool) -> None:
+    """Report the result of pushing/probing a target."""
+    if target.registry and target.repository:
+        full_ref = f"{target.registry}/{target.repository}:{target.version}"
+    else:
+        full_ref = target.version
+
+    if target.variant_name:
+        if dry_run:
+            console.success(f"Dry run OK ({target.variant_name}): {full_ref}")
+        else:
+            console.success(f"Pushed ({target.variant_name}): {full_ref}")
+    elif dry_run:
+        console.success(f"Dry run OK: {full_ref}")
+    else:
+        console.success(f"Pushed: {full_ref}")
 
 
 def push_cmd(  # noqa: PLR0913
@@ -69,6 +89,12 @@ def push_cmd(  # noqa: PLR0913
     repository: str | None = Option(None, "--repository", help="Repository path."),
     build_dir: str = Option(".dist", "--build-dir", help="Directory containing built artifacts."),
     variant: str | None = Option(None, "--variant", help="Push a specific variant (compose/quadlet only)."),
+    dry_run: bool = Option(
+        False,
+        "--dry-run",
+        help="Validate readiness without pushing: check artifacts exist and registry write access, "
+        "then report OCI refs.",
+    ),
 ) -> None:
     """Push built Margo application artifacts to an OCI registry."""
     resolved, expanded_from_all = _resolve_types(types)
@@ -76,21 +102,18 @@ def push_cmd(  # noqa: PLR0913
     all_targets: list[BuildTarget] = []
     try:
         for t in resolved:
-            all_targets.extend(_invoke_push(t, expanded_from_all, project_dir, build_dir, registry, repository, variant))
+            all_targets.extend(_invoke_push(t, expanded_from_all, project_dir, build_dir, registry, repository, variant, dry_run))
 
         if all_targets:
             for target in all_targets:
-                if target.registry and target.repository:
-                    full_ref = f"{target.registry}/{target.repository}:{target.version}"
-                else:
-                    full_ref = target.version
-                if target.variant_name:
-                    console.success(f"Pushed ({target.variant_name}): {full_ref}")
-                else:
-                    console.success(f"Pushed: {full_ref}")
+                _report_target(target, dry_run)
+        elif dry_run:
+            console.warning("Nothing to validate.")
         else:
             console.warning("Nothing was pushed.")
 
+    except PermissionError as e:
+        console.fatal(str(e))
     except ValueError as e:
         console.fatal(str(e))
     except Exception as e:  # noqa: BLE001
