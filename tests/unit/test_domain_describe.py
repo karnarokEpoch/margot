@@ -2,11 +2,18 @@
 
 
 from margot.domain.describe import (
+    Configuration,
+    ConfigurationSection,
+    Parameter,
+    ParameterTarget,
     Schema,
+    Setting,
     build_catalog,
+    build_component_first,
     build_configuration,
     build_deployment_profiles,
     build_identity,
+    build_orphan_report,
     component_index,
     unreferenced_parameters,
 )
@@ -905,6 +912,215 @@ class TestConfigurationModel:
         assert schema.allow_empty is True
 
 
+class TestComponentFirstView:
+    """Tests for build_component_first function."""
+
+    def test_component_first_basic_structure(self) -> None:
+        """Should build a component-first view with per-component parameter edges."""
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Param 1",
+                            description="Test",
+                            immutable=False,
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value="default1",
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="path.to.param1",
+                                        components=["comp-a", "comp-b"],
+                                    )
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp-a", "comp-b"]
+
+        view = build_component_first(config, index)
+
+        assert view is not None
+        assert len(view.components) == 2
+        # Find comp-a
+        comp_a = next((c for c in view.components if c.name == "comp-a"), None)
+        assert comp_a is not None
+        assert len(comp_a.parameters) == 1
+        assert comp_a.parameters[0].parameter_name == "param1"
+
+    def test_component_first_empty_components(self) -> None:
+        """Should include components with no parameters."""
+        config = Configuration(sections=[], unreferenced=[])
+        index = ["comp-a", "comp-b"]
+
+        view = build_component_first(config, index)
+
+        assert len(view.components) == 2
+        # Each component should have empty parameters list
+        for comp in view.components:
+            assert comp.parameters == []
+
+    def test_component_first_multiple_targets_same_component(self) -> None:
+        """Should aggregate multiple targets targeting the same component."""
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Param 1",
+                            immutable=False,
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value="default1",
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="path1",
+                                        components=["comp-a"],
+                                    ),
+                                    ParameterTarget(
+                                        pointer="path2",
+                                        components=["comp-a"],
+                                    ),
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp-a"]
+
+        view = build_component_first(config, index)
+
+        comp_a = view.components[0]
+        # Both targets should be included
+        assert len(comp_a.parameters) == 2
+
+    def test_component_first_ordering_matches_component_index(self) -> None:
+        """Should order components by the component_index order."""
+        config = Configuration(sections=[], unreferenced=[])
+        index = ["zebra", "apple", "banana"]
+
+        view = build_component_first(config, index)
+
+        assert [c.name for c in view.components] == ["zebra", "apple", "banana"]
+
+    def test_component_first_setting_ordering_preserved(self) -> None:
+        """Should preserve setting/section order in parameter edges."""
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Section A",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Param 1",
+                            immutable=False,
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value="v1",
+                                targets=[ParameterTarget(pointer="p1", components=["comp-a"])],
+                            ),
+                        ),
+                        Setting(
+                            parameter="param2",
+                            name="Param 2",
+                            immutable=False,
+                            schema=Schema(name="schema2", data_type="integer"),
+                            parameter_resolved=Parameter(
+                                value=42,
+                                targets=[ParameterTarget(pointer="p2", components=["comp-a"])],
+                            ),
+                        ),
+                    ],
+                ),
+                ConfigurationSection(
+                    name="Section B",
+                    settings=[
+                        Setting(
+                            parameter="param3",
+                            name="Param 3",
+                            immutable=False,
+                            schema=Schema(name="schema3", data_type="boolean"),
+                            parameter_resolved=Parameter(
+                                value=True,
+                                targets=[ParameterTarget(pointer="p3", components=["comp-a"])],
+                            ),
+                        ),
+                    ],
+                ),
+            ],
+            unreferenced=[],
+        )
+        index = ["comp-a"]
+
+        view = build_component_first(config, index)
+
+        comp_a = view.components[0]
+        # Parameters should be in declaration order: param1, param2, param3
+        assert [p.parameter_name for p in comp_a.parameters] == [
+            "param1",
+            "param2",
+            "param3",
+        ]
+
+    def test_component_first_parameter_details_preserved(self) -> None:
+        """Should preserve parameter details in the view."""
+        schema = Schema(
+            name="testSchema",
+            data_type="string",
+            min_length=1,
+            max_length=100,
+        )
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="testParam",
+                            name="Test Parameter",
+                            description="A test parameter",
+                            immutable=True,
+                            schema=schema,
+                            parameter_resolved=Parameter(
+                                value="test-value",
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="config.test",
+                                        components=["comp-a"],
+                                    )
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp-a"]
+
+        view = build_component_first(config, index)
+
+        comp_a = view.components[0]
+        param_edge = comp_a.parameters[0]
+        assert param_edge.parameter_name == "testParam"
+        assert param_edge.setting_name == "Test Parameter"
+        assert param_edge.schema.name == "testSchema"
+        assert param_edge.value == "test-value"
+        assert param_edge.pointer == "config.test"
+
+
 class TestUnreferencedParametersFunction:
     """Tests for the unreferenced_parameters helper function."""
 
@@ -925,3 +1141,371 @@ class TestUnreferencedParametersFunction:
         orphans = unreferenced_parameters(all_params, referenced)
 
         assert set(orphans) == {"orphan1", "orphan2"}
+
+
+class TestOrphanReportBuilder:
+    """Tests for the build_orphan_report builder function."""
+
+    def test_build_orphan_report_all_clean_returns_empty(self) -> None:
+        """Should return all-empty report when configuration is fully connected."""
+
+        # Fully connected config: all params referenced, all schemas used, no dangling components
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Param1",
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value="value1",
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="settings.param1",
+                                        components=["comp1"],
+                                    )
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp1"]
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Param1",
+                                "schema": "schema1",
+                            }
+                        ],
+                    }
+                ],
+                "schema": [{"name": "schema1", "dataType": "string"}],
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == []
+        assert report.unresolved_schema_refs == []
+        assert report.unreferenced_schemas == []
+        assert report.dangling_component_refs == []
+
+    def test_build_orphan_report_unreferenced_parameters(self) -> None:
+        """Should detect parameters not referenced by any setting."""
+
+        config = Configuration(
+            sections=[],
+            unreferenced=["orphan_param1", "orphan_param2"],
+        )
+        index = []
+        doc = {"configuration": {"schema": []}}
+
+        report = build_orphan_report(config, index, doc)
+
+        assert set(report.unreferenced_params) == {"orphan_param1", "orphan_param2"}
+        assert report.unresolved_schema_refs == []
+        assert report.unreferenced_schemas == []
+        assert report.dangling_component_refs == []
+
+    def test_build_orphan_report_unresolved_schema_references(self) -> None:
+        """Should detect settings referencing non-existent schemas."""
+
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Setting1",
+                            schema=None,  # Schema doesn't resolve
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = []
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Setting1",
+                                "schema": "missing_schema",
+                            }
+                        ],
+                    }
+                ],
+                "schema": [],  # No schemas declared
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == []
+        assert report.unresolved_schema_refs == [("Setting1", "missing_schema")]
+        assert report.unreferenced_schemas == []
+        assert report.dangling_component_refs == []
+
+    def test_build_orphan_report_unreferenced_schemas(self) -> None:
+        """Should detect schemas declared but not used by any setting."""
+
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Setting1",
+                            schema=Schema(name="used_schema", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = []
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Setting1",
+                                "schema": "used_schema",
+                            }
+                        ],
+                    }
+                ],
+                "schema": [
+                    {"name": "used_schema", "dataType": "string"},
+                    {"name": "unused_schema", "dataType": "integer"},
+                ]
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == []
+        assert report.unresolved_schema_refs == []
+        assert report.unreferenced_schemas == ["unused_schema"]
+        assert report.dangling_component_refs == []
+
+    def test_build_orphan_report_dangling_component_references(self) -> None:
+        """Should detect targets naming components not in the index."""
+
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Setting1",
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="settings.param1",
+                                        components=["comp1", "missing_comp"],
+                                    )
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp1"]  # Only comp1 exists
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Setting1",
+                                "schema": "schema1",
+                            }
+                        ],
+                    }
+                ],
+                "schema": [{"name": "schema1", "dataType": "string"}],
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == []
+        assert report.unresolved_schema_refs == []
+        assert report.unreferenced_schemas == []
+        assert report.dangling_component_refs == [("param1", "settings.param1", "missing_comp")]
+
+    def test_build_orphan_report_all_four_categories(self) -> None:
+        """Should detect all four categories of orphans in a complex configuration."""
+
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        # Setting with unresolved schema
+                        Setting(
+                            parameter="param1",
+                            name="Setting1",
+                            schema=None,
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[ParameterTarget(pointer="ptr1", components=["comp1"])],
+                            ),
+                        ),
+                        # Setting with dangling component
+                        Setting(
+                            parameter="param2",
+                            name="Setting2",
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="ptr2",
+                                        components=["dangling_comp"],
+                                    )
+                                ],
+                            ),
+                        ),
+                    ],
+                )
+            ],
+            unreferenced=["unreferenced_param"],
+        )
+        index = ["comp1"]
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Setting1",
+                                "schema": "missing_schema",
+                            },
+                            {
+                                "parameter": "param2",
+                                "name": "Setting2",
+                                "schema": "schema1",
+                            },
+                        ],
+                    }
+                ],
+                "schema": [
+                    {"name": "schema1", "dataType": "string"},
+                    {"name": "unused_schema", "dataType": "integer"},
+                ]
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == ["unreferenced_param"]
+        assert report.unresolved_schema_refs == [("Setting1", "missing_schema")]
+        assert report.unreferenced_schemas == ["unused_schema"]
+        assert report.dangling_component_refs == [("param2", "ptr2", "dangling_comp")]
+
+    def test_build_orphan_report_multiple_dangling_refs_same_parameter(self) -> None:
+        """Should report all dangling component refs, even multiple in same parameter."""
+
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Setting1",
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="ptr1",
+                                        components=["comp1", "missing1", "missing2"],
+                                    )
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp1"]
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Setting1",
+                                "schema": "schema1",
+                            }
+                        ],
+                    }
+                ],
+                "schema": [{"name": "schema1", "dataType": "string"}],
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert len(report.dangling_component_refs) == 2
+        assert ("param1", "ptr1", "missing1") in report.dangling_component_refs
+        assert ("param1", "ptr1", "missing2") in report.dangling_component_refs
+
+    def test_build_orphan_report_handles_missing_configuration_key(self) -> None:
+        """Should gracefully handle missing configuration key in doc."""
+
+        config = Configuration(
+            sections=[],
+            unreferenced=[],
+        )
+        index = []
+        doc = {}  # No configuration key
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == []
+        assert report.unresolved_schema_refs == []
+        assert report.unreferenced_schemas == []
+        assert report.dangling_component_refs == []

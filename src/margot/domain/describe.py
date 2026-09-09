@@ -140,6 +140,32 @@ class Configuration:
     unreferenced: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ComponentParameterEdge:
+    """A parameter edge from component perspective: parameter → setting → schema."""
+
+    parameter_name: str | None = None
+    pointer: str | None = None
+    value: object = None
+    setting_name: str | None = None
+    schema: Schema | None = None
+
+
+@dataclass(frozen=True)
+class ComponentFirstNode:
+    """A component node in the component-first view with its parameter edges."""
+
+    name: str | None = None
+    parameters: list[ComponentParameterEdge] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ComponentFirstView:
+    """Component-first traversal: all components with their incoming parameters."""
+
+    components: list[ComponentFirstNode] = field(default_factory=list)
+
+
 def build_identity(doc: dict, meta: MargoYaml | None = None) -> Identity:
     """Transform the loaded descriptor into an Identity dataclass.
 
@@ -406,3 +432,149 @@ def unreferenced_parameters(all_params: set[str], referenced: set[str]) -> list[
         A list of unreferenced parameter names, in iteration order.
     """
     return [name for name in all_params if name not in referenced]
+
+
+def build_component_first(config: Configuration, index: list[str]) -> ComponentFirstView:
+    """Build a component-first view from the configuration.
+
+    Walks through each component in index order and collects all parameters that target
+    that component via their pointers, preserving the declaration order of sections
+    and settings from the configuration.
+
+    Args:
+        config: The Configuration dataclass (already built via build_configuration).
+        index: The component index from component_index(doc), in declaration order.
+
+    Returns:
+        A ComponentFirstView with one ComponentFirstNode per component, each containing
+        its incoming parameter edges in section/setting declaration order.
+    """
+    nodes: list[ComponentFirstNode] = []
+
+    for comp_name in index:
+        # Collect all parameter edges targeting this component
+        edges: list[ComponentParameterEdge] = []
+
+        # Walk sections in order
+        for section in config.sections:
+            # Walk settings in order
+            for setting in section.settings:
+                # Check if this setting's parameter targets this component
+                if setting.parameter_resolved:
+                    param = setting.parameter_resolved
+                    # Check each target
+                    for target in param.targets:
+                        if comp_name in (target.components or []):
+                            # Add edge for this target
+                            edge = ComponentParameterEdge(
+                                parameter_name=setting.parameter,
+                                pointer=target.pointer,
+                                value=param.value,
+                                setting_name=setting.name,
+                                schema=setting.schema,
+                            )
+                            edges.append(edge)
+
+        # Create node for this component
+        node = ComponentFirstNode(
+            name=comp_name,
+            parameters=edges,
+        )
+        nodes.append(node)
+
+    return ComponentFirstView(components=nodes)
+
+
+@dataclass(frozen=True)
+class OrphanReport:
+    """An orphan/dead-end detection report with four categories of issues."""
+
+    unreferenced_params: list[str] = field(default_factory=list)
+    unresolved_schema_refs: list[tuple[str, str]] = field(default_factory=list)  # (setting_name, schema_name)
+    unreferenced_schemas: list[str] = field(default_factory=list)
+    dangling_component_refs: list[tuple[str, str, str]] = field(
+        default_factory=list
+    )  # (parameter_name, pointer, component_name)
+
+
+def build_orphan_report(config: Configuration, index: list[str], doc: dict) -> OrphanReport:  # noqa: C901
+    """Build an orphan/dead-end detection report from the configuration and descriptor.
+
+    Detects four categories:
+    1. Unreferenced parameters — a Parameter with no Setting referencing it.
+    2. Unresolved schema references — a Setting whose schema reference doesn't resolve.
+    3. Unreferenced schemas — a Schema declared but not referenced by any Setting.
+    4. Dangling component references — a Parameter.targets[].components entry naming
+       a component not in the component index.
+
+    Args:
+        config: The Configuration dataclass (already built via build_configuration).
+        index: The component index from component_index(doc), in declaration order.
+        doc: The parsed descriptor dict (to access raw configuration.schema).
+
+    Returns:
+        An OrphanReport with all four categories populated.
+    """
+    index_set = set(index)
+    config_data = doc.get("configuration") or {}
+
+    # 1. Unreferenced parameters — reuse the Configuration.unreferenced list
+    unreferenced_params = list(config.unreferenced)
+
+    # Build schema name set for quick lookup
+    schemas_dict: dict[str, bool] = {}
+    for schema_data in config_data.get("schema") or []:
+        schema_name = schema_data.get("name")
+        if schema_name:
+            schemas_dict[schema_name] = True
+
+    # 2. Unresolved schema references — walk raw settings to find requested schema names
+    # that don't exist. This requires mapping from the display config to raw config.
+    unresolved_schema_refs: list[tuple[str, str]] = []
+    raw_sections = config_data.get("sections") or []
+    for section_idx, section in enumerate(config.sections):
+        raw_section = raw_sections[section_idx] if section_idx < len(raw_sections) else None
+        raw_settings = raw_section.get("settings") or [] if raw_section else []
+
+        for setting_idx, setting in enumerate(section.settings):
+            raw_setting = raw_settings[setting_idx] if setting_idx < len(raw_settings) else None
+            # Get the requested schema name from the raw config
+            requested_schema_name = raw_setting.get("schema") if raw_setting else None
+
+            # Check if the requested schema exists in the schema list
+            if requested_schema_name and requested_schema_name not in schemas_dict:
+                unresolved_schema_refs.append((setting.name or "", requested_schema_name))
+
+    # 3. Unreferenced schemas — schemas not referenced by any setting
+    referenced_schemas: set[str] = set()
+
+    # Collect all referenced schemas from raw settings
+    for section in raw_sections:
+        for setting in section.get("settings") or []:
+            schema_name = setting.get("schema")
+            if schema_name:
+                referenced_schemas.add(schema_name)
+
+    unreferenced_schemas = [
+        schema_name for schema_name in schemas_dict if schema_name not in referenced_schemas
+    ]
+
+    # 4. Dangling component references — targets naming components not in index
+    dangling_component_refs: list[tuple[str, str, str]] = []
+    for section in config.sections:
+        for setting in section.settings:
+            if setting.parameter_resolved:
+                param = setting.parameter_resolved
+                for target in param.targets:
+                    dangling_component_refs.extend(
+                        (setting.parameter or "", target.pointer or "", comp_name)
+                        for comp_name in target.components or []
+                        if comp_name not in index_set
+                    )
+
+    return OrphanReport(
+        unreferenced_params=unreferenced_params,
+        unresolved_schema_refs=unresolved_schema_refs,
+        unreferenced_schemas=unreferenced_schemas,
+        dangling_component_refs=dangling_component_refs,
+    )

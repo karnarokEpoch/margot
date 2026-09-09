@@ -632,7 +632,7 @@ validation, no network.
 
 ```
 margot describe [--project-dir PATH] [--manifest PATH]
-                [--section metadata|profiles|config|extensions]
+                [--section metadata|profiles|config-first|component-first|extensions|orphans]
 ```
 
 **Descriptor resolution:** identical to `verify` — `--manifest`, else `margo.yaml`
@@ -651,7 +651,8 @@ margot describe [--project-dir PATH] [--manifest PATH]
 2. **Deployment profiles** — one tree per entry: `type` and `id`, `description`, the
    profile's own `requiredResources` (`cpu`/`memory`/`storage` on one line, `peripherals`
    and `interfaces` as separate lines when present), then `components[]` → `properties`.
-3. **Configuration** — a single tree carrying everything configurable:
+3. **Configuration (config-first)** — a single tree carrying everything configurable, walked
+   top-down from configuration sections:
 
    ```text
    section → setting (+ immutable) → Schema: <name> <dataType> · <constraints>
@@ -663,15 +664,27 @@ margot describe [--project-dir PATH] [--manifest PATH]
    Each pointer reports how many components it targets against the total number of
    distinct components declared across all deployment profiles. Parameters that no
    `Setting` references are listed in a trailing subtree so they stay visible.
-4. **Extensions** — `x-placeholder-extensions`, rendered only when present.
+4. **Components (component-first)** — an alternative view of configuration walked
+   component-first: each component lists its incoming parameters (via their pointers)
+   with their values, setting names, and schemas. This is useful for understanding what
+   a specific component needs to be configured. Rendered only when explicitly requested
+   via `--section component-first`; not in the default view.
+5. **Extensions** — `x-placeholder-extensions`, rendered only when present.
+6. **Orphans/dead-ends** — coherence checks for dangling or unreferenced descriptor elements.
+   Detects four categories (opt-in via `--section orphans`, not in default view):
+   - Unreferenced parameters: a `Parameter` not referenced by any `Setting`.
+   - Unresolved schema references: a `Setting` whose `schema` name doesn't resolve to a declared schema.
+   - Unreferenced schemas: a `Schema` declared but not referenced by any `Setting`.
+   - Dangling component references: a `Parameter.targets[].components` entry naming a component absent from the component index (across all deployment profiles).
+   All checks are purely local, no network calls. These are observations only; `describe` always exits 0. Use `margot verify` for validation gates.
 
 There is **no parameters block**: parameters are reached through configuration, which is
 the order a reviewer thinks in — what can be configured, what validates it, what it
 defaults to, where it lands.
 
-Panel titles carry counts (`7 profiles · 9 components`, `6 sections · 22 settings`).
-`--section` **filters** which blocks appear; it never reorders them, so flag order does
-not change the output. `metadata` covers identity and catalog together.
+Panel titles carry counts (`7 profiles · 9 components`, `6 sections · 22 settings`,
+`8 components`). `--section` **filters** which blocks appear; it never reorders them, so
+flag order does not change the output. `metadata` covers identity and catalog together.
 
 `type` and component `properties` keys are printed verbatim — no enum check, no fixed
 property lookup. This is deliberate: margot supports a `quadlet` deployment profile ahead
