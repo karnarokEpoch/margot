@@ -31,6 +31,8 @@ with `python-dev`, and public-site changes with `docs-writer`.
   Ruff, coverage, or import-style improvement.
 - **`fix-todos`** (`.kiro/skills/fix-todos/SKILL.md`) — use only for explicitly requested TODO discovery, triage, or
   fixes.
+- **`sprint-workflow`** (`.kiro/skills/sprint-workflow/SKILL.md`) — use only when planning a sprint, opening a release,
+  or closing one out; not during doc or code work.
 
 ## Detailed steering
 

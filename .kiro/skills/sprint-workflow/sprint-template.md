@@ -61,7 +61,7 @@ Example:
 - [ ] E2E test: `margot foo --new-flag value`
 - [ ] Update docs command-reference page
 - [ ] Run `make docs-check` — must pass
-- [ ] All changes committed
+- [ ] Committed as one or more commits for this task (conventional-commit messages)
 
 ---
 
@@ -74,9 +74,8 @@ What "done" looks like for this sprint. Checklist format:
 - [ ] E2E tests pass.
 - [ ] Docs updated and `make docs-check` passes.
 - [ ] No TODOs left (or explicitly deferred to next sprint in a comment).
-- [ ] All changes committed to a feature branch.
-- [ ] PR open to `main` with a clear description.
-- [ ] Code review approved.
+- [ ] Each task committed as one or more commits on the feature branch (conventional-commit messages) — no bulk end-of-sprint commit.
+- [ ] Handed back to the owner for push, PR onto the release branch, review, and merge (agent does not push or open PRs).
 
 ---
 
@@ -93,6 +92,6 @@ Sprint file deleted via chore(sprint) commit [hash].
 
 ## References
 
-- [Workflow & Authority Model](./../steering/workflow.md) — process loop, authority chain, N:M cardinality.
+- [sprint-workflow skill](./SKILL.md) — process loop, authority chain, N:M cardinality.
 - [ROADMAP.md](./../../ROADMAP.md) — forward register and current sequencing.
 - [CONTRIBUTING.md](./../../CONTRIBUTING.md) — commit conventions and release workflow.

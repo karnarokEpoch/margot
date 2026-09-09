@@ -1,5 +1,23 @@
 ---
-inclusion: manual
+name: sprint-workflow
+description: >
+  Sprint planning, release workflows, and the canonical authority model: idea → ROADMAP → sprint file → release → close-out.
+  Covers N:M sprint/release cardinality, when fixes need no sprint, and the release close-out checklist.
+  Use only when planning a sprint, opening a release, or closing one out; not on every request.
+---
+
+# Sprint Workflow Skill
+
+## When to use
+
+Only when:
+- Planning a new sprint (selecting items from ROADMAP, creating a sprint file).
+- Opening or managing a `release/<version>` branch.
+- Closing out / deleting a sprint file at release time.
+- Answering questions about the sprint/release authority model.
+
+Do **not** run this workflow proactively during doc writing, code implementation, or unrelated planning requests. This skill is for process orchestration at sprint boundaries, not every planning step.
+
 ---
 
 # Workflow & Authority Model
@@ -41,30 +59,37 @@ At sprint planning, one or more ROADMAP items are selected and moved from "Backl
 - **Definition of done** — what passes review.
 - **Close-out note** — placeholder for sprint close-out instructions.
 
-See `.kiro/sprints/_template.md` for the standard shape.
+**To create a new sprint:** Copy `sprint-template.md` from this skill into `.kiro/sprints/sprint-N.md` (where N is the next sprint number) and fill in each section per the template's instructions.
 
-### Sprint → `release/<version>` branch
+### Sprint → feature branches → `release/<version>` branch
 
-Dev work follows the sprint file as the authoritative design. On completion:
+Git orchestration is **owner-owned**. The agent implements; it does **not** manage branches, remotes, or reviews.
 
-1. Create a `release/<version>` branch (e.g. `release/0.2.0`).
-2. Update ROADMAP — move the completed sprint from "Planned Sprints" to "Completed Sprints" table with **a release link** (GitHub release URL, once the release is published).
-3. Run close-out tasks (see Close-out checklist below).
-4. Open a PR to `main`.
-5. Review & merge.
+**The project owner:**
 
-On merge, the GitHub release workflow automatically tags, builds, and publishes.
+1. Creates the `release/<version>` branch (e.g. `release/0.2.0`).
+2. Creates a feature branch per sprint item and checks the agent out onto it.
+3. Pushes commits, opens the PR onto the release branch, reviews, and merges.
+4. Merges the release branch to `main`, which triggers the GitHub release workflow (auto tag, build, publish).
+
+**The agent (on a feature branch the owner has already set up):**
+
+1. Implements the sprint items following the sprint file as authoritative design.
+2. Commits its work with conventional-commit messages — **one or more commits per task**, never one bulk commit for the whole sprint. Each task (a checkable step / sprint item) lands as at least one self-contained commit, so the history is reviewable task-by-task and the owner can drop or reorder tasks cleanly.
+3. Runs close-out tasks it is responsible for — updating ROADMAP, docs, deleting the sprint file (see Close-out checklist below).
+
+The agent **must not**: create `release/` or feature branches, `git push`, open or merge PRs, or merge to `main`. If a step requires any of those, the agent stops and hands back to the owner. Commit — never push — is the agent's boundary.
 
 ### Release → Close-out
 
-After merge, in the **release PR** (before merge), or immediately after:
+Close-out work is done by the agent **on the feature branch, before the owner pushes and opens the PR**. The agent commits these changes; the owner handles push/PR/merge:
 
 - [ ] **Docs updated.** `make docs-check` passes (strict build). User-facing behavior is documented in `docs/`.
 - [ ] **ROADMAP updated.** Completed sprint moved to the Completed Sprints table **with the GitHub release link** (e.g. `[0.2.0](https://github.com/karnarokEpoch/margot/releases/tag/0.2.0)`). Backlog reviewed and trimmed if needed.
 - [ ] **Sprint file deleted.** In a single commit with the message: `chore(sprint): close out sprint-N — <capability>` (e.g. `chore(sprint): close out sprint-9 — remote describe and verify`).
 - [ ] **No dangling references.** `grep -r "FEATURES\.md"` or `grep -r "sprint-N"` (for N = current sprint) returns zero (exception: the plan file itself, if it still exists).
 
-After close-out, the sprint file is gone; git history preserves its design via the close-out commit message and the `git log` for that release.
+The GitHub release link may not exist until after the owner merges and the release workflow publishes — in that case the agent adds the row with a `—` placeholder or the anticipated URL, and the owner finalizes it. After close-out the sprint file is gone; git history preserves its design via the close-out commit message.
 
 ## Cardinality: N:M sprints ↔ releases
 
@@ -102,9 +127,9 @@ Sprint 9 ships remote describe/verify. Sprint 10 ships exit codes. Three fixes l
 
 Both releases use the same `release/<version>` branch and auto-release workflow; the cardinality is transparent.
 
-## Close-out checklist (before merge to main)
+## Close-out checklist (agent commits on the feature branch; owner merges)
 
-Use this for every release. It is the gate to green.
+Use this for every release. The agent completes and commits these on its feature branch; the owner then pushes, opens the PR, and merges. It is the gate to green.
 
 ### Documentation
 
@@ -133,6 +158,6 @@ Use this for every release. It is the gate to green.
 
 ## See also
 
-- `.kiro/sprints/_template.md` — uniform sprint-file shape.
+- `sprint-template.md` — uniform sprint-file shape (copy into `.kiro/sprints/sprint-N.md`).
 - `ROADMAP.md` — current queue of work.
 - `CONTRIBUTING.md` — release branch mechanics and CI flow.

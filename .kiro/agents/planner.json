@@ -73,10 +73,9 @@
   "resources": [
     "file://.kiro/steering/code-conventions.md",
     "file://.kiro/steering/oci-media-types.md",
-    "file://.kiro/steering/workflow.md",
+    "skill://.kiro/skills/sprint-workflow/SKILL.md",
     "file://AGENTS.md",
-    "file://ROADMAP.md",
-    "file://.kiro/sprints/"
+    "file://ROADMAP.md"
   ],
   "hooks": {},
   "keyboardShortcut": "ctrl+shift+p",
