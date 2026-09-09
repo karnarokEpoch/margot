@@ -31,7 +31,11 @@ detection.
 
 ## Scope
 
-### Item 1 — Rename `config` section to `config-first`, add `component-first`
+### Item 1 — Rename `config` section to `config-first`, add `component-first` ✅ DONE
+
+**Status:** Implemented (rename + `component-first` view), including the follow-up
+styling fix aligning `[Component]`/`[Parameter]` hints with `config-first` conventions
+and the hint-ordering adjustment (parameter line: name → pointer → `[Parameter]`).
 
 **Rename:** `--section config` → `--section config-first`. This is a breaking rename
 (no deprecation alias) — `describe` is unreleased-stage tooling, not yet load-bearing for
@@ -73,7 +77,11 @@ rule 4 — a schema's constraints ride on the setting's line, not their own leve
   cover `component-first`.
 - `FEATURES.md`, `ROADMAP.md`.
 
-### Item 2 — Orphan / dead-end detection
+### Item 2 — Orphan / dead-end detection ✅ DONE
+
+**Status:** Implemented as a dedicated, opt-in-only `--section orphans` (open questions
+resolved: dedicated section, and dangling component references included — purely local,
+no-network check, distinct from `verify --remote`'s OCI reachability work).
 
 **Read-only for now** (locked decision) — this is a display concern, not a validation
 gate. No exit code change, no `linkml` import, no new flag on `verify`. Surfaces inside
