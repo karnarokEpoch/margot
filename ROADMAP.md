@@ -11,19 +11,18 @@ sequencing; FEATURES.md is updated as items land (see backlog).
 
 ## Planned Sprints
 
-### Sprint 9 — `--json` output and stable error codes
+### Sprint 10 — `--json` output and stable error codes
 
 Makes margot's output and failure modes machine-consumable for scripts/agents: `--json`
 on `describe` and `verify` (their display/result dataclasses already have zero `rich`
 coupling), a stable, closed exit-code taxonomy replacing today's single `Exit(1)`
 catch-all across 22 call sites, a structured `--json` error envelope on stderr, and
-explicit `--no-color`/`NO_COLOR` support. No change to default rich rendering. Orthogonal
-to Sprint 8, can run in parallel. Full plan at
-[`.kiro/sprints/sprint-9.md`](.kiro/sprints/sprint-9.md).
+explicit `--no-color`/`NO_COLOR` support. No change to default rich rendering. Full plan
+at [`.kiro/sprints/sprint-10.md`](.kiro/sprints/sprint-10.md).
 
 ---
 
-## Backlog / Stack (Sprint 8+)
+## Backlog / Stack (Sprint 11+)
 
 Unordered within groups; sequencing decided at sprint planning.
 

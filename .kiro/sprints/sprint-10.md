@@ -1,4 +1,4 @@
-# Sprint 9 — `--json` output and stable error codes
+# Sprint 10 — `--json` output and stable error codes
 
 **Goal:** Make margot's output and failure modes machine-consumable, without changing
 any human-facing rich rendering by default. An agent (or script) driving margot today
@@ -6,10 +6,7 @@ has exactly one structured surface (`fetch`'s raw manifest JSON) and one failure
 (`Exit(1)` + an English sentence on stderr) — everywhere else it must screen-scrape rich
 panels/trees or string-match error text. This sprint closes both gaps.
 
-**Prerequisite:** none — orthogonal to Sprint 8 (`describe` traversal/orphan work).
-Can run in parallel or before/after; touches `console.py` and every `commands/*.py`
-file, not `domain/describe.py`'s data model itself (Sprint 8's new dataclasses should
-serialize for free once this lands, if Sprint 8 ships first — see Item 1 ordering note).
+**Prerequisite:** none — independently sequenced after Sprint 9's remote OCI work.
 
 ---
 
