@@ -11,6 +11,7 @@ from margot.commands.describe import (
     build_deployment_profiles_panel,
     build_extensions_panel,
     build_identity_catalog_panel,
+    build_orphans_panel,
 )
 from margot.domain.describe import (
     Component,
@@ -18,6 +19,7 @@ from margot.domain.describe import (
     ConfigurationSection,
     DeploymentProfile,
     Identity,
+    OrphanReport,
     Parameter,
     ParameterTarget,
     Schema,
@@ -921,10 +923,6 @@ class TestOrphansPanel:
 
     def test_orphans_panel_all_clean_renders_none(self) -> None:
         """Should render 'none' when all categories are empty."""
-        from margot.domain.describe import OrphanReport
-
-        from margot.commands.describe import build_orphans_panel
-
         orphan_report = OrphanReport(
             unreferenced_params=[],
             unresolved_schema_refs=[],
@@ -941,10 +939,6 @@ class TestOrphansPanel:
 
     def test_orphans_panel_unreferenced_parameters_renders(self) -> None:
         """Should render unreferenced parameters category."""
-        from margot.domain.describe import OrphanReport
-
-        from margot.commands.describe import build_orphans_panel
-
         orphan_report = OrphanReport(
             unreferenced_params=["param1", "param2"],
             unresolved_schema_refs=[],
@@ -962,10 +956,6 @@ class TestOrphansPanel:
 
     def test_orphans_panel_unresolved_schema_refs_renders(self) -> None:
         """Should render unresolved schema references with setting and schema name."""
-        from margot.domain.describe import OrphanReport
-
-        from margot.commands.describe import build_orphans_panel
-
         orphan_report = OrphanReport(
             unreferenced_params=[],
             unresolved_schema_refs=[("SettingName", "missingSchema")],
@@ -983,10 +973,6 @@ class TestOrphansPanel:
 
     def test_orphans_panel_unreferenced_schemas_renders(self) -> None:
         """Should render unreferenced schemas."""
-        from margot.domain.describe import OrphanReport
-
-        from margot.commands.describe import build_orphans_panel
-
         orphan_report = OrphanReport(
             unreferenced_params=[],
             unresolved_schema_refs=[],
@@ -1003,10 +989,6 @@ class TestOrphansPanel:
 
     def test_orphans_panel_dangling_component_refs_renders(self) -> None:
         """Should render dangling component references."""
-        from margot.domain.describe import OrphanReport
-
-        from margot.commands.describe import build_orphans_panel
-
         orphan_report = OrphanReport(
             unreferenced_params=[],
             unresolved_schema_refs=[],
@@ -1025,10 +1007,6 @@ class TestOrphansPanel:
 
     def test_orphans_panel_total_count_sums_all_categories(self) -> None:
         """Should compute total count as sum of all four categories."""
-        from margot.domain.describe import OrphanReport
-
-        from margot.commands.describe import build_orphans_panel
-
         orphan_report = OrphanReport(
             unreferenced_params=["p1", "p2"],
             unresolved_schema_refs=[("s1", "schema1")],
@@ -1044,10 +1022,6 @@ class TestOrphansPanel:
 
     def test_orphans_panel_markup_escaped_in_names(self) -> None:
         """Should escape markup characters in parameter/schema/component names."""
-        from margot.domain.describe import OrphanReport
-
-        from margot.commands.describe import build_orphans_panel
-
         orphan_report = OrphanReport(
             unreferenced_params=["array[string]"],
             unresolved_schema_refs=[("setting[name]", "schema[ref]")],
@@ -1070,10 +1044,6 @@ class TestOrphansPanel:
 
     def test_orphans_panel_empty_categories_show_none_dimmed(self) -> None:
         """Each empty category should show 'none' in dim style."""
-        from margot.domain.describe import OrphanReport
-
-        from margot.commands.describe import build_orphans_panel
-
         orphan_report = OrphanReport(
             unreferenced_params=[],
             unresolved_schema_refs=[],
