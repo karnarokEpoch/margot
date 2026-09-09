@@ -632,7 +632,7 @@ validation, no network.
 
 ```
 margot describe [--project-dir PATH] [--manifest PATH]
-                [--section metadata|profiles|config-first|component-first|extensions]
+                [--section metadata|profiles|config-first|component-first|extensions|orphans]
 ```
 
 **Descriptor resolution:** identical to `verify` — `--manifest`, else `margo.yaml`
@@ -670,6 +670,13 @@ margot describe [--project-dir PATH] [--manifest PATH]
    a specific component needs to be configured. Rendered only when explicitly requested
    via `--section component-first`; not in the default view.
 5. **Extensions** — `x-placeholder-extensions`, rendered only when present.
+6. **Orphans/dead-ends** — coherence checks for dangling or unreferenced descriptor elements.
+   Detects four categories (opt-in via `--section orphans`, not in default view):
+   - Unreferenced parameters: a `Parameter` not referenced by any `Setting`.
+   - Unresolved schema references: a `Setting` whose `schema` name doesn't resolve to a declared schema.
+   - Unreferenced schemas: a `Schema` declared but not referenced by any `Setting`.
+   - Dangling component references: a `Parameter.targets[].components` entry naming a component absent from the component index (across all deployment profiles).
+   All checks are purely local, no network calls. These are observations only; `describe` always exits 0. Use `margot verify` for validation gates.
 
 There is **no parameters block**: parameters are reached through configuration, which is
 the order a reviewer thinks in — what can be configured, what validates it, what it

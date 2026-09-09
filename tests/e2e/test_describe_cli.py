@@ -1160,3 +1160,194 @@ compose:
         assert "OCI:" in plain
         # Should not crash
         assert result.exit_code == 0
+
+
+
+ORPHAN_FIXTURE_APP_YAML = """apiVersion: application.margo.org/v1alpha1
+kind: ApplicationDescription
+id: orphan-detector
+metadata:
+  name: Orphan Detector Test
+  version: 1.0.0
+  description: Tests orphan/dead-end detection
+deploymentProfiles:
+  - type: compose
+    id: default
+    components:
+      - name: comp1
+        properties:
+          repository: oci://example.com/comp1
+      - name: comp2
+        properties:
+          repository: oci://example.com/comp2
+parameters:
+  # Unreferenced parameter (no setting points to it)
+  orphan_param:
+    value: "unused"
+    targets:
+      - pointer: settings.orphan
+        components: [comp1]
+  # Referenced parameter (setting points to it)
+  used_param:
+    value: "used"
+    targets:
+      - pointer: settings.used
+        components: [comp1]
+  # Parameter with dangling component reference
+  dangling_comp_param:
+    value: "config"
+    targets:
+      - pointer: settings.dangling
+        components: [nonexistent_component]
+configuration:
+  sections:
+    - name: "Config"
+      settings:
+        # Setting referencing a parameter that doesn't exist in parameters above
+        - parameter: missing_param
+          name: "Missing Param Setting"
+          schema: schema1
+        # Setting with schema that doesn't exist in schema[] below
+        - parameter: used_param
+          name: "Used Param"
+          schema: missing_schema
+        # Setting with valid schema
+        - parameter: dangling_comp_param
+          name: "Dangling Comp Param"
+          schema: schema1
+  schema:
+    # Schema that is used (schema1)
+    - name: schema1
+      dataType: string
+    # Schema that is never referenced by any setting
+    - name: unused_schema
+      dataType: integer
+"""
+
+
+class TestDescribeOrphans:
+    """E2E tests for the orphans section of describe."""
+
+    def test_orphans_section_opt_in_only(self, cli_project: Path) -> None:
+        """Should not render orphans section in default view (opt-in only)."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Orphans section should NOT be in output without explicit flag
+        assert "Orphans" not in plain
+        assert "dead-ends" not in plain
+
+    def test_orphans_section_renders_when_requested(self, cli_project: Path) -> None:
+        """Should render orphans section when explicitly requested via --section orphans."""
+        (cli_project / "margo" / "app.yaml").write_text(ORPHAN_FIXTURE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "orphans"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Orphans section title should appear
+        assert "Orphans" in plain or "dead-ends" in plain
+
+    def test_orphans_all_four_categories_in_fixture(self, cli_project: Path) -> None:
+        """Should surface all four orphan categories in the test fixture."""
+        (cli_project / "margo" / "app.yaml").write_text(ORPHAN_FIXTURE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "orphans"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # All four category headings should appear
+        assert "Unreferenced parameters" in plain
+        assert "Unresolved schema references" in plain
+        assert "Unreferenced schemas" in plain
+        assert "Dangling component references" in plain
+
+    def test_orphans_unreferenced_parameters_detected(self, cli_project: Path) -> None:
+        """Should detect orphan_param as unreferenced."""
+        (cli_project / "margo" / "app.yaml").write_text(ORPHAN_FIXTURE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "orphans"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should see orphan_param listed
+        assert "orphan_param" in plain
+
+    def test_orphans_unresolved_schema_references_detected(self, cli_project: Path) -> None:
+        """Should detect missing_schema reference as unresolved."""
+        (cli_project / "margo" / "app.yaml").write_text(ORPHAN_FIXTURE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "orphans"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should see missing_schema listed
+        assert "missing_schema" in plain
+
+    def test_orphans_unreferenced_schemas_detected(self, cli_project: Path) -> None:
+        """Should detect unused_schema as unreferenced."""
+        (cli_project / "margo" / "app.yaml").write_text(ORPHAN_FIXTURE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "orphans"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should see unused_schema listed
+        assert "unused_schema" in plain
+
+    def test_orphans_dangling_component_references_detected(self, cli_project: Path) -> None:
+        """Should detect nonexistent_component as a dangling reference."""
+        (cli_project / "margo" / "app.yaml").write_text(ORPHAN_FIXTURE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "orphans"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should see nonexistent_component listed
+        assert "nonexistent_component" in plain
+
+    def test_orphans_section_clean_descriptor_renders_none(self, cli_project: Path) -> None:
+        """Should render 'none' for a fully-connected descriptor with zero orphans."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "orphans"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should have orphans section with 0 total
+        assert "Orphans" in plain or "dead-ends" in plain
+        assert "0 total" in plain
+        # Should show "none" indicating no orphans found
+        assert "none" in plain.lower()
+
+    def test_orphans_section_with_other_sections(self, cli_project: Path) -> None:
+        """Should render orphans alongside other sections when both are requested."""
+        (cli_project / "margo" / "app.yaml").write_text(ORPHAN_FIXTURE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--section", "config-first", "--section", "orphans"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Both sections should render
+        assert "Configuration" in plain
+        assert "Orphans" in plain or "dead-ends" in plain
+
+    def test_orphans_preserves_section_canonical_order(self, cli_project: Path) -> None:
+        """Should render orphans in canonical position regardless of flag order."""
+        (cli_project / "margo" / "app.yaml").write_text(ORPHAN_FIXTURE_APP_YAML, encoding="utf-8")
+
+        # Request in reverse order
+        result1 = runner.invoke(app, ["describe", "--section", "orphans", "--section", "metadata"])
+        # Request in canonical order
+        result2 = runner.invoke(app, ["describe", "--section", "metadata", "--section", "orphans"])
+        plain1 = _output(result1)
+        plain2 = _output(result2)
+
+        assert result1.exit_code == 0
+        assert result2.exit_code == 0
+        # Metadata should come before Orphans in both (canonical order)
+        assert plain1.find("metadata") < plain1.find("Orphans") or "Orphans" not in plain1
+        assert plain2.find("metadata") < plain2.find("Orphans")

@@ -22,6 +22,7 @@ from margot.domain.describe import (
     ConfigurationSection,
     DeploymentProfile,
     Identity,
+    OrphanReport,
     Parameter,
     Schema,
     Setting,
@@ -30,6 +31,7 @@ from margot.domain.describe import (
     build_configuration,
     build_deployment_profiles,
     build_identity,
+    build_orphan_report,
     component_index,
 )
 from margot.services import describe as describe_service
@@ -509,6 +511,95 @@ def build_extensions_panel(extensions: dict) -> Panel | None:
     return Panel(grid, title="Extensions")
 
 
+def build_orphans_panel(orphan_report: OrphanReport) -> Panel:  # noqa: PLR0912, PLR0915, C901
+    """Build the orphans/dead-ends panel.
+
+    Args:
+        orphan_report: An OrphanReport dataclass from build_orphan_report.
+
+    Returns:
+        A Panel with the orphan report organized into four category subtrees.
+    """
+    total_orphans = (
+        len(orphan_report.unreferenced_params)
+        + len(orphan_report.unresolved_schema_refs)
+        + len(orphan_report.unreferenced_schemas)
+        + len(orphan_report.dangling_component_refs)
+    )
+
+    title = f"Orphans/dead-ends ({total_orphans} total)"
+
+    if total_orphans == 0:
+        return Panel(Text("none", style="dim"), title=title)
+
+    blocks: list = []
+
+    # 1. Unreferenced parameters
+    unreferenced_root = Text("Unreferenced parameters", style="bold")
+    unreferenced_root.append(f"  ({len(orphan_report.unreferenced_params)})", style="dim")
+    unreferenced_tree = Tree(unreferenced_root)
+    if not orphan_report.unreferenced_params:
+        unreferenced_tree.add(Text("none", style="dim"))
+    else:
+        for param_name in orphan_report.unreferenced_params:
+            unreferenced_tree.add(Text(escape(param_name)))
+    blocks.append(unreferenced_tree)
+
+    # 2. Unresolved schema references
+    unresolved_root = Text("Unresolved schema references", style="bold")
+    unresolved_root.append(f"  ({len(orphan_report.unresolved_schema_refs)})", style="dim")
+    unresolved_tree = Tree(unresolved_root)
+    if not orphan_report.unresolved_schema_refs:
+        unresolved_tree.add(Text("none", style="dim"))
+    else:
+        for setting_name, schema_name in orphan_report.unresolved_schema_refs:
+            line = Text(escape(setting_name))
+            line.append("  ")
+            line.append(DASH, style="dim")
+            line.append("  ")
+            line.append(escape(schema_name), style="yellow")
+            unresolved_tree.add(line)
+    blocks.append(unresolved_tree)
+
+    # 3. Unreferenced schemas
+    unreferenced_schemas_root = Text("Unreferenced schemas", style="bold")
+    unreferenced_schemas_root.append(f"  ({len(orphan_report.unreferenced_schemas)})", style="dim")
+    unreferenced_schemas_tree = Tree(unreferenced_schemas_root)
+    if not orphan_report.unreferenced_schemas:
+        unreferenced_schemas_tree.add(Text("none", style="dim"))
+    else:
+        for schema_name in orphan_report.unreferenced_schemas:
+            unreferenced_schemas_tree.add(Text(escape(schema_name)))
+    blocks.append(unreferenced_schemas_tree)
+
+    # 4. Dangling component references
+    dangling_root = Text("Dangling component references", style="bold")
+    dangling_root.append(f"  ({len(orphan_report.dangling_component_refs)})", style="dim")
+    dangling_tree = Tree(dangling_root)
+    if not orphan_report.dangling_component_refs:
+        dangling_tree.add(Text("none", style="dim"))
+    else:
+        for param_name, pointer, comp_name in orphan_report.dangling_component_refs:
+            line = Text(escape(param_name))
+            line.append("  ")
+            line.append(_literal(pointer))
+            line.append("  ")
+            line.append(DASH, style="dim")
+            line.append("  ")
+            line.append(escape(comp_name), style="yellow")
+            dangling_tree.add(line)
+    blocks.append(dangling_tree)
+
+    # Interleave with blank lines
+    interleaved: list = []
+    for block in blocks:
+        interleaved.extend([block, Text()])
+    if interleaved:
+        interleaved.pop()  # Remove trailing blank
+
+    return Panel(Group(*interleaved), title=title)
+
+
 def _render_section(  # noqa: PLR0913
     section_name: str,
     identity: Identity,
@@ -538,6 +629,10 @@ def _render_section(  # noqa: PLR0913
             panel = build_extensions_panel(extensions)
             if panel:
                 console.print_renderable(panel)
+    elif section_name == "orphans":
+        orphan_report = build_orphan_report(config, index, descriptor_dict)
+        panel = build_orphans_panel(orphan_report)
+        console.print_renderable(panel)
 
 
 # CLI command function
@@ -548,7 +643,7 @@ def describe_cmd(
         list[str] | None,
         Option(
             "--section",
-            help="Render only this section (metadata|profiles|config-first|component-first|extensions). Repeatable.",
+            help="Render only this section (metadata|profiles|config-first|component-first|extensions|orphans). Repeatable.",
         ),
     ] = None,
 ) -> None:
@@ -579,13 +674,13 @@ def describe_cmd(
     # Determine which sections to render
     requested_sections = set(section or []) if section else set()
     if not requested_sections:
-        # All sections by default, but extensions only when present
+        # All sections by default, but extensions and orphans only when present
         requested_sections = {"metadata", "profiles", "config-first"}
         if descriptor_dict.get("x-placeholder-extensions"):
             requested_sections.add("extensions")
 
     # Canonical order, regardless of flag order
-    canonical_order = ["metadata", "profiles", "config-first", "component-first", "extensions"]
+    canonical_order = ["metadata", "profiles", "config-first", "component-first", "extensions", "orphans"]
     sections_to_render = [s for s in canonical_order if s in requested_sections]
 
     # Get resolved path for subtitle

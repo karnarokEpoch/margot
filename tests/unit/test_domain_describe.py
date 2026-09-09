@@ -13,6 +13,7 @@ from margot.domain.describe import (
     build_configuration,
     build_deployment_profiles,
     build_identity,
+    build_orphan_report,
     component_index,
     unreferenced_parameters,
 )
@@ -1140,3 +1141,379 @@ class TestUnreferencedParametersFunction:
         orphans = unreferenced_parameters(all_params, referenced)
 
         assert set(orphans) == {"orphan1", "orphan2"}
+
+
+class TestOrphanReportBuilder:
+    """Tests for the build_orphan_report builder function."""
+
+    def test_build_orphan_report_all_clean_returns_empty(self) -> None:
+        """Should return all-empty report when configuration is fully connected."""
+        from margot.domain.describe import build_orphan_report
+
+        # Fully connected config: all params referenced, all schemas used, no dangling components
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Param1",
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value="value1",
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="settings.param1",
+                                        components=["comp1"],
+                                    )
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp1"]
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Param1",
+                                "schema": "schema1",
+                            }
+                        ],
+                    }
+                ],
+                "schema": [{"name": "schema1", "dataType": "string"}],
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == []
+        assert report.unresolved_schema_refs == []
+        assert report.unreferenced_schemas == []
+        assert report.dangling_component_refs == []
+
+    def test_build_orphan_report_unreferenced_parameters(self) -> None:
+        """Should detect parameters not referenced by any setting."""
+        from margot.domain.describe import build_orphan_report
+
+        config = Configuration(
+            sections=[],
+            unreferenced=["orphan_param1", "orphan_param2"],
+        )
+        index = []
+        doc = {"configuration": {"schema": []}}
+
+        report = build_orphan_report(config, index, doc)
+
+        assert set(report.unreferenced_params) == {"orphan_param1", "orphan_param2"}
+        assert report.unresolved_schema_refs == []
+        assert report.unreferenced_schemas == []
+        assert report.dangling_component_refs == []
+
+    def test_build_orphan_report_unresolved_schema_references(self) -> None:
+        """Should detect settings referencing non-existent schemas."""
+        from margot.domain.describe import build_orphan_report
+
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Setting1",
+                            schema=None,  # Schema doesn't resolve
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = []
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Setting1",
+                                "schema": "missing_schema",
+                            }
+                        ],
+                    }
+                ],
+                "schema": [],  # No schemas declared
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == []
+        assert report.unresolved_schema_refs == [("Setting1", "missing_schema")]
+        assert report.unreferenced_schemas == []
+        assert report.dangling_component_refs == []
+
+    def test_build_orphan_report_unreferenced_schemas(self) -> None:
+        """Should detect schemas declared but not used by any setting."""
+        from margot.domain.describe import build_orphan_report
+
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Setting1",
+                            schema=Schema(name="used_schema", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = []
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Setting1",
+                                "schema": "used_schema",
+                            }
+                        ],
+                    }
+                ],
+                "schema": [
+                    {"name": "used_schema", "dataType": "string"},
+                    {"name": "unused_schema", "dataType": "integer"},
+                ]
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == []
+        assert report.unresolved_schema_refs == []
+        assert report.unreferenced_schemas == ["unused_schema"]
+        assert report.dangling_component_refs == []
+
+    def test_build_orphan_report_dangling_component_references(self) -> None:
+        """Should detect targets naming components not in the index."""
+        from margot.domain.describe import build_orphan_report
+
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Setting1",
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="settings.param1",
+                                        components=["comp1", "missing_comp"],
+                                    )
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp1"]  # Only comp1 exists
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Setting1",
+                                "schema": "schema1",
+                            }
+                        ],
+                    }
+                ],
+                "schema": [{"name": "schema1", "dataType": "string"}],
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == []
+        assert report.unresolved_schema_refs == []
+        assert report.unreferenced_schemas == []
+        assert report.dangling_component_refs == [("param1", "settings.param1", "missing_comp")]
+
+    def test_build_orphan_report_all_four_categories(self) -> None:
+        """Should detect all four categories of orphans in a complex configuration."""
+        from margot.domain.describe import build_orphan_report
+
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        # Setting with unresolved schema
+                        Setting(
+                            parameter="param1",
+                            name="Setting1",
+                            schema=None,
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[ParameterTarget(pointer="ptr1", components=["comp1"])],
+                            ),
+                        ),
+                        # Setting with dangling component
+                        Setting(
+                            parameter="param2",
+                            name="Setting2",
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="ptr2",
+                                        components=["dangling_comp"],
+                                    )
+                                ],
+                            ),
+                        ),
+                    ],
+                )
+            ],
+            unreferenced=["unreferenced_param"],
+        )
+        index = ["comp1"]
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Setting1",
+                                "schema": "missing_schema",
+                            },
+                            {
+                                "parameter": "param2",
+                                "name": "Setting2",
+                                "schema": "schema1",
+                            },
+                        ],
+                    }
+                ],
+                "schema": [
+                    {"name": "schema1", "dataType": "string"},
+                    {"name": "unused_schema", "dataType": "integer"},
+                ]
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == ["unreferenced_param"]
+        assert report.unresolved_schema_refs == [("Setting1", "missing_schema")]
+        assert report.unreferenced_schemas == ["unused_schema"]
+        assert report.dangling_component_refs == [("param2", "ptr2", "dangling_comp")]
+
+    def test_build_orphan_report_multiple_dangling_refs_same_parameter(self) -> None:
+        """Should report all dangling component refs, even multiple in same parameter."""
+        from margot.domain.describe import build_orphan_report
+
+        config = Configuration(
+            sections=[
+                ConfigurationSection(
+                    name="Settings",
+                    settings=[
+                        Setting(
+                            parameter="param1",
+                            name="Setting1",
+                            schema=Schema(name="schema1", data_type="string"),
+                            parameter_resolved=Parameter(
+                                value=None,
+                                targets=[
+                                    ParameterTarget(
+                                        pointer="ptr1",
+                                        components=["comp1", "missing1", "missing2"],
+                                    )
+                                ],
+                            ),
+                        )
+                    ],
+                )
+            ],
+            unreferenced=[],
+        )
+        index = ["comp1"]
+        doc = {
+            "configuration": {
+                "sections": [
+                    {
+                        "name": "Settings",
+                        "settings": [
+                            {
+                                "parameter": "param1",
+                                "name": "Setting1",
+                                "schema": "schema1",
+                            }
+                        ],
+                    }
+                ],
+                "schema": [{"name": "schema1", "dataType": "string"}],
+            }
+        }
+
+        report = build_orphan_report(config, index, doc)
+
+        assert len(report.dangling_component_refs) == 2
+        assert ("param1", "ptr1", "missing1") in report.dangling_component_refs
+        assert ("param1", "ptr1", "missing2") in report.dangling_component_refs
+
+    def test_build_orphan_report_handles_missing_configuration_key(self) -> None:
+        """Should gracefully handle missing configuration key in doc."""
+        from margot.domain.describe import build_orphan_report
+
+        config = Configuration(
+            sections=[],
+            unreferenced=[],
+        )
+        index = []
+        doc = {}  # No configuration key
+
+        report = build_orphan_report(config, index, doc)
+
+        assert report.unreferenced_params == []
+        assert report.unresolved_schema_refs == []
+        assert report.unreferenced_schemas == []
+        assert report.dangling_component_refs == []

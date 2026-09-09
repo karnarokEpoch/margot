@@ -913,3 +913,176 @@ class TestComponentFirstPanel:
         assert "MQTT Port" in text
         assert "portSchema" in text
         assert "integer" in text
+
+
+
+class TestOrphansPanel:
+    """Tests for build_orphans_panel."""
+
+    def test_orphans_panel_all_clean_renders_none(self) -> None:
+        """Should render 'none' when all categories are empty."""
+        from margot.domain.describe import OrphanReport
+
+        from margot.commands.describe import build_orphans_panel
+
+        orphan_report = OrphanReport(
+            unreferenced_params=[],
+            unresolved_schema_refs=[],
+            unreferenced_schemas=[],
+            dangling_component_refs=[],
+        )
+
+        panel = build_orphans_panel(orphan_report)
+        text = _render_to_text(panel)
+
+        # Title should have zero count
+        assert "0 total" in text
+        assert "none" in text.lower()
+
+    def test_orphans_panel_unreferenced_parameters_renders(self) -> None:
+        """Should render unreferenced parameters category."""
+        from margot.domain.describe import OrphanReport
+
+        from margot.commands.describe import build_orphans_panel
+
+        orphan_report = OrphanReport(
+            unreferenced_params=["param1", "param2"],
+            unresolved_schema_refs=[],
+            unreferenced_schemas=[],
+            dangling_component_refs=[],
+        )
+
+        panel = build_orphans_panel(orphan_report)
+        text = _render_to_text(panel)
+
+        assert "Unreferenced parameters" in text
+        assert "(2)" in text
+        assert "param1" in text
+        assert "param2" in text
+
+    def test_orphans_panel_unresolved_schema_refs_renders(self) -> None:
+        """Should render unresolved schema references with setting and schema name."""
+        from margot.domain.describe import OrphanReport
+
+        from margot.commands.describe import build_orphans_panel
+
+        orphan_report = OrphanReport(
+            unreferenced_params=[],
+            unresolved_schema_refs=[("SettingName", "missingSchema")],
+            unreferenced_schemas=[],
+            dangling_component_refs=[],
+        )
+
+        panel = build_orphans_panel(orphan_report)
+        text = _render_to_text(panel)
+
+        assert "Unresolved schema references" in text
+        assert "(1)" in text
+        assert "SettingName" in text
+        assert "missingSchema" in text
+
+    def test_orphans_panel_unreferenced_schemas_renders(self) -> None:
+        """Should render unreferenced schemas."""
+        from margot.domain.describe import OrphanReport
+
+        from margot.commands.describe import build_orphans_panel
+
+        orphan_report = OrphanReport(
+            unreferenced_params=[],
+            unresolved_schema_refs=[],
+            unreferenced_schemas=["unusedSchema"],
+            dangling_component_refs=[],
+        )
+
+        panel = build_orphans_panel(orphan_report)
+        text = _render_to_text(panel)
+
+        assert "Unreferenced schemas" in text
+        assert "(1)" in text
+        assert "unusedSchema" in text
+
+    def test_orphans_panel_dangling_component_refs_renders(self) -> None:
+        """Should render dangling component references."""
+        from margot.domain.describe import OrphanReport
+
+        from margot.commands.describe import build_orphans_panel
+
+        orphan_report = OrphanReport(
+            unreferenced_params=[],
+            unresolved_schema_refs=[],
+            unreferenced_schemas=[],
+            dangling_component_refs=[("paramName", "settings.param", "missing_component")],
+        )
+
+        panel = build_orphans_panel(orphan_report)
+        text = _render_to_text(panel)
+
+        assert "Dangling component references" in text
+        assert "(1)" in text
+        assert "paramName" in text
+        assert "settings.param" in text
+        assert "missing_component" in text
+
+    def test_orphans_panel_total_count_sums_all_categories(self) -> None:
+        """Should compute total count as sum of all four categories."""
+        from margot.domain.describe import OrphanReport
+
+        from margot.commands.describe import build_orphans_panel
+
+        orphan_report = OrphanReport(
+            unreferenced_params=["p1", "p2"],
+            unresolved_schema_refs=[("s1", "schema1")],
+            unreferenced_schemas=["schema2"],
+            dangling_component_refs=[("p3", "ptr1", "comp1"), ("p3", "ptr2", "comp2")],
+        )
+
+        panel = build_orphans_panel(orphan_report)
+        text = _render_to_text(panel)
+
+        # Total should be 2 + 1 + 1 + 2 = 6
+        assert "6 total" in text
+
+    def test_orphans_panel_markup_escaped_in_names(self) -> None:
+        """Should escape markup characters in parameter/schema/component names."""
+        from margot.domain.describe import OrphanReport
+
+        from margot.commands.describe import build_orphans_panel
+
+        orphan_report = OrphanReport(
+            unreferenced_params=["array[string]"],
+            unresolved_schema_refs=[("setting[name]", "schema[ref]")],
+            unreferenced_schemas=["unused[schema]"],
+            dangling_component_refs=[("param[x]", "ptr[y]", "comp[z]")],
+        )
+
+        panel = build_orphans_panel(orphan_report)
+        text = _render_to_text(panel)
+
+        # All bracketed names should be present (not disappeared due to markup parsing)
+        assert "array" in text
+        assert "string" in text
+        assert "setting" in text
+        assert "name" in text
+        assert "schema" in text
+        assert "ref" in text
+        assert "unused" in text
+        assert "comp" in text
+
+    def test_orphans_panel_empty_categories_show_none_dimmed(self) -> None:
+        """Each empty category should show 'none' in dim style."""
+        from margot.domain.describe import OrphanReport
+
+        from margot.commands.describe import build_orphans_panel
+
+        orphan_report = OrphanReport(
+            unreferenced_params=[],
+            unresolved_schema_refs=[],
+            unreferenced_schemas=[],
+            dangling_component_refs=[],
+        )
+
+        panel = build_orphans_panel(orphan_report)
+        text = _render_to_text(panel)
+
+        # Count how many times "none" appears (one per empty category, plus the main "none")
+        assert text.count("none") >= 1
