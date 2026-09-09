@@ -54,12 +54,11 @@ Unordered within groups; sequencing decided at sprint planning.
 
 ### Cross-cutting
 
-* ~~`margot push --dry-run` — validate readiness without pushing, `Dry run OK: ...` output~~
-  ✓ done (post-Sprint 4, unplanned addition — see `FEATURES.md` → `margot push`)
-* ~~`domain/tags.py` OCI tag + SemVer validation~~ ✓ done (Sprint 3)
-* ~~`domain/metadata.py` `margo.yaml` project descriptor parsing~~ ✓ done (Sprint 3)
-* ~~`config.py` full dynaconf layering~~ ✓ done (Sprint 3)
-* ~~**Update FEATURES.md** `fetch` section: positional URI + raw JSON~~ ✓ done
+* `margot init` — scaffold a new Margo project: generate a starter `margo.yaml` and the
+  expected directory layout (`margo/app.yaml.jinja`, optional `compose/` / `quadlet/`).
+  Already referenced in the "`margo.yaml` not found" error hint (`Run margot init or
+  create it manually`) but not yet implemented — the command the error points at does not
+  exist. Land the command, then reconcile `FEATURES.md`.
 
 ---
 
