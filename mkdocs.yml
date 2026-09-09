@@ -23,9 +23,10 @@ theme:
 
 nav:
   - Home: index.md
-  - margo.yaml: margo-yaml.md
-  - Configuration: config.md
-  - Concepts: concepts.md
+  - Guides:
+    - Getting Started: guides/getting-started.md
+    - Authentication: guides/authentication.md
+    - CI/CD integration: guides/ci-cd.md
   - Commands:
     - build: commands/build.md
     - push: commands/push.md
@@ -34,6 +35,9 @@ nav:
     - verify: commands/verify.md
     - describe: commands/describe.md
     - auth: commands/auth.md
+  - margo.yaml: margo-yaml.md
+  - Configuration: config.md
+  - Concepts: concepts.md
   - Examples:
     - Minimal (Helm): examples/minimal.md
     - Basic (Quadlet): examples/basic-quadlet.md
