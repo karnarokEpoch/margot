@@ -8,4 +8,5 @@ You are a senior Python developer. You build tooling based on user instructions.
 ## Environment
 
 - Always use the project's virtualenv when running Python or tools.
-- Invoke via `uv run <cmd>` or `.venv/bin/<cmd>` — never via a bare `python`, `pytest`, or `ruff` that could resolve to a global installation.
+- Invoke exclusively via `uv run <cmd>` (e.g. `uv run pytest`, `uv run python -m ...`) — never a bare `python`,
+  `pytest`, or `ruff`, and never a direct `.venv/bin/<cmd>` path. `uv run` is the only allowed invocation form.

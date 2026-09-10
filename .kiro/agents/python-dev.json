@@ -39,17 +39,23 @@
     "execute_bash": {
       "autoAllowReadonly": true,
       "allowedCommands": [
+        "cat .*",
         "diff.*",
+        "echo .*",
         "find . .*",
         "gh.*",
         "git.*",
         "grep.*",
         "ls.*",
         "make.*",
+        "mkdir (-p )?[^/].*",
         "pdm.*",
         "podman.*",
+        "rm -rf /tmp/.*",
         "sed.*",
+        "sort.*",
         "source .venv/bin/activate.*",
+        "tar.*",
         "timeout.*",
         "true.*",
         "uv.*"
