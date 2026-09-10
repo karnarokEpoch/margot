@@ -3,6 +3,7 @@
 Forward register: planned features, fixes to make, ideas, and backlog. A queue of intent, not a spec.
 
 The authority model:
+
 - **ROADMAP.md** (this file) — what to build next.
 - **`.kiro/sprints/sprint-N.md`** — authoritative design while a release is being built; deleted on close-out.
 - **`docs/`** — standing source of truth for shipped behavior.
@@ -40,27 +41,26 @@ Unordered within groups; sequencing decided at sprint planning.
 
 ### Display UX
 
-* Minified JSON output + make minified the **default** display for artifacts
+- Minified JSON output + make minified the **default** display for artifacts
   (fetch may keep pretty as default — TBD).
-* Table output when listing **multiple** URIs (new `list`-style command).
+- Table output when listing **multiple** URIs (new `list`-style command).
 
 ### Manifest recognition & validation (on JSON output)
 
-* Detect & label: recognized margo manifest / valid / invalid / unknown OCI artifact.
+- Detect & label: recognized margo manifest / valid / invalid / unknown OCI artifact.
 
 ### More artifact types in `fetch`
 
-* image, compose component, quadlet component, helm chart.
-* Extend `PackageType` enum + per-type display.
+- image, compose component, quadlet component, helm chart.
+- Extend `PackageType` enum + per-type display.
 
 ### Cross-cutting
 
-* ~~`margot push --dry-run` — validate readiness without pushing, `Dry run OK: ...` output~~
-  ✓ done (post-Sprint 4, unplanned addition)
-* ~~`domain/tags.py` OCI tag + SemVer validation~~ ✓ done (Sprint 3)
-* ~~`domain/metadata.py` `margo.yaml` project descriptor parsing~~ ✓ done (Sprint 3)
-* ~~`config.py` full dynaconf layering~~ ✓ done (Sprint 3)
-* ~~**Update docs** `fetch` section: positional URI + raw JSON~~ ✓ done
+- `margot init` — scaffold a new Margo project: generate a starter `margo.yaml` and the
+  expected directory layout (`margo/app.yaml.jinja`, optional `compose/` / `quadlet/`).
+  Already referenced in the "`margo.yaml` not found" error hint (`Run margot init or
+  create it manually`) but not yet implemented — the command the error points at does not
+  exist. Land the command, then reconcile `FEATURES.md`.
 
 ---
 
