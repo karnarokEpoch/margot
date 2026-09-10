@@ -1,6 +1,6 @@
 # margot — Testing Plan
 
-All features defined in [FEATURES.md](FEATURES.md) must have test coverage.
+All behavior documented in [docs/](https://karnarokepoch.github.io/margot/) and defined in the active sprint file must have test coverage.
 
 ---
 

@@ -1,172 +1,204 @@
-# Sprint 9 — `--json` output and stable error codes
+# Sprint 9 — Shared remote OCI resolution for `describe` and `verify`
 
-**Goal:** Make margot's output and failure modes machine-consumable, without changing
-any human-facing rich rendering by default. An agent (or script) driving margot today
-has exactly one structured surface (`fetch`'s raw manifest JSON) and one failure signal
-(`Exit(1)` + an English sentence on stderr) — everywhere else it must screen-scrape rich
-panels/trees or string-match error text. This sprint closes both gaps.
+**Goal:** Let `margot describe` and `margot verify` inspect a published Margo application artifact directly, using the
+same OCI inspection and layer-pull mechanics as `fetch` and `pull`. A command with no positional URI remains
+local-project behavior; a command with a URI validates, pulls the remote margo artifact into a temporary directory, and
+then runs the existing local descriptor pipeline against that downloaded `app.yaml`.
 
-**Prerequisite:** none — orthogonal to Sprint 8 (`describe` traversal/orphan work).
-Can run in parallel or before/after; touches `console.py` and every `commands/*.py`
-file, not `domain/describe.py`'s data model itself (Sprint 8's new dataclasses should
-serialize for free once this lands, if Sprint 8 ships first — see Item 1 ordering note).
+This finishes the remote `describe` capability that was planned in Sprint 8 but did not land in release 0.8.0, and
+extends the same capability to `verify`. It replaces the previous backlog concept of `verify --remote` reachability-only
+checks with actual remote descriptor validation.
 
----
+**Prerequisite:** Sprint 8's local `describe` views are released. The former Sprint 9 machine-output/error-code plan has
+been renumbered to Sprint 10.
+
+______________________________________________________________________
 
 ## Context: current state (verified against source)
 
-- `console.print_json` exists (`src/margot/console.py`) but only `fetch` uses it — every
-  other command (`build`, `push`, `pull`, `verify`, `describe`) is rich-text/panel-only,
-  with no structured alternative.
-- `console.fatal()` (22 call sites across `auth.py`, `build.py`, `push.py`, `pull.py`,
-  `fetch.py`, `verify.py`, `describe.py`) always: prints a free-text `str` to stderr,
-  raises `Exit(1)`. Every failure — bad flag, expired credentials, network error,
-  SemVer violation, unloadable descriptor — collapses to the same exit code. Nothing
-  distinguishes them but message wording.
-- `domain/validation.py` already has clean, serializable dataclasses:
-  `ValidationFinding` (`field_path`, `message`, `severity`), `VerifyResult`
-  (`schema_a_results`, `schema_b_results`, `schema_a_version`, `passed`). No `rich`
-  import — trivial to serialize as-is.
-- `domain/describe.py`'s display dataclasses (`Identity`, `Catalog`, `DeploymentProfile`,
-  `Configuration`, etc.) are equally clean — pure data, no `rich` import (per
-  rich-rendering.md's layering rule: `domain/` never imports `rich`).
-- stdout/stderr separation is already correct and should be preserved exactly:
-  `success`/structured-data → stdout (pipeable), `warning`/`info`/`debug`/`fatal` →
-  stderr. This sprint extends the pattern, doesn't change it.
-- Global flags (`-v`/`-d`/`-V`) are wired once via `app.callback()` in
-  `commands/global_options.py`, backed by module-level flags in `console.py`
-  (`set_verbose`/`set_debug`). `--json` should follow the identical shape.
+- `describe` and `verify` currently resolve only local files: an explicit `--manifest`, or `margo.yaml` in
+  `--project-dir` followed by `app.yaml.jinja` / `app.yaml` resolution. Neither command accepts a positional URI.
+- `services/verify.py::resolve_descriptor` is the shared local resolution mechanism. An explicit static `app.yaml`
+  bypasses `margo.yaml`, which makes it suitable for a downloaded remote descriptor; `describe` layers its YAML-mapping
+  and `kind: ApplicationDescription` load gate on top of this resolver.
+- `services/fetch.py::fetch_manifest` already normalizes an optional `oci://` scheme, validates the OCI reference,
+  checks credential expiry, and obtains a manifest through `infra/oci.py::OrasClient`.
+- `services/pull.py::pull_artifact` performs the same registry checks and downloads artifact layers. Margo artifacts use
+  the ORAS pull path and write their layers, including `app.yaml`, to the caller-provided output directory.
+- `pull_artifact` currently adds a SemVer gate that conflicts with the documented behavior: `pull` and
+  `fetch` are inspection commands and must retrieve arbitrary existing OCI references, including legacy tags. This
+  defect would reject remote inspection references such as `public.ecr.aws/g2n4p2m7/margo:1.1.0_legacy-manifest`.
+- `artifact_type_to_package_type` maps the OCI manifest's `artifactType` to `PackageType`. Only `PackageType.MARGO`
+  contains an application description; compose, quadlet, and unknown artifacts must fail before their layers are
+  accepted by `describe` or `verify`.
 
----
+______________________________________________________________________
 
 ## Scope
 
-### Item 1 — `--json` flag on `describe` and `verify`
+### Item 1 — Optional remote OCI URI for `describe` and `verify`
 
-These two are the highest-value read commands for an agent: "what's in this descriptor"
-and "is it valid." Both already have fully-built display/result dataclasses with zero
-`rich` coupling — this is a serialization problem, not a data-modeling one.
+Both commands receive the same optional positional argument:
 
-**`margot verify --json`:**
-```json
-{
-  "passed": false,
-  "schema_a_version": "45f4359",
-  "schema_a_results": [
-    {"field_path": "deploymentProfiles[0].components[1].name", "message": "...", "severity": "ERROR"}
-  ],
-  "schema_b_results": []
-}
-```
-Direct `dataclasses.asdict`-style dump of `VerifyResult`, `Severity` as its string value.
-No new fields — this is the same data `verify`'s pass/fail lines are already built from.
+- `margot describe [URI] [--project-dir PATH] [--manifest PATH] [--section ...]`
+- `margot verify [URI]` with its existing project, manifest, schema, recommendation,
+  and strictness options
 
-**`margot describe --json`:**
-Dump whichever sections were requested via `--section` (same selection logic, same
-default-set behavior) as a single JSON object keyed by section name (`metadata`,
-`profiles`, `config-first` / `component-first` if Sprint 8 has landed, `extensions`).
-Structure mirrors the display dataclasses directly — no rich-specific concepts (no tree
-depth, no panel titles) leak into the JSON; e.g. the "immutable" flag is a plain
-`"immutable": true` field, not a rendered `[Setting] immutable` string.
+`URI` is a full tagged OCI reference, for example `public.ecr.aws/g2n4p2m7/margo:1.0.0`. An `oci://`-prefixed reference
+remains accepted, matching `fetch` and `pull`.
 
-**Design decision (needs confirmation before implementation):** is `--json` a boolean
-flag that *replaces* rich output (`describe --json` prints only JSON, nothing else), or
-does it live alongside `--section` as an output-mode toggle usable with any section
-selection? Leaning toward: boolean flag, mutually exclusive with nothing, always replaces
-rich rendering entirely when passed — one command, one output contract per invocation,
-no mixed stdout.
+#### Invocation contract
 
-**Files:**
-- `src/margot/commands/verify.py`, `src/margot/commands/describe.py` — add `--json`,
-  branch to `console.print_json` instead of panel/text rendering.
-- `src/margot/console.py` — no change expected; `print_json` already exists.
-- Unit tests: JSON output asserted against the same fixtures already used for the rich
-  rendering tests (sensor-dashboard descriptor, existing verify fixtures) — same input,
-  assert the JSON shape instead of screen text.
-- `FEATURES.md` — document the flag and shape per command.
+1. **No URI:** behavior remains exactly local. Existing `--project-dir`, `--manifest`, descriptor rendering, schema
+   options, output, and exit behavior must not regress.
+1. **URI supplied:** it is remote mode. It is never interpreted as a local filename or project path. A malformed/non-OCI
+   value fails via the existing URI validation before any registry or filesystem operation.
+1. **Mutual exclusion:** a URI cannot be combined with an explicitly supplied `--project-dir` or with `--manifest`. Fail
+   before I/O with one shared clear message:
+   > URI and --project-dir/--manifest are mutually exclusive — describe or verify either a
+   > remote artifact or a local project, not both.
 
-### Item 2 — Stable error codes
+   Change the CLI's `project_dir` default to `None` and substitute `.` only for local
+   mode, so the implementation can distinguish an omitted flag from `--project-dir .`.
+1. All existing `verify` flags remain usable in remote mode. In particular, `--recommend`, `--only-recommend`,
+   `--strict`, `--schema`, and `--recommended-schema` retain exactly their local semantics and mutual-exclusion checks.
+1. All existing `describe --section` choices remain usable in remote mode. Section selection and canonical ordering do
+   not vary by descriptor source.
 
-Replace the single `Exit(1)` catch-all with a small, closed set of exit codes, so a
-caller can branch without string-matching. Proposed taxonomy (subject to review — this
-is the one open design decision that needs a decision before coding):
+#### Shared remote-resolution service
 
-| Code | Meaning | Example current call sites |
-|---|---|---|
-| `0` | Success | — |
-| `1` | Generic/unexpected failure (fallback — every current bare `except Exception` case) | `build.py:88`, `push.py:91`, `pull.py:56`, `fetch.py:20/22` |
-| `2` | Usage error — bad flag/argument combination, caught before any I/O | `verify.py:39` (mutually exclusive flags), `build.py:20`/`push.py:20` (invalid `--type`), `pull.py:33` (invalid `--force-type`), `auth.py:54/57/61` (missing credentials input) |
-| `3` | Validation failure — the input was well-formed but semantically invalid (SemVer, schema, descriptor load gate) | `verify.py:86/138` (schema failures), `describe.py:478` (unloadable descriptor), `build.py:86` (SemVer/metadata error) |
-| `4` | Remote/auth failure — registry unreachable, credentials expired/rejected | `auth.py:74/86` (login/logout failure), `push.py:89` (push failure — may need finer split between local validation and remote failure inside `services/push.py`) |
+Add one service-level remote resolver (for example `services/remote.py`) used by both commands. It owns the entire
+remote source lifecycle and returns a context containing:
 
-**Open question:** several `fatal()` sites currently wrap a caught `Exception` with a
-generic message (`f"Build failed: {e}"`) without distinguishing *why* it failed — the
-exception type is already known at the catch site, just discarded. Assigning the right
-code means inspecting what exception types `services/*.py` actually raises today
-(`ValueError`, `TypeError`, oras-py exceptions, etc.) and mapping each to a category
-*before* implementation — this needs a short audit pass per command, not a guess.
+the normalized URI, the path of the downloaded `app.yaml`, and a live temporary-directory handle whose cleanup remains
+the caller's responsibility. The resolver must not produce rich renderables or validation output.
 
-**Implementation shape:**
-- `console.fatal(message: str, code: int = 1)` — add an optional `code` param, default
-  preserves today's behavior for any call site not yet updated (no silent behavior
-  change for callers not touched this sprint).
-- Update call sites incrementally, command by command, each as its own commit — 22 call
-  sites across 7 files is enough surface area to regress silently if done as one sweep.
-- `FEATURES.md` gets a new "Exit codes" reference table — this is the authoritative
-  contract callers (including agents) rely on; once published, codes should be treated
-  as stable API, same weight as the OCI media type table.
+It must use the **same registry mechanics as `fetch` and `pull`**, not make a bespoke ORAS request or download only a
+single blob:
 
-**Files:** `src/margot/console.py`, all 7 command files with `fatal()` calls,
-`FEATURES.md`.
+1. Normalize `oci://`, validate the URI, and check credentials using the shared pull / fetch path.
+1. Fetch the manifest through the shared OCI inspection path and map its `artifactType`.
+1. Require `PackageType.MARGO` before downloading. For compose, quadlet, unknown, or absent artifact types, raise a
+   clear error naming the actual type (or `unknown`) and direct the user to `margot fetch <uri>` for raw-manifest
+   inspection.
+1. Pull the margo artifact into a `tempfile.TemporaryDirectory`, with `recursive=False`. Reuse the margo layer-pull
+   implementation behind `pull_artifact`; refactor common fetch/pull internals as necessary to avoid diverging URI
+   validation, credential checks, manifest handling, or ORAS transfer behavior. Do not duplicate the margo layer
+   downloader in the new resolver.
+1. Locate the pulled root `app.yaml` from the pull result. If the artifact passed its type gate but did not produce an
+   application description layer, raise a clear error.
+1. Do not persist anything in the caller's directory. Always clean the entire temporary directory in `finally`, after
+   the command has rendered or validated the descriptor.
 
-### Item 3 — `--json` error envelope (depends on Item 2)
+The reusable boundary matters: an OCI retrieval defect seen through remote `describe` or `verify` must reproduce through
+`margot pull` and be fixed in the shared pull/fetch mechanics, not papered over in either inspection command.
 
-Once exit codes exist, pair them with a structured error on stderr when `--json` is
-active, so a caller doesn't need *both* the exit code *and* to parse English:
+#### Arbitrary-reference inspection fix
 
-```json
-{"error": true, "code": 3, "message": "Schema A: FAIL — 2 errors, 0 warnings"}
-```
+Make the read-only registry contract internally consistent:
 
-Only emitted when `--json` was passed for that invocation — a script not asking for JSON
-still gets today's plain-English `Error: ...` line. `console.fatal()` needs to know
-whether the current invocation is in JSON mode (module-level flag, same pattern as
-`_verbose`/`_debug`) to choose the envelope vs. the prose line.
+- Remove the SemVer gate from `pull_artifact`; it is a build/push constraint, not an OCI inspection constraint.
+- Preserve URI syntax validation, credential-expiry checks, artifact-type handling, malicious-annotation protections,
+  and all other pull safeguards.
+- `margot pull`, `margot fetch`, remote `describe`, and remote `verify` must all accept an existing arbitrary/legacy OCI
+  tag. No `--force` is needed merely because a tag is not SemVer.
+- Build and push retain their existing SemVer validation unchanged.
 
-**Files:** `src/margot/console.py` (`set_json_mode` / `is_json_mode`, branch in
-`fatal()`), same command files as Item 2.
+#### Re-enter the existing local pipelines
 
-### Item 4 — `--no-color` / `NO_COLOR` support
+The remote resolver hands the pulled static `app.yaml` to the commands as an internal explicit manifest path:
 
-Rich auto-detects non-TTY and usually suppresses color when piped, but an explicit,
-guaranteed-off switch removes ambiguity for a caller capturing output into logs it
-stores or re-displays. Support both an explicit `--no-color` flag and the `NO_COLOR`
-env var convention (https://no-color.org) — check `NO_COLOR` presence in
-`global_options.py` alongside the existing `-v`/`-d` wiring, force rich's
-`Console(no_color=True)` at the `_get_stdout`/`_get_stderr` factories in `console.py`.
+- **Verify:** call the existing `verify_service.verify` with that path. Schema A/B, template behavior (not applicable to
+  a pulled static descriptor), findings, strict behavior, result dataclass, output, and exit rules remain the existing
+  code path.
+- **Describe:** run the existing `load_descriptor` load gate and display-model builders against that path. The remote
+  artifact must receive the same YAML parsing, mapping/type gate, configuration joins, orphan observations, and
+  rich-rendering protections as a local descriptor.
 
-**Files:** `src/margot/console.py`, `src/margot/commands/global_options.py`.
+Do not require a downloaded remote artifact to contain a local project `margo.yaml`. The pulled `app.yaml` is the
+manifest passed internally; it is a static source and therefore correctly bypasses local project resolution.
 
----
+#### Remote describe identity and subtitle
 
-## Out of scope (explicitly deferred)
+Remote `describe` must identify its real source rather than expose a temporary path:
 
-- `build`/`push`/`pull` gaining `--json` — these are action commands whose primary value
-  is the side effect (files written, artifact pushed), not information retrieval. Their
-  `success()` line could grow a structured counterpart later, but `describe`/`verify`
-  are the clear first targets; revisit after those ship and prove the pattern.
-- Retrying/backoff logic, or any agent-side tooling — this sprint only makes margot's
-  own output/exit contract legible; it does not add agent orchestration features.
-- Changing default (non-`--json`) output in any way — every existing rich panel, tree,
-  and `console.success` line stays exactly as-is for interactive/human use.
+- The identity panel subtitle is `<normalized-uri> (remote)`.
+- Its `OCI:` line is the same normalized URI, even though the remote artifact does not provide the local `margo.yaml`
+  metadata currently used to derive that line.
+- Local behavior is unchanged: the subtitle remains the local source path (with `(rendered)` for a Jinja template), and
+  the OCI line remains derived from local metadata when configured.
 
-## Decisions needed before implementation
+Keep this source/OCI override at the command/display boundary or as explicit optional pure-data inputs; `domain/`
+remains free of filesystem, OCI, console, and rich imports.
 
-1. Does `--json` fully replace rich output for that invocation, or can it combine with
-   partial `--section` selection on `describe`? (Leaning: full replace, see Item 1.)
-2. Final exit code taxonomy (Item 2 table above is a proposal, not locked) — needs a
-   pass through `services/*.py` to confirm what exceptions are actually raised where,
-   rather than assigning codes from the command layer's current generic catches alone.
-3. Whether `--json` and `--no-color` are per-command flags or promoted to
-   `global_options.py` like `-v`/`-d`/`-V` — global is more consistent with existing
-   convention but `--json` only makes sense on commands that produce structured output today.
+#### Errors and exits
+
+All user-facing errors continue through the existing command error handling and `console.fatal`; this sprint does not
+introduce a new exit-code taxonomy.
+
+| Condition | Expected behavior | | --- | --- | | URI malformed or untagged | Existing `validate_uri` error before
+network or temp-dir creation. | | URI plus `--project-dir` or `--manifest` | Shared mutual-exclusion error before I/O. |
+| Credentials expired | Existing credential error, unchanged. | | Registry/ORAS failure | Existing propagated pull/fetch
+failure, unchanged. | | OCI artifact not margo | Clear hard error; no best-effort descriptor parsing; direct to
+`margot fetch`. | | Margo artifact lacks root `app.yaml` | Clear hard error; temp dir still removed. | | Pulled
+`app.yaml` is invalid/unloadable | Existing `describe` load-gate or `verify` descriptor/schema behavior, respectively. |
+| Non-SemVer but valid OCI tag | Allowed for all read-only remote commands. |
+
+### Tests (TDD)
+
+Add expected-behavior tests before or alongside implementation. Mock the ORAS client at the `infra/oci.py` boundary; no
+test contacts a live registry.
+
+#### Pull/fetch regression coverage
+
+- Arbitrary/legacy OCI tags pass URI validation and pull without `--force`; build/push SemVer tests remain unchanged.
+- The shared inspection/pull path still validates malformed URIs, checks credentials, maps artifact types, and preserves
+  margo-layer download behavior.
+
+#### Shared remote resolver
+
+- Valid margo manifest + pulled `app.yaml` returns the descriptor path and normalized URI, calls the shared pull
+  mechanics with `recursive=False`, and removes the temp directory after use.
+- The type gate rejects compose, quadlet, unknown, and missing `artifactType` before accepting a descriptor.
+- Missing `app.yaml`, expired credentials, malformed URI, ORAS failure, and cleanup on every exception path are covered.
+- A non-SemVer legacy tag succeeds through the remote resolver.
+
+#### CLI / end-to-end coverage
+
+- Existing local `describe` and `verify` calls retain their current behavior.
+- `margot describe public.ecr.aws/g2n4p2m7/margo:1.0.0` uses the remote resolver, renders the same panels as an
+  equivalent local static descriptor, and shows the URI plus `(remote)` in the identity subtitle and OCI line.
+- Remote `describe --section metadata` and `--section component-first` respect the same filtering and ordering as local
+  mode.
+- `margot verify public.ecr.aws/g2n4p2m7/margo:1.0.0` produces the same Schema A/B results, including `--recommend`,
+  `--only-recommend`, and `--strict`, as the equivalent local static descriptor.
+- Both commands reject URI + `--project-dir`, URI + `--manifest`, malformed positional values, non-margo manifests, and
+  missing descriptor layers without a network transfer when rejection is local.
+- Command help shows the optional positional URI and preserves the local flag help.
+
+### Documentation and definition of done
+
+- Update the relevant docs command-reference pages for `describe` and `verify`: optional URI, local-vs-remote behavior, mutual
+  exclusion, margo-only type gate, arbitrary existing OCI tags, temporary/non-persistent pull, remote subtitle/OCI line,
+  and unchanged verification flags.
+- Update the relevant user documentation (`README.md`, `docs/index.md`, and command documentation when introduced) with
+  the canonical remote example `margot describe public.ecr.aws/g2n4p2m7/margo:1.0.0` and its `verify` counterpart. Do
+  not use project/customer-specific references in docs.
+- Remove the obsolete backlog item for reachability-only `verify --remote`; this sprint supersedes it.
+- `uv run pytest` passes, including the new regression and CLI tests.
+- `make docs-check` passes if docs are touched.
+- Lint/type checks configured by the project pass.
+- Implementation is committed in a conventional commit after all validation passes.
+
+______________________________________________________________________
+
+## Out of scope
+
+- Checking reachability of every component referenced *inside* an application descriptor. This sprint
+  validates/describes the root remote application descriptor; recursive component reachability remains future work.
+- Recursive download of component artifacts. The temporary pull is `recursive=False`; commands need only the root
+  `app.yaml`.
+- Remote rendering of compose, quadlet, image, Helm, or unknown artifacts. They do not contain a Margo application
+  description and are rejected.
+- Persisting the temporary artifact or adding an output directory flag. Use `margot pull` when layers must be kept.
+- `--json`, stable exit codes, JSON error envelopes, or `NO_COLOR`; those remain the separately planned Sprint 10 work.
