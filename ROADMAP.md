@@ -1,11 +1,13 @@
 # margot — Roadmap
 
-Agile, vertical-slice roadmap. Each sprint ships one working, end-to-end capability
-through all layers rather than building layers horizontally.
+Forward register: planned features, fixes to make, ideas, and backlog. A queue of intent, not a spec.
 
-See [FEATURES.md](FEATURES.md) for the full spec and [TESTING.md](TESTING.md) for the
-test plan. Where this roadmap diverges from FEATURES.md, this roadmap wins for
-sequencing; FEATURES.md is updated as items land (see backlog).
+The authority model:
+
+- **ROADMAP.md** (this file) — what to build next.
+- **`.kiro/sprints/sprint-N.md`** — authoritative design while a release is being built; deleted on close-out.
+- **`docs/`** — standing source of truth for shipped behavior.
+- **Git history** — archives of each sprint's design decisions via close-out commits.
 
 ---
 
@@ -39,22 +41,22 @@ Unordered within groups; sequencing decided at sprint planning.
 
 ### Display UX
 
-* Minified JSON output + make minified the **default** display for artifacts
+- Minified JSON output + make minified the **default** display for artifacts
   (fetch may keep pretty as default — TBD).
-* Table output when listing **multiple** URIs (new `list`-style command).
+- Table output when listing **multiple** URIs (new `list`-style command).
 
 ### Manifest recognition & validation (on JSON output)
 
-* Detect & label: recognized margo manifest / valid / invalid / unknown OCI artifact.
+- Detect & label: recognized margo manifest / valid / invalid / unknown OCI artifact.
 
 ### More artifact types in `fetch`
 
-* image, compose component, quadlet component, helm chart.
-* Extend `PackageType` enum + per-type display.
+- image, compose component, quadlet component, helm chart.
+- Extend `PackageType` enum + per-type display.
 
 ### Cross-cutting
 
-* `margot init` — scaffold a new Margo project: generate a starter `margo.yaml` and the
+- `margot init` — scaffold a new Margo project: generate a starter `margo.yaml` and the
   expected directory layout (`margo/app.yaml.jinja`, optional `compose/` / `quadlet/`).
   Already referenced in the "`margo.yaml` not found" error hint (`Run margot init or
   create it manually`) but not yet implemented — the command the error points at does not

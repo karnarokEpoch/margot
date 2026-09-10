@@ -173,9 +173,8 @@ If you curate your own rc includes rather than a raw rc append, use
 ## Learn more
 
 - [Documentation](https://karnarokepoch.github.io/margot/) — full command reference,
-  `margo.yaml` reference, and worked examples (Helm, Compose, Quadlet, multi-component).
-- [FEATURES.md](FEATURES.md) — authoritative spec: architecture, commands, OCI media
-  types, config, error handling.
+  `margo.yaml` reference, configuration, and worked examples (Helm, Compose, Quadlet, multi-component).
+- [ROADMAP.md](ROADMAP.md) — planned features, fixes, and ideas.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, testing, release process.
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — community standards.
 

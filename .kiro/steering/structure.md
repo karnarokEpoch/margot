@@ -21,8 +21,7 @@ description: >
 - `docs/` and `mkdocs.yml` — public MkDocs site.
 - `.kiro/agents/`, `.kiro/skills/`, `.kiro/steering/`, and `.kiro/sprints/` — local agent configuration, on-demand
   procedures, persistent guidance, and approved plans.
-- `FEATURES.md`, `TESTING.md`, `ROADMAP.md`, and `CONTRIBUTING.md` — product spec, test strategy, delivery plan, and
-  contributor workflow.
+- `TESTING.md`, `ROADMAP.md`, and `CONTRIBUTING.md` — test strategy, forward register, and contributor workflow.
 
 ## Organisation rules
 
@@ -30,5 +29,5 @@ Dependencies point inward: `commands` → `services` → `domain` and `infra`. `
 `validation` returns data rather than terminal renderables. Keep tests aligned to their matching scope and place user
 documentation in `docs/`, not in source comments.
 
-`FEATURES.md` owns the detailed architecture and layer-responsibility table. See `tech.md` for runtime and validation
+This structure mirrors the layer-responsibility table in `structure.md`. See `tech.md` for runtime and validation
 commands; see `code-conventions.md` for detailed code rules.
