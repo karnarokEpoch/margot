@@ -86,6 +86,8 @@ $ margot --help
 │ build     Build Margo application package types locally.                     │
 │ push      Push built Margo application artifacts to an OCI registry.         │
 │ pull      Pull OCI artifact layers to a local directory.                     │
+│ package   Bundle built artifacts into an offline .tgz for disconnected      │
+│           deployment.                                                        │
 │ verify    Validate the Margo application description against the Margo spec │
 │           schema.                                                            │
 │ describe  Describe a Margo application description in rich, structured      │
@@ -154,6 +156,23 @@ Log in first if the registry requires auth:
 ```bash
 margot auth login
 ```
+
+### Package for offline delivery
+
+```bash
+margot build
+margot package
+```
+
+`package` collects everything `build` produced and bundles it into a single
+`<id>-<version>.tgz` — for deployment in disconnected environments without registry
+access. The bundle is written to `.dist/<version>/` by default:
+
+```
+.dist/1.0.0/com-example-nginx-1.0.0.tgz
+```
+
+Pass `--output` to write it elsewhere. A bundle is never pushed to a registry.
 
 ### Pull and inspect a published artifact
 
