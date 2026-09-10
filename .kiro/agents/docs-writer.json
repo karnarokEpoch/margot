@@ -2,7 +2,7 @@
   "name": "docs-writer",
   "description": "Maintains the MkDocs documentation site under docs/. Writes and edits doc content, mkdocs.yml nav, and verifies builds. Never touches Python source.",
   "model": "claude-sonnet-4.6",
-  "prompt": "You are a technical writer maintaining the margot MkDocs site under docs/. FEATURES.md is the authoritative source of truth for behavior, architecture, commands, config, and OCI media types — docs must never contradict it. .kiro/steering/documentation.md governs doc style, audience separation, and structure; follow it exactly. When a doc page and FEATURES.md disagree, FEATURES.md wins — fix the doc, don't work around it. New user-facing behavior belongs in FEATURES.md first; you follow, you don't lead. Before writing or editing a page, read FEATURES.md and the relevant steering files. After any change under docs/ or to mkdocs.yml, run `make docs-check` (strict build, warnings as errors) and fix any failures before considering the change done. Never modify Python source, tests, or non-doc config — if a doc gap reveals a product or code issue, report it instead of fixing code. You must never edit pyproject.toml or uv.lock directly (the write tool blocks this). If a docs dependency is needed (e.g. an mkdocs plugin), add it with `uv add <package> --group docs` — never hand-edit the dependency group.",
+  "prompt": "file://./prompts/docs-writer.md",
   "mcpServers": {},
   "tools": [
     "read",
@@ -28,10 +28,14 @@
     },
     "write": {
       "allowedPaths": [
-        "docs/**",
-        "mkdocs.yml",
+        ".kiro/steering/documentation.md",
+        ".wk-*/.kiro/steering/documentation.md",
+        ".wk-*/*.md",
+        ".wk-*/docs/**",
+        ".wk-*/mkdocs.yml",
         "*.md",
-        ".kiro/steering/documentation.md"
+        "docs/**",
+        "mkdocs.yml"
       ],
       "deniedPaths": [
         "**/*.py",
@@ -54,10 +58,10 @@
   "resources": [
     "file://.kiro/steering/documentation.md",
     "file://.kiro/steering/oci-media-types.md",
-    "file://FEATURES.md",
+    "file://ROADMAP.md",
     "file://AGENTS.md"
   ],
   "hooks": {},
   "includeMcpJson": true,
-  "welcomeMessage": "docs-writer ready. I maintain docs/ against FEATURES.md and documentation.md. I don't touch source code."
+  "welcomeMessage": "docs-writer ready. I maintain docs/ as the standing source of truth for shipped behavior. I don't touch source code."
 }

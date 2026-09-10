@@ -1,38 +1,46 @@
-# AGENTS.md — margot
+# margot — Agent Guide
 
-Guidance for AI agents working in this repo.
+margot is a Python developer CLI for building, publishing, validating, and inspecting Margo application packages as OCI
+artifacts. Its source follows a layered architecture: `commands/` → `services/` → `domain/` and `infra/`; `domain/`
+stays pure.
 
-## Key files
+## Start here
 
-- [`FEATURES.md`](FEATURES.md) — authoritative spec: commands, architecture, OCI media types, config, error handling.
-- [`TESTING.md`](TESTING.md) — test structure, stack, priorities, coverage requirements.
+- [Product context](.kiro/steering/product.md) — purpose, users, and current surface.
+- [Structure context](.kiro/steering/structure.md) — repository map and placement rules.
+- [Technology context](.kiro/steering/tech.md) — runtime, commands, constraints, and releases.
+- [ROADMAP.md](ROADMAP.md) — forward register: planned features, fixes, ideas, and backlog.
+- [TESTING.md](TESTING.md) — test strategy and coverage requirements.
 
-Read both before touching anything.
+**Authority chain:** `ROADMAP.md` (future) → `.kiro/sprints/sprint-N.md` (in-flight design, while actively building) → `docs/` (shipped behavior).
 
-## Architecture
+## Route work to the right agent
 
-Strict layered architecture: `commands/` → `services/` → `domain/` + `infra/`.
-Inner layers never import outer ones. `domain/` is pure Python — no I/O, no frameworks.
-See the layer table and project structure in `FEATURES.md`.
+- **`planner`** (`.kiro/agents/planner.json`) — investigate, settle design, record a checkable plan, and delegate
+  implementation. It does not edit source or tests.
+- **`python-dev`** (`.kiro/agents/python-dev.json`) — implement Python behavior and tests after the design is approved.
+- **`docs-writer`** (`.kiro/agents/docs-writer.json`) — maintain only the MkDocs site under `docs/` and its navigation;
+  it does not modify Python source.
 
-## Non-negotiables
+Select or delegate to the named agent according to task scope. Keep product decisions with the planner, implementation
+with `python-dev`, and public-site changes with `docs-writer`.
 
-- All tags must be valid SemVer. Validate before any build/push. See `domain/tags.py`.
-- OCI operations go through `oras-py` only — no subprocess calls to the ORAS CLI.
-- Credential expiry check runs before every registry operation.
-- Artifact type is encoded in `artifactType`, never in the tag string.
-- All terminal output goes through `margot.console` — no `rprint`, `echo`, or `print` in commands/services/infra. See `code-conventions.md` for the full rules.
+## Use local skills on demand
 
-## Testing
+- **`code-quality-enhancement`** (`.kiro/skills/code-quality-enhancement/SKILL.md`) — use only for explicitly requested
+  Ruff, coverage, or import-style improvement.
+- **`fix-todos`** (`.kiro/skills/fix-todos/SKILL.md`) — use only for explicitly requested TODO discovery, triage, or
+  fixes.
+- **`sprint-workflow`** (`.kiro/skills/sprint-workflow/SKILL.md`) — use only when planning a sprint, opening a release,
+  or closing one out; not during doc or code work.
+- **`agent-workspace`** (`.kiro/skills/agent-workspace/SKILL.md`) — use only when splitting a sprint into parallel
+  `.wk-<name>/` git worktrees and orchestrating multi-agent work across them; not for single-branch tasks.
 
-- Write unit tests for `domain/` first (no mocks needed).
-- Mock `OrasClient` at the `infra/oci.py` boundary — never hit a live registry.
-- E2E via Typer `CliRunner`. See `TESTING.md` for full structure.
+## Detailed steering
 
-## Running tests
+- `code-conventions.md` — imports, TDD, terminal output, TODO format, and third-party inheritance rules.
+- `rich-rendering.md` — safe and faithful rendering of externally supplied data.
+- `oci-media-types.md` — canonical OCI and Docker media-type constants.
+- `documentation.md` — MkDocs authority, style, and verification rules.
 
-```bash
-uv run pytest
-```
-
-Coverage report prints automatically (`--cov=margot --cov-report=term-missing`).
+These files own detailed procedures. Do not duplicate them here; update their source of truth when policy changes.

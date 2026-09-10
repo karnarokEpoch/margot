@@ -68,6 +68,10 @@ def push(  # noqa: PLR0913
         targets.extend(
             _push_compose_or_quadlet(meta, build_dir, registry, repository, variant, PackageType.QUADLET, dry_run, probed_pairs)
         )
+    elif package_type == PackageType.BUNDLE:
+        raise ValueError("Bundles are not pushed to registries; use 'margot package' to create an offline bundle.")
+    elif package_type == PackageType.UNKNOWN:
+        raise ValueError("Cannot push UNKNOWN package type.")
     else:
         raise ValueError(f"Unsupported package_type: {package_type}")  # pragma: no cover
 

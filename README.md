@@ -1,5 +1,20 @@
 # margot
 
+[![PyPI version](https://img.shields.io/pypi/v/margo-tooling)](https://pypi.org/project/margo-tooling/)
+[![Python versions](https://img.shields.io/pypi/pyversions/margo-tooling)](https://pypi.org/project/margo-tooling/)
+[![License](https://img.shields.io/pypi/l/margo-tooling)](https://github.com/karnarokEpoch/margot/blob/main/LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/karnarokEpoch/margot/ci.yml)](https://github.com/karnarokEpoch/margot/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue)](https://karnarokepoch.github.io/margot/)
+[![Downloads](https://img.shields.io/pypi/dm/margo-tooling)](https://pypi.org/project/margo-tooling/)
+[![Container](https://img.shields.io/badge/ghcr.io-margot-blue?logo=podman)](https://github.com/karnarokEpoch/margot/pkgs/container/margot)
+[![Codecov](https://img.shields.io/codecov/c/github/karnarokEpoch/margot)](https://codecov.io/gh/karnarokEpoch/margot)
+[![GitHub stars](https://img.shields.io/github/stars/karnarokEpoch/margot)](https://github.com/karnarokEpoch/margot)
+[![GitHub forks](https://img.shields.io/github/forks/karnarokEpoch/margot)](https://github.com/karnarokEpoch/margot)
+[![GitHub issues](https://img.shields.io/github/issues/karnarokEpoch/margot)](https://github.com/karnarokEpoch/margot/issues)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![pytest](https://img.shields.io/badge/tested%20with-pytest-blue)](https://docs.pytest.org/)
+
 **margot** is a developer CLI for building and publishing [Margo](https://margo.org) application
 packages as OCI artifacts. It handles packaging, tagging, and pushing/pulling to any
 OCI-compliant registry.
@@ -71,6 +86,8 @@ $ margot --help
 │ build     Build Margo application package types locally.                     │
 │ push      Push built Margo application artifacts to an OCI registry.         │
 │ pull      Pull OCI artifact layers to a local directory.                     │
+│ package   Bundle built artifacts into an offline .tgz for disconnected      │
+│           deployment.                                                        │
 │ verify    Validate the Margo application description against the Margo spec │
 │           schema.                                                            │
 │ describe  Describe a Margo application description in rich, structured      │
@@ -140,6 +157,23 @@ Log in first if the registry requires auth:
 margot auth login
 ```
 
+### Package for offline delivery
+
+```bash
+margot build
+margot package
+```
+
+`package` collects everything `build` produced and bundles it into a single
+`<id>-<version>.tgz` — for deployment in disconnected environments without registry
+access. The bundle is written to `.dist/<version>/` by default:
+
+```
+.dist/1.0.0/com-example-nginx-1.0.0.tgz
+```
+
+Pass `--output` to write it elsewhere. A bundle is never pushed to a registry.
+
 ### Pull and inspect a published artifact
 
 ```bash
@@ -173,9 +207,8 @@ If you curate your own rc includes rather than a raw rc append, use
 ## Learn more
 
 - [Documentation](https://karnarokepoch.github.io/margot/) — full command reference,
-  `margo.yaml` reference, and worked examples (Helm, Compose, Quadlet, multi-component).
-- [FEATURES.md](FEATURES.md) — authoritative spec: architecture, commands, OCI media
-  types, config, error handling.
+  `margo.yaml` reference, configuration, and worked examples (Helm, Compose, Quadlet, multi-component).
+- [ROADMAP.md](ROADMAP.md) — planned features, fixes, and ideas.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, testing, release process.
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — community standards.
 

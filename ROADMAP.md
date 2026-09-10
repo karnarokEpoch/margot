@@ -1,78 +1,66 @@
 # margot — Roadmap
 
-Agile, vertical-slice roadmap. Each sprint ships one working, end-to-end capability
-through all layers rather than building layers horizontally.
+Forward register: planned features, fixes to make, ideas, and backlog. A queue of intent, not a spec.
 
-See [FEATURES.md](FEATURES.md) for the full spec and [TESTING.md](TESTING.md) for the
-test plan. Where this roadmap diverges from FEATURES.md, this roadmap wins for
-sequencing; FEATURES.md is updated as items land (see backlog).
+The authority model:
+
+- **ROADMAP.md** (this file) — what to build next.
+- **`.kiro/sprints/sprint-N.md`** — authoritative design while a release is being built; deleted on close-out.
+- **`docs/`** — standing source of truth for shipped behavior.
+- **Git history** — archives of each sprint's design decisions via close-out commits.
 
 ---
 
 ## Planned Sprints
 
-### Sprint 8 — `describe` component-first view + orphan detection + remote support
+### Sprint 9 — Shared remote OCI resolution for `describe` and `verify`
 
-`describe` gains a second configuration traversal (component → parameter → setting/
-schema, mirroring Sprint 7's section-first walk), read-only orphan/dead-end detection
-(unreferenced parameters, unresolved schema references, unused schemas, dangling
-component pointers), remote artifact support (`margot describe <uri>` — pulls and
-renders a `margo`-type OCI artifact's application description directly from a registry,
-reusing the existing display pipeline unchanged), and documented shell completion setup.
-`--section config` renamed to `--section config-first` (no alias) alongside the new
-`--section component-first`. No validation exit paths added — stays inside `describe`'s
-existing read-only contract.
-Full plan at [`.kiro/sprints/sprint-8.md`](.kiro/sprints/sprint-8.md).
+`describe` and `verify` gain the same optional positional OCI URI. Without it, both
+commands preserve local-project behavior; with it, both reuse the shared `fetch`/`pull`
+validation, credential, artifact-type, and layer-download path to pull a margo artifact
+into a temporary directory, then run their existing local descriptor pipeline against
+its `app.yaml`. This completes the unshipped remote `describe` design and replaces the
+reachability-only `verify --remote` backlog proposal. Read-only registry inspection
+accepts arbitrary existing OCI tags; no SemVer gate. Full plan at
+[`.kiro/sprints/sprint-9.md`](.kiro/sprints/sprint-9.md).
 
-### Sprint 9 — `--json` output and stable error codes
+### Sprint 10 — `--json` output and stable error codes
 
 Makes margot's output and failure modes machine-consumable for scripts/agents: `--json`
 on `describe` and `verify` (their display/result dataclasses already have zero `rich`
 coupling), a stable, closed exit-code taxonomy replacing today's single `Exit(1)`
 catch-all across 22 call sites, a structured `--json` error envelope on stderr, and
-explicit `--no-color`/`NO_COLOR` support. No change to default rich rendering. Orthogonal
-to Sprint 8, can run in parallel. Full plan at
-[`.kiro/sprints/sprint-9.md`](.kiro/sprints/sprint-9.md).
+explicit `--no-color`/`NO_COLOR` support. No change to default rich rendering. Full plan
+at [`.kiro/sprints/sprint-10.md`](.kiro/sprints/sprint-10.md).
 
 ---
 
-## Backlog / Stack (Sprint 8+)
+## Backlog / Stack (Sprint 11+)
 
 Unordered within groups; sequencing decided at sprint planning.
 
 ### Display UX
 
-* Minified JSON output + make minified the **default** display for artifacts
+- Minified JSON output + make minified the **default** display for artifacts
   (fetch may keep pretty as default — TBD).
-* Table output when listing **multiple** URIs (new `list`-style command).
+- Table output when listing **multiple** URIs (new `list`-style command).
 
 ### Manifest recognition & validation (on JSON output)
 
-* Detect & label: recognized margo manifest / valid / invalid / unknown OCI artifact.
+- Detect & label: recognized margo manifest / valid / invalid / unknown OCI artifact.
 
 ### More artifact types in `fetch`
 
-* image, compose component, quadlet component, helm chart.
-* Extend `PackageType` enum + per-type display.
-
-### Remaining commands
-
-* `verify --remote` — remote artifact reachability check, descoped from Sprint 6
-  (local-only `verify` shipped in Sprint 6 — see Completed Sprints). For each component
-  ref in `margo.yaml`, call `OrasClient.get_manifest(ref)`, report REACHABLE / MISSING /
-  WRONG_TYPE, with `check_credentials(hostname)` before each call. Open question carried
-  over: whether variant tags are also checked or only primary versions.
-
----
+- image, compose component, quadlet component, helm chart.
+- Extend `PackageType` enum + per-type display.
 
 ### Cross-cutting
 
-* ~~`margot push --dry-run` — validate readiness without pushing, `Dry run OK: ...` output~~
-  ✓ done (post-Sprint 4, unplanned addition — see `FEATURES.md` → `margot push`)
-* ~~`domain/tags.py` OCI tag + SemVer validation~~ ✓ done (Sprint 3)
-* ~~`domain/metadata.py` `margo.yaml` project descriptor parsing~~ ✓ done (Sprint 3)
-* ~~`config.py` full dynaconf layering~~ ✓ done (Sprint 3)
-* ~~**Update FEATURES.md** `fetch` section: positional URI + raw JSON~~ ✓ done
+- `margot init` — scaffold a new Margo project: generate a starter `margo.yaml` and the
+  expected directory layout (`margo/app.yaml.jinja`, optional `compose/` / `quadlet/`).
+  Already referenced in the "`margo.yaml` not found" error hint (`Run margot init or
+  create it manually`) but not yet implemented — the command the error points at does not
+  exist. Land the command, then reconcile `FEATURES.md`.
 
 ---
 
@@ -87,3 +75,4 @@ Unordered within groups; sequencing decided at sprint planning.
 | Sprint 5 | `margot auth status` (credential expiry table), authenticated `fetch`/`pull` (transparent oras-py credential use), and the Jinja2 `app.yaml.jinja` rendering refactor: `id`/`version` required top-level fields, no `margo:` block (top-level `directory`/`repository` for the margo artifact instead), optional variant `version` with `<base>+<type>-<name>` derivation, `image: {search, replace}` block for compose/quadlet dev-local image swapping (`replace` is a Jinja2 template rendered with `StrictUndefined`), unresolved-placeholder warnings, per-component error messages. | — |
 | Sprint 6 | `margot verify` — local-only LinkML validation of the Margo application description (`app.yaml`, or `app.yaml.jinja` rendered to a temp file, never requiring a prior `build`), upstream Margo spec schema vendored at draft commit `45f4359` with that commit reported in the output, curated recommended schema (`--recommend`) as a lint pass and `--strict` as a contract, `--only-recommend` to lint against the recommended schema alone, `--schema` / `--recommended-schema` overrides, `validation/` LinkML adapter layer (plugin set + finding formatter, `x-placeholder-extensions` stripped so vendor content never false-fails), Jinja2 rendering extracted to `infra/templating.py` and shared with `build`, standalone descriptor resolution reused by `describe`, plain CI-style pass/fail output | — |
 | Sprint 7 | `margot describe` — read-only visual view of the Margo application description with rich panels and trees organizing the raw descriptor for human review. Identity+catalog panel with apiVersion title, deployment profiles with per-profile components and properties, and configuration-first join tree (section → setting → schema/parameter → pointer → components). Renders `type` verbatim (supports `quadlet` ahead of upstream spec), shows per-pointer component ratios against deduplicated component index, unreferenced-parameters subtree, scalar values in literal form (quoted strings, bare numbers, empty string as `""`, absent as `—`). No validation, no `linkml` import, exit 0 always except unloadable descriptor (exit 1). | — |
+| Sprint 8 | `describe` component-first view (`--section component-first`, mirroring Sprint 7's section-first walk) and `--section config` renamed to `--section config-first` (no alias); read-only orphan/dead-end detection (`--section orphans`: unreferenced parameters, unresolved schema references, unused schemas, dangling component pointers); documented shell completion setup (`README.md`, `docs/index.md`). No validation exit paths added — stays inside `describe`'s existing read-only contract. | [0.8.0](https://github.com/karnarokEpoch/margot/releases/tag/0.8.0) |

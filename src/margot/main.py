@@ -7,6 +7,7 @@ from margot.commands.build import build_cmd
 from margot.commands.describe import describe_cmd
 from margot.commands.fetch import fetch
 from margot.commands.global_options import global_options
+from margot.commands.package import package_cmd
 from margot.commands.pull import pull
 from margot.commands.push import push_cmd
 from margot.commands.verify import verify_cmd
@@ -22,6 +23,7 @@ app = Typer(
 app.command()(fetch)
 app.command(name="build")(build_cmd)
 app.command(name="push")(push_cmd)
+app.command(name="package")(package_cmd)
 app.command()(pull)
 app.command(name="verify")(verify_cmd)
 app.command(name="describe")(describe_cmd)

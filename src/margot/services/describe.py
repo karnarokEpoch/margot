@@ -5,9 +5,11 @@ and adds the Item 1 load gate: the descriptor must be valid YAML that parses int
 mapping with kind=ApplicationDescription.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from margot import console
+from margot.domain.metadata import MargoYaml
 from margot.infra.filesystem import load_yaml
 from margot.services.verify import resolve_descriptor
 
@@ -15,11 +17,30 @@ JINJA_DESCRIPTOR = "app.yaml.jinja"
 STATIC_DESCRIPTOR = "app.yaml"
 
 
-def load_descriptor(project_dir: str = ".", manifest_path: str | None = None) -> dict:
+@dataclass(frozen=True)
+class LoadedDescriptor:
+    """Loaded descriptor with metadata and resolution info.
+
+    Attributes:
+        descriptor: The parsed descriptor dict.
+        meta: Parsed `margo.yaml`, or None when an explicit static manifest was given
+            and no `margo.yaml` was needed.
+        source_path: The descriptor as found on disk (template or static file).
+        rendered: True when the descriptor was rendered from a template.
+    """
+
+    descriptor: dict
+    meta: MargoYaml | None
+    source_path: str
+    rendered: bool
+
+
+def load_descriptor(project_dir: str = ".", manifest_path: str | None = None) -> LoadedDescriptor:
     """Load the resolved application description into a dict, enforcing the Item 1 load gate.
 
     The descriptor is located, rendered if templated, and parsed. It must be valid YAML
-    that parses into a mapping with kind=ApplicationDescription.
+    that parses into a mapping with kind=ApplicationDescription. Temporary files are
+    cleaned up after parsing.
 
     Args:
         project_dir: Directory holding margo.yaml.
@@ -27,7 +48,8 @@ def load_descriptor(project_dir: str = ".", manifest_path: str | None = None) ->
             resolution.
 
     Returns:
-        The parsed descriptor as a dict.
+        A LoadedDescriptor with the parsed descriptor, metadata, source path, and
+        rendered flag. The temp file (if any) is already cleaned up.
 
     Raises:
         ValueError: If the file is missing, both descriptor forms are present, Jinja2
@@ -54,7 +76,12 @@ def load_descriptor(project_dir: str = ".", manifest_path: str | None = None) ->
         console.info(
             "Item 1 load gate passed: valid mapping with kind=ApplicationDescription"
         )
-        return parsed
+        return LoadedDescriptor(
+            descriptor=parsed,
+            meta=resolved.meta,
+            source_path=resolved.source_path,
+            rendered=resolved.rendered,
+        )
 
     finally:
         # Clean up temp file if it was rendered
