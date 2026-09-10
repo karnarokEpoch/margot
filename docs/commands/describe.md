@@ -117,3 +117,5 @@ margot describe --section orphans
 # Describe a specific manifest file
 margot describe --manifest path/to/app.yaml
 ```
+
+See a real multi-component example: [Full example — Inspect with describe](../examples/full.md#inspect-with-describe).

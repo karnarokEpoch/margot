@@ -6,6 +6,9 @@ Fetch and display the manifest of an OCI artifact without downloading layers.
 margot fetch <uri>
 ```
 
+!!! note
+    `fetch` is a lightweight debugging/inspection command, modeled after `oras manifest fetch`. It fetches and prints the raw OCI manifest for a given tag — nothing more. No layers are downloaded, nothing is written to disk. Use `margot pull` when you need the artifact layers on disk.
+
 ## Arguments
 
 | Argument | Description |
