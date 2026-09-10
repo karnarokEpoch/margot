@@ -28,10 +28,14 @@
     },
     "write": {
       "allowedPaths": [
-        "docs/**",
-        "mkdocs.yml",
+        ".kiro/steering/documentation.md",
+        ".wk-*/.kiro/steering/documentation.md",
+        ".wk-*/*.md",
+        ".wk-*/docs/**",
+        ".wk-*/mkdocs.yml",
         "*.md",
-        ".kiro/steering/documentation.md"
+        "docs/**",
+        "mkdocs.yml"
       ],
       "deniedPaths": [
         "**/*.py",
