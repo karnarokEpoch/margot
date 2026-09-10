@@ -53,7 +53,8 @@ The ROADMAP is the queue of intent — all work lives here first.
 
 At sprint planning, one or more ROADMAP items are selected and moved from "Backlog" to "Planned Sprints" section. The `planner` creates a `.kiro/sprints/sprint-N.md` file with:
 
-- **Goal** — what this sprint ships (one vertical capability).
+- **Goal** — what this sprint ships (multiple items, each implemented on its own branch/worktree via
+  `agent-workspace`).
 - **Authoritative design** — contracts, data flows, scope, mutual exclusions.
 - **Checkable steps** — per-feature tasks, file changes, test requirements.
 - **Definition of done** — what passes review.
