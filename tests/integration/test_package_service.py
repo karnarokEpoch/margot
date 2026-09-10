@@ -154,6 +154,44 @@ quadlet:
     return tmp_path
 
 
+@fixture
+def fake_project_with_differing_id_name(tmp_path: Path) -> Path:
+    """Create a test project where margo.yaml id and name fields differ.
+
+    This fixture proves the fix uses `id` for the bundle's outer filename and
+    root directory name, not `name`, while internal component tarballs still use `name`.
+    """
+    # Create margo.yaml with id != name
+    margo_yaml_content = """\
+apiVersion: v1
+id: com-belden-mosquitto
+name: mosquitto
+description: Mosquitto MQTT broker
+version: 1.0.2
+repository: public.ecr.aws/g2n4p2m7/margo
+compose:
+  directory: compose
+  version: 1.0.2
+  repository: public.ecr.aws/g2n4p2m7/compose
+"""
+    (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+
+    # Create margo component
+    margo_dir = tmp_path / "margo"
+    margo_dir.mkdir()
+    (margo_dir / "app.yaml").write_text("name: mosquitto\nversion: 1.0.2\n")
+
+    # Create compose component
+    compose_dir = tmp_path / "compose"
+    compose_dir.mkdir()
+    (compose_dir / "compose.yaml").write_text("version: '3'\nservices:\n  mosquitto: test\n")
+
+    # Build all components
+    build_service.build(PackageType.ALL, project_dir=str(tmp_path), build_dir=str(tmp_path / ".dist"))
+
+    return tmp_path
+
+
 class TestPackageDifferentVersions:
     """Tests for packaging components with different versions (regression for the bug)."""
 
@@ -376,6 +414,76 @@ quadlet:
 
         assert bundle_path == str(custom_output)
         assert Path(bundle_path).exists()
+
+
+class TestBundleNaming:
+    """Tests for verifying bundle filename and root directory naming uses id."""
+
+    def test_bundle_uses_id_not_name_for_filename(self, fake_project_with_differing_id_name: Path) -> None:
+        """Should use margo.yaml id (not name) for bundle filename.
+
+        The bundle's outer archive should be named with `id`, while internal
+        component tarballs keep using `name`.
+        """
+        project = fake_project_with_differing_id_name
+        bundle_path = package_service.package(
+            PackageType.BUNDLE,
+            project_dir=str(project),
+            build_dir=str(project / ".dist"),
+        )
+
+        # Bundle filename should use id (com-belden-mosquitto), not name (mosquitto)
+        assert "com-belden-mosquitto-1.0.2" in bundle_path
+        assert "mosquitto-1.0.2" not in bundle_path or "com-belden-mosquitto" in bundle_path
+        assert Path(bundle_path).exists()
+
+    def test_bundle_root_dir_uses_id(self, fake_project_with_differing_id_name: Path) -> None:
+        """Should use id for the root directory inside the bundle.
+
+        When extracted, the top-level folder should be named with id (com-belden-mosquitto-1.0.2),
+        not name (mosquitto-1.0.2).
+        """
+        project = fake_project_with_differing_id_name
+        bundle_path = package_service.package(
+            PackageType.BUNDLE,
+            project_dir=str(project),
+            build_dir=str(project / ".dist"),
+        )
+
+        with tarfile.open(bundle_path, "r:gz") as tar:
+            members = tar.getnames()
+            # Root should use id
+            assert any(m.startswith("com-belden-mosquitto-1.0.2/") for m in members), (
+                f"Bundle root should start with 'com-belden-mosquitto-1.0.2/', got: {members[:5]}"
+            )
+            # Should NOT start with name-based root
+            assert not any(m.startswith("mosquitto-1.0.2/") for m in members), (
+                f"Bundle root should NOT start with 'mosquitto-1.0.2/', got: {members[:5]}"
+            )
+
+    def test_internal_component_tarballs_still_use_name(self, fake_project_with_differing_id_name: Path) -> None:
+        """Should keep internal component tarballs using name, not id.
+
+        The compose/quadlet .tgz files inside the bundle should still use the original
+        `name` (mosquitto), not the `id` (com-belden-mosquitto).
+        """
+        project = fake_project_with_differing_id_name
+        bundle_path = package_service.package(
+            PackageType.BUNDLE,
+            project_dir=str(project),
+            build_dir=str(project / ".dist"),
+        )
+
+        with tarfile.open(bundle_path, "r:gz") as tar:
+            members = tar.getnames()
+            # Find component tarballs inside the bundle
+            component_tarballs = [m for m in members if ".tgz" in m]
+            assert component_tarballs, "Should have component tarballs in bundle"
+            # They should use name (mosquitto), not id (com-belden-mosquitto)
+            for tarball in component_tarballs:
+                assert "mosquitto-1.0.2" in tarball, (
+                    f"Component tarball should use name 'mosquitto', got: {tarball}"
+                )
 
 
 class TestBundleStructure:

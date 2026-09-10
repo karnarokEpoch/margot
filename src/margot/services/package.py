@@ -336,10 +336,10 @@ def _create_bundle(  # noqa: PLR0913
         Path to created bundle .tgz file.
     """
     margo_build_path = Path(build_dir) / margo_version
-    root_dir_name = f"{meta.name}-{margo_version}"
+    root_dir_name = f"{meta.id}-{margo_version}"
 
     # Determine output path
-    bundle_path = Path(output_override) if output_override else margo_build_path / f"{meta.name}-{margo_version}.tgz"
+    bundle_path = Path(output_override) if output_override else margo_build_path / f"{meta.id}-{margo_version}.tgz"
 
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
 
