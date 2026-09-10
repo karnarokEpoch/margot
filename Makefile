@@ -7,7 +7,7 @@ help:  ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 test:  ## Run pytest with coverage
-	uv run pytest
+	uv run pytest $(PYTEST_ARGS)
 
 lint:  ## Run Ruff checks without auto-fixing
 	uv run ruff check --no-fix src/ tests/
