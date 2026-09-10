@@ -80,7 +80,7 @@ no mixed stdout.
 - Unit tests: JSON output asserted against the same fixtures already used for the rich
   rendering tests (sensor-dashboard descriptor, existing verify fixtures) — same input,
   assert the JSON shape instead of screen text.
-- `FEATURES.md` — document the flag and shape per command.
+- `docs/` — document the flag and shape per command.
 
 ### Item 2 — Stable error codes
 
@@ -109,12 +109,12 @@ code means inspecting what exception types `services/*.py` actually raises today
   change for callers not touched this sprint).
 - Update call sites incrementally, command by command, each as its own commit — 22 call
   sites across 7 files is enough surface area to regress silently if done as one sweep.
-- `FEATURES.md` gets a new "Exit codes" reference table — this is the authoritative
+- `docs/` gets a new "Exit codes" reference table — this is the authoritative
   contract callers (including agents) rely on; once published, codes should be treated
   as stable API, same weight as the OCI media type table.
 
 **Files:** `src/margot/console.py`, all 7 command files with `fatal()` calls,
-`FEATURES.md`.
+`docs/commands/`.
 
 ### Item 3 — `--json` error envelope (depends on Item 2)
 

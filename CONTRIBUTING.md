@@ -38,7 +38,7 @@ make check   # lint + test
 Layered: `commands/` → `services/` → `domain/` + `infra/`.
 Inner layers never import outer ones. `domain/` is pure Python (no I/O).
 
-See [FEATURES.md](FEATURES.md) for the full spec and [AGENTS.md](AGENTS.md) for
+See [the documentation](https://karnarokepoch.github.io/margot/) for the full spec and [AGENTS.md](AGENTS.md) for
 architecture constraints.
 
 ## Commit conventions
@@ -49,7 +49,7 @@ Commits follow [Angular Commits Standard](https://github.com/angular/angular/blo
 feat: add fetch command
 fix: handle empty manifest response
 refactor(infra): simplify OrasClient wrapper
-docs: update FEATURES.md fetch section
+docs: update command reference
 test: add E2E for fetch command
 chore: bump ruff
 ```
