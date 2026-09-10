@@ -90,39 +90,70 @@ class TestResolveComponentRepository:
             package_service._resolve_component_repository("invalid_no_slash", None)
 
 
-class TestGetBuiltComponentVersions:
-    """Tests for _get_built_component_versions()."""
+class TestResolveComponentVersions:
+    """Tests for _resolve_component_versions()."""
 
-    def test_finds_component_tarballs(self, tmp_path):
-        """Should find all component tarballs in build directory."""
-        build_dir = tmp_path / ".dist" / "1.0.0"
-        build_dir.mkdir(parents=True)
-        (build_dir / "testapp-1.0.0.tgz").touch()
-        (build_dir / "testapp-1.0.0_variant1.tgz").touch()
-        (build_dir / "testapp-1.0.0_variant2.tgz").touch()
-        (build_dir / "other-file.txt").touch()
+    def test_flat_component_resolves_version(self):
+        """Should resolve version for a flat (non-variant) component."""
+        mock_component = type("obj", (object,), {
+            "version": "1.0.0",
+            "variants": None,
+        })()
+        result = package_service._resolve_component_versions(mock_component, PackageType.COMPOSE)
+        assert result == ["1.0.0"]
 
-        result = package_service._get_built_component_versions(str(tmp_path / ".dist"), "1.0.0", "compose", "testapp")
+    def test_flat_component_normalizes_plus_to_underscore(self):
+        """Should normalize + to _ in versions."""
+        mock_component = type("obj", (object,), {
+            "version": "1.0.0+compose-test",
+            "variants": None,
+        })()
+        result = package_service._resolve_component_versions(mock_component, PackageType.COMPOSE)
+        assert result == ["1.0.0_compose-test"]
 
-        assert len(result) == 3
-        assert "1.0.0" in result
-        assert "1.0.0_variant1" in result
-        assert "1.0.0_variant2" in result
-
-    def test_returns_empty_when_no_builds(self, tmp_path):
-        """Should return empty list when build directory doesn't exist."""
-        build_dir = tmp_path / ".dist"
-        result = package_service._get_built_component_versions(str(build_dir), "1.0.0", "compose", "testapp")
+    def test_flat_component_no_version_returns_empty(self):
+        """Should return empty list if flat component has no version."""
+        mock_component = type("obj", (object,), {
+            "version": None,
+            "variants": None,
+        })()
+        result = package_service._resolve_component_versions(mock_component, PackageType.COMPOSE)
         assert result == []
 
-    def test_sorts_versions(self, tmp_path):
-        """Should return sorted version list."""
-        build_dir = tmp_path / ".dist" / "1.0.0"
-        build_dir.mkdir(parents=True)
-        (build_dir / "testapp-1.0.0_z.tgz").touch()
-        (build_dir / "testapp-1.0.0_a.tgz").touch()
-        (build_dir / "testapp-1.0.0.tgz").touch()
+    def test_none_component_returns_empty(self):
+        """Should return empty list if component is None."""
+        result = package_service._resolve_component_versions(None, PackageType.COMPOSE)
+        assert result == []
 
-        result = package_service._get_built_component_versions(str(tmp_path / ".dist"), "1.0.0", "compose", "testapp")
+    def test_variant_component_with_versions(self):
+        """Should resolve each variant's own version."""
+        mock_variant1 = type("obj", (object,), {"version": "1.0.0_v1"})()
+        mock_variant2 = type("obj", (object,), {"version": "1.0.0_v2"})()
+        mock_component = type("obj", (object,), {
+            "version": "1.0.0",
+            "variants": [mock_variant1, mock_variant2],
+        })()
+        result = package_service._resolve_component_versions(mock_component, PackageType.QUADLET)
+        assert result == ["1.0.0_v1", "1.0.0_v2"]
 
-        assert result == ["1.0.0", "1.0.0_a", "1.0.0_z"]
+    def test_variant_without_version_derives_from_base(self):
+        """Should derive version from base + variant name when variant omits version."""
+        mock_variant1 = type("obj", (object,), {"version": None, "name": "prod"})()
+        mock_variant2 = type("obj", (object,), {"version": None, "name": "dev"})()
+        mock_component = type("obj", (object,), {
+            "version": "1.0.0",
+            "variants": [mock_variant1, mock_variant2],
+        })()
+        result = package_service._resolve_component_versions(mock_component, PackageType.QUADLET)
+        assert "1.0.0_quadlet-prod" in result
+        assert "1.0.0_quadlet-dev" in result
+
+    def test_variant_without_version_no_base_skips(self):
+        """Should skip variant if it has no version and no base version exists."""
+        mock_variant = type("obj", (object,), {"version": None, "name": "test"})()
+        mock_component = type("obj", (object,), {
+            "version": None,
+            "variants": [mock_variant],
+        })()
+        result = package_service._resolve_component_versions(mock_component, PackageType.COMPOSE)
+        assert result == []

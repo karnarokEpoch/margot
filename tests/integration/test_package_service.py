@@ -11,6 +11,106 @@ from margot.services import package as package_service
 
 
 @fixture
+def fake_project_with_different_versions(tmp_path: Path) -> Path:
+    """Create a test project where margo, compose, and quadlet have different versions.
+
+    Reproduces the real-world bug where a project has:
+    - margo version: 1.0.2
+    - quadlet version: 1.0.2_mosquitto-quadlet (different from margo)
+    """
+    # Create margo.yaml with different versions for each component
+    margo_yaml_content = """\
+apiVersion: v1
+id: testapp
+name: testapp
+description: Test application
+version: 1.0.2
+repository: public.ecr.aws/g2n4p2m7/testapp
+compose:
+  directory: compose
+  version: 1.0.2_testapp-compose
+  repository: public.ecr.aws/g2n4p2m7/compose
+quadlet:
+  directory: quadlet
+  version: 1.0.2_testapp-quadlet
+"""
+    (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+
+    # Create margo component
+    margo_dir = tmp_path / "margo"
+    margo_dir.mkdir()
+    (margo_dir / "app.yaml").write_text("name: testapp\nversion: 1.0.2\n")
+    (margo_dir / "resources").mkdir()
+    (margo_dir / "resources" / "description.md").write_text("# Test App\n")
+
+    # Create compose component
+    compose_dir = tmp_path / "compose"
+    compose_dir.mkdir()
+    (compose_dir / "compose.yaml").write_text("version: '3'\nservices:\n  app: test\n")
+
+    # Create quadlet component
+    quadlet_dir = tmp_path / "quadlet"
+    quadlet_dir.mkdir()
+    (quadlet_dir / "app.container").write_text("[Container]\nImage=test:1.0.2\n")
+
+    # Build all components
+    build_service.build(PackageType.ALL, project_dir=str(tmp_path), build_dir=str(tmp_path / ".dist"))
+
+    return tmp_path
+
+
+@fixture
+def fake_project_with_variant_versions(tmp_path: Path) -> Path:
+    """Create a test project with variant components at different versions.
+
+    Tests the variant version resolution path where margo version differs from
+    per-variant component versions.
+    """
+    # Create margo.yaml with variant components
+    margo_yaml_content = """\
+apiVersion: v1
+id: testapp
+name: testapp
+description: Test application
+version: 1.0.2
+repository: public.ecr.aws/g2n4p2m7/testapp
+quadlet:
+  directory: quadlet
+  version: 1.0.2
+  variants:
+    - name: prod
+      version: 1.0.2_prod-variant
+    - name: dev
+      version: 1.0.2_dev-variant
+"""
+    (tmp_path / "margo.yaml").write_text(margo_yaml_content)
+
+    # Create margo component
+    margo_dir = tmp_path / "margo"
+    margo_dir.mkdir()
+    (margo_dir / "app.yaml").write_text("name: testapp\nversion: 1.0.2\n")
+
+    # Create quadlet component with variants
+    quadlet_dir = tmp_path / "quadlet"
+    quadlet_dir.mkdir()
+
+    # Prod variant
+    prod_dir = quadlet_dir / "prod"
+    prod_dir.mkdir()
+    (prod_dir / "app.container").write_text("[Container]\nImage=test:1.0.2-prod\n")
+
+    # Dev variant
+    dev_dir = quadlet_dir / "dev"
+    dev_dir.mkdir()
+    (dev_dir / "app.container").write_text("[Container]\nImage=test:1.0.2-dev\n")
+
+    # Build all components
+    build_service.build(PackageType.ALL, project_dir=str(tmp_path), build_dir=str(tmp_path / ".dist"))
+
+    return tmp_path
+
+
+@fixture
 def fake_project_with_all_components(tmp_path: Path) -> Path:
     """Create a test project with margo, compose, and quadlet components already built."""
     # Create margo.yaml
@@ -52,6 +152,97 @@ quadlet:
     build_service.build(PackageType.ALL, project_dir=str(tmp_path), build_dir=str(tmp_path / ".dist"))
 
     return tmp_path
+
+
+class TestPackageDifferentVersions:
+    """Tests for packaging components with different versions (regression for the bug)."""
+
+    def test_different_component_versions_builds_correctly(self, fake_project_with_different_versions: Path) -> None:
+        """Should confirm the build produces separate .dist/<version>/ folders.
+
+        This validates that the fixture reproduces the real scenario before testing package().
+        """
+        project = fake_project_with_different_versions
+        dist_dir = project / ".dist"
+
+        # Verify margo built to its own version folder
+        margo_build = dist_dir / "1.0.2" / "margo"
+        assert margo_build.exists(), f"Margo should be built at {margo_build}"
+
+        # Verify compose built to its own (different) version folder
+        compose_tgz = dist_dir / "1.0.2_testapp-compose" / "testapp-1.0.2_testapp-compose.tgz"
+        assert (
+            compose_tgz.exists()
+        ), f"Compose should be built at {compose_tgz}, not mixed with margo's 1.0.2 folder"
+
+        # Verify quadlet built to its own (different) version folder
+        quadlet_tgz = dist_dir / "1.0.2_testapp-quadlet" / "testapp-1.0.2_testapp-quadlet.tgz"
+        assert (
+            quadlet_tgz.exists()
+        ), f"Quadlet should be built at {quadlet_tgz}, not mixed with margo's 1.0.2 folder"
+
+    def test_package_with_different_component_versions(self, fake_project_with_different_versions: Path) -> None:
+        """Should package successfully when compose/quadlet versions differ from margo's.
+
+        Regression test for the bug where package.py failed to find compose/quadlet
+        output because it looked in the wrong .dist/<version>/ folder.
+        """
+        project = fake_project_with_different_versions
+        bundle_path = package_service.package(
+            PackageType.BUNDLE,
+            project_dir=str(project),
+            build_dir=str(project / ".dist"),
+        )
+
+        assert Path(bundle_path).exists()
+        assert bundle_path.endswith(".tgz")
+
+        # Extract and verify structure
+        with tarfile.open(bundle_path, "r:gz") as tar:
+            members = tar.getnames()
+            # Margo content (bundle root uses margo's version 1.0.2)
+            assert any("testapp-1.0.2/app.yaml" in m for m in members)
+            assert any("testapp-1.0.2/resources/description.md" in m for m in members)
+            # Component tarballs should be present (from their own version folders)
+            assert any("compose" in m and ".tgz" in m for m in members), "Compose tarball should be in bundle"
+            assert any("quadlet" in m and ".tgz" in m for m in members), "Quadlet tarball should be in bundle"
+
+    def test_variant_component_different_versions(self, fake_project_with_variant_versions: Path) -> None:
+        """Should package correctly with variant components at different versions.
+
+        Tests that the variant version resolution path also correctly locates
+        each variant's build output in its own .dist/<variant_version>/ folder.
+        """
+        project = fake_project_with_variant_versions
+        dist_dir = project / ".dist"
+
+        # Verify margo built to its version folder
+        margo_build = dist_dir / "1.0.2" / "margo"
+        assert margo_build.exists(), f"Margo should be at {margo_build}"
+
+        # Verify each variant built to its own version folder
+        prod_tgz = dist_dir / "1.0.2_prod-variant" / "testapp-1.0.2_prod-variant.tgz"
+        dev_tgz = dist_dir / "1.0.2_dev-variant" / "testapp-1.0.2_dev-variant.tgz"
+        assert prod_tgz.exists(), f"Prod variant should be at {prod_tgz}"
+        assert dev_tgz.exists(), f"Dev variant should be at {dev_tgz}"
+
+        # Package should succeed
+        bundle_path = package_service.package(
+            PackageType.BUNDLE,
+            project_dir=str(project),
+            build_dir=str(project / ".dist"),
+        )
+
+        assert Path(bundle_path).exists()
+
+        # Extract and verify both variants are present
+        with tarfile.open(bundle_path, "r:gz") as tar:
+            members = tar.getnames()
+            # Margo content
+            assert any("testapp-1.0.2/app.yaml" in m for m in members)
+            # Both variant tarballs should be present
+            variant_tarballs = [m for m in members if "testapp-1.0.2_" in m and ".tgz" in m]
+            assert len(variant_tarballs) >= 2, f"Should have both variant tarballs, got: {variant_tarballs}"
 
 
 class TestPackageMargo:
@@ -145,8 +336,10 @@ version: 1.0.0
 repository: public.ecr.aws/g2n4p2m7/same
 compose:
   directory: compose
+  version: 1.0.0
 quadlet:
   directory: quadlet
+  version: 1.0.0
 """
         (tmp_path / "margo.yaml").write_text(margo_yaml_content)
 

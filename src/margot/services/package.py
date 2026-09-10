@@ -6,10 +6,51 @@ import tarfile
 from tempfile import mkdtemp
 
 from margot import console
-from margot.domain.metadata import MargoYaml, load_margo_yaml
+from margot.domain.metadata import ComponentConfig, MargoYaml, load_margo_yaml
 from margot.domain.models import PackageType
 from margot.domain.tags import validate_oci_tag, validate_semver
 from margot.infra.filesystem import copy_tree
+
+
+def _resolve_component_versions(
+    component: ComponentConfig | None,
+    component_type: PackageType,
+) -> list[str]:
+    """Resolve all versions for a component (flat or all variants).
+
+    Mirrors the version resolution logic from build.py's _build_flat_component
+    and _build_variant_component to ensure consistent version handling.
+
+    Args:
+        component: The component config, or None if not defined.
+        component_type: COMPOSE or QUADLET.
+
+    Returns:
+        List of resolved version strings for this component.
+    """
+    if component is None:
+        return []
+
+    # Flat component: one version
+    if not component.variants:
+        version = component.version
+        if version is None:
+            return []  # No version specified, skip
+        version = version.replace("+", "_")
+        return [version]
+
+    # Variant component: one version per variant
+    versions = []
+    for variant in component.variants:
+        version = variant.version
+        if version is None:
+            # Variant omits version: use base version + variant suffix
+            if component.version is None:
+                continue  # Skip if no base version either
+            version = f"{component.version}+{component_type.value}-{variant.name}"
+        version = version.replace("+", "_")
+        versions.append(version)
+    return versions
 
 
 def package(
@@ -43,25 +84,50 @@ def package(
     meta = load_margo_yaml(margo_yaml_path)
     console.info(f"Loaded margo.yaml: {margo_yaml_path}")
 
-    version = meta.version
-    version = version.replace("+", "_")
-    validate_oci_tag(version)
-    validate_semver(version)
+    # Resolve margo's version (always uses top-level version)
+    margo_version = meta.version
+    margo_version = margo_version.replace("+", "_")
+    validate_oci_tag(margo_version)
+    validate_semver(margo_version)
 
     # Determine which types to bundle
     types_to_include = _resolve_bundle_types(package_type, meta)
 
+    # Resolve component versions independently
+    component_versions = _resolve_component_versions_map(meta, types_to_include)
+
     # Verify all requested types have been built
-    _verify_build_outputs_exist(types_to_include, build_dir, version)
+    _verify_build_outputs_exist(types_to_include, build_dir, margo_version, component_versions, meta)
 
     # Detect collisions between components
-    _check_for_collisions(meta, types_to_include, build_dir, version)
+    _check_for_collisions(meta, types_to_include, build_dir, component_versions)
 
     # Create the bundle
-    bundle_path = _create_bundle(meta, types_to_include, build_dir, version, output)
+    bundle_path = _create_bundle(meta, types_to_include, build_dir, margo_version, component_versions, output)
 
     console.info(f"Bundle created: {bundle_path}")
     return bundle_path
+
+
+def _resolve_component_versions_map(
+    meta: MargoYaml,
+    types_to_include: set[PackageType],
+) -> dict[PackageType, list[str]]:
+    """Resolve all versions for compose and quadlet components.
+
+    Args:
+        meta: Loaded margo.yaml.
+        types_to_include: Types to resolve versions for.
+
+    Returns:
+        Map of PackageType -> list of version strings.
+    """
+    result = {}
+    if PackageType.COMPOSE in types_to_include:
+        result[PackageType.COMPOSE] = _resolve_component_versions(meta.compose, PackageType.COMPOSE)
+    if PackageType.QUADLET in types_to_include:
+        result[PackageType.QUADLET] = _resolve_component_versions(meta.quadlet, PackageType.QUADLET)
+    return result
 
 
 def _resolve_bundle_types(package_type: PackageType, meta: MargoYaml) -> set[PackageType]:
@@ -108,34 +174,53 @@ def _resolve_bundle_types(package_type: PackageType, meta: MargoYaml) -> set[Pac
 def _verify_build_outputs_exist(
     types_to_include: set[PackageType],
     build_dir: str,
-    version: str,
+    margo_version: str,
+    component_versions: dict[PackageType, list[str]],
+    meta: MargoYaml,
 ) -> None:
     """Verify that requested build outputs exist on disk.
 
     Args:
         types_to_include: Types to check.
         build_dir: Build output directory.
-        version: Version string.
+        margo_version: Margo's version string.
+        component_versions: Map of component type to list of versions.
+        meta: Loaded margo.yaml.
 
     Raises:
         ValueError: If required build output is missing or if margo is not found.
     """
-    build_path = Path(build_dir) / version
-
-    # Margo is always required
-    margo_path = build_path / "margo"
+    # Margo is always required, in its own version folder
+    margo_path = Path(build_dir) / margo_version / "margo"
     if not margo_path.exists():
         raise ValueError(f"Built margo artifact not found at {margo_path}. Run 'margot build' first.")
 
-    # Check optional types: they must exist if listed in types_to_include
-    # (They were added by _resolve_bundle_types only if defined in margo.yaml)
-    for pkg_type in (PackageType.COMPOSE, PackageType.QUADLET):
-        if pkg_type in types_to_include:
-            # For this component, check if ANY built tarball exists
-            component_tarballs = list(build_path.glob("*-*.tgz"))
-            if not component_tarballs:
+    # Check compose: must be in its own version folder(s)
+    if PackageType.COMPOSE in types_to_include:
+        compose_versions = component_versions.get(PackageType.COMPOSE, [])
+        if not compose_versions:
+            raise ValueError("compose component not defined in margo.yaml or has no versions")
+        for comp_version in compose_versions:
+            # Check if at least one tarball exists for this version
+            version_path = Path(build_dir) / comp_version
+            tarballs = list(version_path.glob(f"{meta.name}-*.tgz"))
+            if not tarballs:
                 raise ValueError(
-                    f"Built {pkg_type.value} artifact not found in {build_path}. Run 'margot build' first."
+                    f"Built compose artifact not found in {version_path}. Run 'margot build' first."
+                )
+
+    # Check quadlet: must be in its own version folder(s)
+    if PackageType.QUADLET in types_to_include:
+        quadlet_versions = component_versions.get(PackageType.QUADLET, [])
+        if not quadlet_versions:
+            raise ValueError("quadlet component not defined in margo.yaml or has no versions")
+        for quad_version in quadlet_versions:
+            # Check if at least one tarball exists for this version
+            version_path = Path(build_dir) / quad_version
+            tarballs = list(version_path.glob(f"{meta.name}-*.tgz"))
+            if not tarballs:
+                raise ValueError(
+                    f"Built quadlet artifact not found in {version_path}. Run 'margot build' first."
                 )
 
 
@@ -143,7 +228,7 @@ def _check_for_collisions(
     meta: MargoYaml,
     types_to_include: set[PackageType],
     build_dir: str,
-    version: str,
+    component_versions: dict[PackageType, list[str]],
 ) -> None:
     """Detect if two components would collide when placed in the bundle.
 
@@ -153,7 +238,7 @@ def _check_for_collisions(
         meta: Loaded margo.yaml.
         types_to_include: Types to check.
         build_dir: Build output directory.
-        version: Version string.
+        component_versions: Map of component type to list of versions.
 
     Raises:
         ValueError: If a collision is detected.
@@ -163,34 +248,38 @@ def _check_for_collisions(
     if PackageType.COMPOSE in types_to_include and meta.compose is not None:
         # Resolve compose repository
         repo = _resolve_component_repository(meta.compose.repository, meta.repository)
-        # Add all compose variant tarballs
-        for variant_version in _get_built_component_versions(build_dir, version, "compose", meta.name):
-            filename = f"{meta.name}-{variant_version}.tgz"
-            key = (repo, filename)
-            if key in seen_collisions:
-                other_type, _other_repo = seen_collisions[key]
-                raise ValueError(
-                    f"Collision: {PackageType.COMPOSE.value} and {other_type.value} would both write "
-                    f"{repo}/{filename} to the bundle. Resolve the conflict in margo.yaml "
-                    f"by using different repository values for each component."
-                )
-            seen_collisions[key] = (PackageType.COMPOSE, repo)
+        # Check all compose versions for collisions
+        for comp_version in component_versions.get(PackageType.COMPOSE, []):
+            version_path = Path(build_dir) / comp_version
+            for tgz in version_path.glob(f"{meta.name}-*.tgz"):
+                filename = tgz.name
+                key = (repo, filename)
+                if key in seen_collisions:
+                    other_type, _other_repo = seen_collisions[key]
+                    raise ValueError(
+                        f"Collision: {PackageType.COMPOSE.value} and {other_type.value} would both write "
+                        f"{repo}/{filename} to the bundle. Resolve the conflict in margo.yaml "
+                        f"by using different repository values for each component."
+                    )
+                seen_collisions[key] = (PackageType.COMPOSE, repo)
 
     if PackageType.QUADLET in types_to_include and meta.quadlet is not None:
         # Resolve quadlet repository
         repo = _resolve_component_repository(meta.quadlet.repository, meta.repository)
-        # Add all quadlet variant tarballs
-        for variant_version in _get_built_component_versions(build_dir, version, "quadlet", meta.name):
-            filename = f"{meta.name}-{variant_version}.tgz"
-            key = (repo, filename)
-            if key in seen_collisions:
-                other_type, _other_repo = seen_collisions[key]
-                raise ValueError(
-                    f"Collision: {PackageType.QUADLET.value} and {other_type.value} would both write "
-                    f"{repo}/{filename} to the bundle. Resolve the conflict in margo.yaml "
-                    f"by using different repository values for each component."
-                )
-            seen_collisions[key] = (PackageType.QUADLET, repo)
+        # Check all quadlet versions for collisions
+        for quad_version in component_versions.get(PackageType.QUADLET, []):
+            version_path = Path(build_dir) / quad_version
+            for tgz in version_path.glob(f"{meta.name}-*.tgz"):
+                filename = tgz.name
+                key = (repo, filename)
+                if key in seen_collisions:
+                    other_type, _other_repo = seen_collisions[key]
+                    raise ValueError(
+                        f"Collision: {PackageType.QUADLET.value} and {other_type.value} would both write "
+                        f"{repo}/{filename} to the bundle. Resolve the conflict in margo.yaml "
+                        f"by using different repository values for each component."
+                    )
+                seen_collisions[key] = (PackageType.QUADLET, repo)
 
 
 def _resolve_component_repository(component_repo: str | None, global_repo: str | None) -> str:
@@ -217,39 +306,12 @@ def _resolve_component_repository(component_repo: str | None, global_repo: str |
     return rest
 
 
-def _get_built_component_versions(
-    build_dir: str,
-    version: str,
-    _component_type: str,
-    name: str,
-) -> list[str]:
-    """Get all built variant versions of a component.
-
-    Args:
-        build_dir: Build output directory.
-        version: Base version (for flat layout detection).
-        _component_type: 'compose' or 'quadlet' (for logging context).
-        name: Package name.
-
-    Returns:
-        List of version strings of successfully built components.
-    """
-    versions = []
-    build_path = Path(build_dir) / version
-    if build_path.exists():
-        # Look for tarballs of this component
-        for tgz in build_path.glob(f"{name}-*.tgz"):
-            # Extract version from filename (name-VERSION.tgz)
-            variant_version = tgz.stem[len(name) + 1 :]  # Remove 'name-' prefix, keep everything else
-            versions.append(variant_version)
-    return sorted(versions)
-
-
-def _create_bundle(
+def _create_bundle(  # noqa: PLR0913
     meta: MargoYaml,
     types_to_include: set[PackageType],
     build_dir: str,
-    version: str,
+    margo_version: str,
+    component_versions: dict[PackageType, list[str]],
     output_override: str | None,
 ) -> str:
     """Create the bundle tarball.
@@ -266,17 +328,18 @@ def _create_bundle(
         meta: Loaded margo.yaml.
         types_to_include: Component types to bundle (already validated).
         build_dir: Build output directory.
-        version: Version string.
+        margo_version: Margo's version string (used for bundle root directory).
+        component_versions: Map of component type to list of versions.
         output_override: Override output path (or None for default).
 
     Returns:
         Path to created bundle .tgz file.
     """
-    build_path = Path(build_dir) / version
-    root_dir_name = f"{meta.name}-{version}"
+    margo_build_path = Path(build_dir) / margo_version
+    root_dir_name = f"{meta.name}-{margo_version}"
 
     # Determine output path
-    bundle_path = Path(output_override) if output_override else build_path / f"{meta.name}-{version}.tgz"
+    bundle_path = Path(output_override) if output_override else margo_build_path / f"{meta.name}-{margo_version}.tgz"
 
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -286,7 +349,7 @@ def _create_bundle(
         staging_root = Path(tmp_parent) / root_dir_name
 
         # 1. Copy margo content recursively to bundle root (drop the margo/ wrapper)
-        margo_src = build_path / "margo"
+        margo_src = margo_build_path / "margo"
         console.debug(f"Copying margo content from {margo_src}")
         for item in margo_src.iterdir():
             item_dst = staging_root / item.name
@@ -301,12 +364,24 @@ def _create_bundle(
         # 2. Copy component tarballs under their respective repository folders
         if PackageType.COMPOSE in types_to_include and meta.compose is not None:
             _add_component_to_bundle(
-                staging_root, meta.compose.repository, meta.repository, build_path, meta.name, "compose"
+                staging_root,
+                meta.compose.repository,
+                meta.repository,
+                build_dir,
+                meta.name,
+                "compose",
+                component_versions.get(PackageType.COMPOSE, []),
             )
 
         if PackageType.QUADLET in types_to_include and meta.quadlet is not None:
             _add_component_to_bundle(
-                staging_root, meta.quadlet.repository, meta.repository, build_path, meta.name, "quadlet"
+                staging_root,
+                meta.quadlet.repository,
+                meta.repository,
+                build_dir,
+                meta.name,
+                "quadlet",
+                component_versions.get(PackageType.QUADLET, []),
             )
 
         # 3. Create the final tarball
@@ -322,29 +397,36 @@ def _add_component_to_bundle(  # noqa: PLR0913
     staging_root: Path,
     component_repo: str | None,
     global_repo: str | None,
-    build_path: Path,
+    build_dir: str,
     name: str,
     component_type: str,
+    component_versions: list[str],
 ) -> None:
     """Add a component's built tarballs to the bundle staging directory.
+
+    Looks for the component's tarballs in each of its own version folders
+    (since different components can have different versions).
 
     Args:
         staging_root: Root staging directory.
         component_repo: Component-level repository.
         global_repo: Global repository fallback.
-        build_path: Build output directory.
+        build_dir: Build output directory.
         name: Package name.
         component_type: 'compose' or 'quadlet'.
+        component_versions: List of version strings for this component.
     """
     repo = _resolve_component_repository(component_repo, global_repo)
     repo_dir = staging_root / repo
 
-    # Find all built tarballs for this component
-    for tgz in build_path.glob(f"{name}-*.tgz"):
-        repo_dir.mkdir(parents=True, exist_ok=True)
-        dst = repo_dir / tgz.name
-        console.debug(f"Copying {component_type} tarball: {tgz.name} → {repo}/{tgz.name}")
-        dst.write_bytes(tgz.read_bytes())
+    # For each version of this component, find and copy its tarball(s)
+    for comp_version in component_versions:
+        version_path = Path(build_dir) / comp_version
+        for tgz in version_path.glob(f"{name}-*.tgz"):
+            repo_dir.mkdir(parents=True, exist_ok=True)
+            dst = repo_dir / tgz.name
+            console.debug(f"Copying {component_type} tarball: {tgz.name} → {repo}/{tgz.name}")
+            dst.write_bytes(tgz.read_bytes())
 
 
 def _write_bundle_tarball(staging_root: Path, bundle_path: Path, root_dir_name: str) -> None:
