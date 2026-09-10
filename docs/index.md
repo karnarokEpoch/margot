@@ -12,6 +12,8 @@
 [![GitHub forks](https://img.shields.io/github/forks/karnarokEpoch/margot)](https://github.com/karnarokEpoch/margot)
 [![GitHub issues](https://img.shields.io/github/issues/karnarokEpoch/margot)](https://github.com/karnarokEpoch/margot/issues)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![pytest](https://img.shields.io/badge/tested%20with-pytest-blue)](https://docs.pytest.org/)
 
 **margot** is a developer CLI for building and publishing Margo application packages as OCI artifacts. It handles
 packaging, tagging, and pushing/pulling to any OCI-compliant registry.
