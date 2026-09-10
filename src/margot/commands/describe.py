@@ -125,15 +125,13 @@ def _constraint_format(schema: Schema) -> Text:
     return Text(DOT.join(parts))
 
 
-def build_identity_catalog_panel(identity: Identity, catalog: Catalog | None, resolved_path: str) -> Panel:
+def build_identity_catalog_panel(identity: Identity, catalog: Catalog | None, resolved_path: str, rendered: bool) -> Panel:
     """Build the identity+catalog panel.
 
     Title is apiVersion. Subtitle is resolved path, suffixed with (rendered) if templated.
     Grid shows id/version/name. OCI URI line follows. Description and Catalog follow.
     """
-    # Detect if path looks like a temporary file (ends in .yaml or similar, with temp markers)
-    is_rendered = "/margot-" in resolved_path and resolved_path.endswith(".yaml")
-    subtitle = resolved_path + ("  (rendered)" if is_rendered else "")
+    subtitle = resolved_path + ("  (rendered)" if rendered else "")
 
     # Build body
     body: list = []
@@ -609,10 +607,11 @@ def _render_section(  # noqa: PLR0913
     config: Configuration,
     descriptor_dict: dict,
     resolved_path: str,
+    rendered: bool,
 ) -> None:
     """Render a single section panel based on section name."""
     if section_name == "metadata":
-        panel = build_identity_catalog_panel(identity, catalog, resolved_path)
+        panel = build_identity_catalog_panel(identity, catalog, resolved_path, rendered)
         console.print_renderable(panel)
     elif section_name == "profiles":
         panel = build_deployment_profiles_panel(profiles, index)
@@ -653,19 +652,17 @@ def describe_cmd(
     configuration (sections → settings → schema/parameters → targets → components).
     """
     try:
-        # Resolve and load descriptor through Item 1 load gate
-        descriptor_dict = describe_service.load_descriptor(project_dir or ".", manifest)
+        # Load descriptor with metadata and resolution info (temp file cleaned up after parsing)
+        loaded = describe_service.load_descriptor(project_dir or ".", manifest)
+        descriptor_dict = loaded.descriptor
+        meta = loaded.meta
+        resolved_path = loaded.source_path
+        rendered = loaded.rendered
     except (ValueError, TypeError) as e:
         console.fatal(f"{e!s} Run 'margot verify' to debug.")
 
-    # Resolve descriptor to get meta for OCI URI computation
-    try:
-        resolved = describe_service.resolve_descriptor(project_dir or ".", manifest)
-    except ValueError as e:
-        console.fatal(f"{e!s}")
-
     # Build display model from dict, threading meta into build_identity for OCI URI
-    identity = build_identity(descriptor_dict, resolved.meta)
+    identity = build_identity(descriptor_dict, meta)
     catalog = build_catalog(descriptor_dict)
     profiles = build_deployment_profiles(descriptor_dict)
     index = component_index(descriptor_dict)
@@ -683,10 +680,6 @@ def describe_cmd(
     canonical_order = ["metadata", "profiles", "config-first", "component-first", "extensions", "orphans"]
     sections_to_render = [s for s in canonical_order if s in requested_sections]
 
-    # Get resolved path for subtitle
-    resolved_path = resolved.source_path
-
-    # Render panels in order
     # Render sections
     for section_name in sections_to_render:
-        _render_section(section_name, identity, catalog, profiles, index, config, descriptor_dict, resolved_path)
+        _render_section(section_name, identity, catalog, profiles, index, config, descriptor_dict, resolved_path, rendered)

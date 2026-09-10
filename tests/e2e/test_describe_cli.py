@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+import tempfile
 from typing import Any
 
 from pytest import fixture
@@ -1351,3 +1352,62 @@ class TestDescribeOrphans:
         # Metadata should come before Orphans in both (canonical order)
         assert plain1.find("metadata") < plain1.find("Orphans") or "Orphans" not in plain1
         assert plain2.find("metadata") < plain2.find("Orphans")
+
+
+class TestDescribeRenderedMarker:
+    """E2E tests for the (rendered) marker in describe output."""
+
+    def test_describe_templated_descriptor_shows_rendered_marker(self, cli_project: Path) -> None:
+        """Should render '(rendered)' marker in subtitle for app.yaml.jinja."""
+        (cli_project / "margo" / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should show the (rendered) marker in the subtitle
+        assert "(rendered)" in plain
+        # Should show the template file path (not temp file path)
+        assert "app.yaml.jinja" in plain
+
+    def test_describe_static_descriptor_no_rendered_marker(self, cli_project: Path) -> None:
+        """Should NOT render '(rendered)' marker for static app.yaml."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should NOT show (rendered) marker
+        assert "(rendered)" not in plain
+        # Should show the static file path
+        assert "app.yaml" in plain
+
+    def test_describe_templated_no_temp_file_leak(self, cli_project: Path) -> None:
+        """Should not leave temp files on disk after describing a .jinja template.
+
+        This test verifies that:
+        1. Only one render happens (not two as in the original bug)
+        2. The temp file is cleaned up after parsing
+        """
+        (cli_project / "margo" / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+
+        # Get temp directory and count margot temp files BEFORE running describe
+        temp_dir = Path(tempfile.gettempdir())
+        margot_temp_files_before = set(temp_dir.glob("*margot*.yaml"))
+
+        # Run describe
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        assert "(rendered)" in plain
+
+        # Count margot temp files AFTER running describe
+        margot_temp_files_after = set(temp_dir.glob("*margot*.yaml"))
+
+        # Find any NEW temp files created by this test (not pre-existing)
+        new_temp_files = margot_temp_files_after - margot_temp_files_before
+
+        # Should have no NEW leftover margot temp files (they should be cleaned up)
+        assert len(new_temp_files) == 0, f"Temp file leak detected: {new_temp_files}"

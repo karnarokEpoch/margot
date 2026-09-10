@@ -71,15 +71,18 @@ def temp_project() -> Path:
 class TestDescribeServiceStaticDescriptor:
     """Tests for load_descriptor with a static app.yaml."""
 
-    def test_load_descriptor_returns_dict(self, temp_project: Path) -> None:
-        """Should load a valid descriptor into a dict."""
+    def test_load_descriptor_returns_loaded_descriptor(self, temp_project: Path) -> None:
+        """Should load a valid descriptor into a LoadedDescriptor."""
         (temp_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
 
         result = describe_service.load_descriptor(str(temp_project))
 
-        assert isinstance(result, dict)
-        assert result.get("kind") == "ApplicationDescription"
-        assert result.get("id") == "hello-world"
+        assert isinstance(result, describe_service.LoadedDescriptor)
+        assert isinstance(result.descriptor, dict)
+        assert result.descriptor.get("kind") == "ApplicationDescription"
+        assert result.descriptor.get("id") == "hello-world"
+        assert result.source_path == str(temp_project / "margo" / "app.yaml")
+        assert result.rendered is False
 
     def test_load_descriptor_missing_file_raises_valueerror(self, temp_project: Path) -> None:
         """Should raise ValueError when neither app.yaml nor app.yaml.jinja exists."""
@@ -125,10 +128,13 @@ class TestDescribeServiceTemplatedDescriptor:
 
         result = describe_service.load_descriptor(str(temp_project))
 
-        assert isinstance(result, dict)
-        assert result.get("kind") == "ApplicationDescription"
-        assert result.get("id") == "hello-world"
-        assert result["metadata"]["name"] == "Hello World"
+        assert isinstance(result, describe_service.LoadedDescriptor)
+        assert isinstance(result.descriptor, dict)
+        assert result.descriptor.get("kind") == "ApplicationDescription"
+        assert result.descriptor.get("id") == "hello-world"
+        assert result.descriptor["metadata"]["name"] == "Hello World"
+        assert result.source_path == str(temp_project / "margo" / "app.yaml.jinja")
+        assert result.rendered is True
 
     def test_load_descriptor_unresolved_variable_raises_valueerror(self, temp_project: Path) -> None:
         """Should raise ValueError when Jinja2 variable cannot be resolved."""
@@ -164,8 +170,9 @@ class TestDescribeServiceManifestFlag:
 
         result = describe_service.load_descriptor(str(temp_project), manifest_path=str(manifest_path))
 
-        assert isinstance(result, dict)
-        assert result.get("id") == "hello-world"
+        assert isinstance(result, describe_service.LoadedDescriptor)
+        assert isinstance(result.descriptor, dict)
+        assert result.descriptor.get("id") == "hello-world"
 
     def test_load_descriptor_with_missing_manifest_path_raises_valueerror(self, temp_project: Path) -> None:
         """Should raise ValueError when --manifest path does not exist."""
