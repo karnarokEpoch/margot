@@ -94,7 +94,11 @@ metadata:
       icon: ./resources/icon.png
       descriptionFile: ./resources/description.md
       tags: ["web", "reverse-proxy"]
-    organization: {{ manifest.organization | to_yaml }}
+    organization:
+{%- for org in manifest.organization %}
+      - name: {{ org.name }}
+        site: {{ org.site }}
+{%- endfor %}
 
 deploymentProfiles:
   - type: helm
@@ -136,6 +140,21 @@ parameters:
 {%- for v in manifest.compose.variants + manifest.quadlet.variants %}
           - {{ v.component }}
 {%- endfor %}
+
+configuration:
+  sections:
+    - name: Networking
+      settings:
+        - parameter: nginxPort
+          name: NGINX Port
+          description: Host port the NGINX component listens on.
+          schema: portSchema
+  schema:
+    - name: portSchema
+      dataType: integer
+      minValue: 1
+      maxValue: 65535
+      allowEmpty: false
 ```
 
 Adding a new variant to `margo.yaml` requires **zero edits** to `app.yaml.jinja` — the loops pick it up
@@ -146,6 +165,127 @@ automatically. At build time, the context resolves to:
 - `{{ v.repository }}` → `public.ecr.aws/g2n4p2m7/margo` (bare registry/repository — the `oci://`
   scheme required by `deploymentProfiles[].components[].properties.repository` is prepended in
   the template, not part of the context value)
+
+## Inspect with describe
+
+`margot describe` renders the application descriptor as structured panels and trees — read-only inspection of the
+descriptor, no schema validation, no network, no prior build required. This is the natural thing to run before
+`build` and `push` to sanity-check the descriptor.
+
+```bash
+margot describe
+```
+
+This produces three output panels: identity metadata (name, version, OCI URI, catalog), deployment profiles (tree of
+types, components, and their properties), and configuration (settings, parameters, and schemas).
+
+```
+╭──────────────────────────── margo.org/v1-alpha1 ─────────────────────────────╮
+│ id    com-example-web-platform  version  1.0.0                               │
+│ name  Web Platform                                                           │
+│                                                                              │
+│ OCI: public.ecr.aws/g2n4p2m7/margo:1.0.0                                     │
+│ Description: NGINX + Apache web platform                                     │
+│ Catalog:                                                                     │
+│     tagline             —                                                    │
+│     site                —                                                    │
+│     icon                ./resources/icon.png                                 │
+│     descriptionFile     ./resources/description.md                           │
+│     licenseFile         —                                                    │
+│     releaseNotes        —                                                    │
+│     tags                web · reverse-proxy                                  │
+│     author              —                                                    │
+│     organization        Example Corp — https://example.com                   │
+╰────────────────────── margo/app.yaml.jinja (rendered) ───────────────────────╯
+╭────────────── Deployment profiles (5 profiles · 6 components) ───────────────╮
+│ helm  com-example-web-platform-helm                                          │
+│ └── components                                                               │
+│     ├── nginx                                                                │
+│     │   ├── repository  oci://registry-1.docker.io/bitnamicharts/nginx       │
+│     │   └── revision    25.0.15                                              │
+│     └── apache                                                               │
+│         ├── repository  oci://registry-1.docker.io/bitnamicharts/apache      │
+│         └── revision    11.4.29                                              │
+│                                                                              │
+│ compose  com-example-web-platform-compose-default                            │
+│ └── components                                                               │
+│     └── com-example-web-platform-compose-default                             │
+│         ├── repository  oci://public.ecr.aws/g2n4p2m7/margo                  │
+│         └── revision    2.1.0_compose-default                                │
+│                                                                              │
+│ compose  com-example-web-platform-compose-minimal                            │
+│ └── components                                                               │
+│     └── com-example-web-platform-compose-minimal                             │
+│         ├── repository  oci://public.ecr.aws/g2n4p2m7/margo                  │
+│         └── revision    2.1.0_compose-minimal                                │
+│                                                                              │
+│ quadlet  com-example-web-platform-quadlet-default                            │
+│ └── components                                                               │
+│     └── com-example-web-platform-quadlet-default                             │
+│         ├── repository  oci://public.ecr.aws/g2n4p2m7/margo                  │
+│         └── revision    2.1.0_quadlet-default                                │
+│                                                                              │
+│ quadlet  com-example-web-platform-quadlet-minimal                            │
+│ └── components                                                               │
+│     └── com-example-web-platform-quadlet-minimal                             │
+│         ├── repository  oci://public.ecr.aws/g2n4p2m7/margo                  │
+│         └── revision    2.1.0_quadlet-minimal                                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭────────────────── Configuration (1 sections · 1 settings) ───────────────────╮
+│ Networking  [Section]                                                        │
+│ └── NGINX Port  [Setting]                                                    │
+│     ├── Schema: portSchema  integer  1..65535 · allowEmpty false             │
+│     └── Parameter: nginxPort  8080                                           │
+│         └── Pointer: "NGINX_PORT"  (4/6 components)                          │
+│             ├── com-example-web-platform-compose-default                     │
+│             ├── com-example-web-platform-compose-minimal                     │
+│             ├── com-example-web-platform-quadlet-default                     │
+│             └── com-example-web-platform-quadlet-minimal                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+The configuration now includes the `nginxPort` setting properly wired to its schema and all component targets.
+
+### Component-first view
+
+Use `--section component-first` to see an alternative view listing each component with its incoming parameters.
+This is useful when understanding what configuration a specific component needs.
+
+```
+╭───────────────────────── Components (6 components) ──────────────────────────╮
+│ nginx  [Component]                                                           │
+│ └── no parameters                                                            │
+│                                                                              │
+│ apache  [Component]                                                          │
+│ └── no parameters                                                            │
+│                                                                              │
+│ com-example-web-platform-compose-default  [Component]                        │
+│ └── nginxPort  "NGINX_PORT"  [Parameter]                                     │
+│     ├── Value: 8080                                                          │
+│     ├── Setting: NGINX Port                                                  │
+│     └── Schema: portSchema  integer  1..65535 · allowEmpty false             │
+│                                                                              │
+│ com-example-web-platform-compose-minimal  [Component]                        │
+│ └── nginxPort  "NGINX_PORT"  [Parameter]                                     │
+│     ├── Value: 8080                                                          │
+│     ├── Setting: NGINX Port                                                  │
+│     └── Schema: portSchema  integer  1..65535 · allowEmpty false             │
+│                                                                              │
+│ com-example-web-platform-quadlet-default  [Component]                        │
+│ └── nginxPort  "NGINX_PORT"  [Parameter]                                     │
+│     ├── Value: 8080                                                          │
+│     ├── Setting: NGINX Port                                                  │
+│     └── Schema: portSchema  integer  1..65535 · allowEmpty false             │
+│                                                                              │
+│ com-example-web-platform-quadlet-minimal  [Component]                        │
+│ └── nginxPort  "NGINX_PORT"  [Parameter]                                     │
+│     ├── Value: 8080                                                          │
+│     ├── Setting: NGINX Port                                                  │
+│     └── Schema: portSchema  integer  1..65535 · allowEmpty false             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+The compose and quadlet components now show their incoming `nginxPort` parameter with its schema details.
 
 ## Compose files
 
@@ -190,6 +330,8 @@ The minimal variant ships only nginx, no apache.
 
 ## Quadlet files
 
+Note: `${NGINX_PORT}` in the quadlet `PublishPort=` is resolved by the deploying Margo device at deploy time (not by margot during build), and the `Environment=NGINX_PORT=8080` in the `[Service]` section supplies the default value if not overridden by the device.
+
 ### default
 
 #### nginx.container
@@ -197,9 +339,12 @@ The minimal variant ships only nginx, no apache.
 ```ini
 [Container]
 Image=docker.io/library/nginx:1.27.0
-PublishPort=8080:80
+PublishPort=${NGINX_PORT}:80
 Network=web.network
 Volume=%h/.config/containers/systemd/nginx-index.html:/usr/share/nginx/html/index.html:ro
+
+[Service]
+Environment=NGINX_PORT=8080
 
 [Install]
 WantedBy=default.target
@@ -253,9 +398,12 @@ Gateway=10.89.1.1
 ```ini
 [Container]
 Image=docker.io/library/nginx:1.27.0
-PublishPort=8080:80
+PublishPort=${NGINX_PORT}:80
 Network=web.network
 Volume=%h/.config/containers/systemd/nginx-index.html:/usr/share/nginx/html/index.html:ro
+
+[Service]
+Environment=NGINX_PORT=8080
 
 [Install]
 WantedBy=default.target

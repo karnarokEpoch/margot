@@ -54,6 +54,17 @@ class OrasClient(OrasClientLib):
     """OCI client extending oras.client.OrasClient for anonymous OCI operations.
 
     Provides pull() for bulk layer download and download_blob() for individual blob retrieval.
+
+    Manifest cache:
+        A per-client, single-reference manifest cache allows oras-py's internal
+        Registry.pull() to reuse a manifest already fetched by _prepare_oci_retrieval,
+        avoiding a redundant third fetch when oras-py calls self.get_manifest(Container)
+        polymorphically during its layer-download loop.
+
+        The cache is keyed by string URI and has no global scope or persistence.
+        oras-py's layer transfer path (client.pull / download_blob) remains the source
+        of truth; this cache is a coherency optimization for a single prepare→pull
+        workflow, not a general-purpose manifest cache.
     """
 
     def __init__(self, hostname: str | None = None) -> None:
@@ -66,6 +77,8 @@ class OrasClient(OrasClientLib):
                 anonymous-only (no credential loading).
         """
         super().__init__()
+        # Per-client manifest cache: keyed by string URI, scoped to this client instance
+        self._manifest_cache: dict[str, dict[str, Any]] = {}
         if hostname is not None:
             self.auth.load_configs(self.get_container(hostname))
         _configure_oras_logger()
@@ -76,7 +89,7 @@ class OrasClient(OrasClientLib):
         allowed_media_type: list | None = None,
         validation_schema: dict | None = None,
     ) -> dict[str, Any]:
-        """Fetch the manifest of an OCI artifact.
+        """Fetch the manifest of an OCI artifact, with per-client single-reference cache.
 
         This method overrides the base class signature to support both legacy usage
         patterns from margot's own call sites (which pass a URI string) and internal
@@ -89,6 +102,12 @@ class OrasClient(OrasClientLib):
         passing a Container object and optional allowed_media_type; this method must
         accept both forms without re-wrapping or dropping arguments.
 
+        Manifest cache:
+            On cache hit, returns the cached manifest without a registry fetch (e.g., when
+            oras-py's Registry.pull() internally calls self.get_manifest(Container) after
+            _prepare_oci_retrieval has already fetched it). On cache miss, fetches from
+            the registry and caches by string URI key.
+
         Args:
             container: Full OCI reference as a string (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0)
                 or an oras.container.Container instance (when called by oras-py internals).
@@ -98,20 +117,39 @@ class OrasClient(OrasClientLib):
                 class unchanged.
 
         Returns:
-            Manifest dict from the registry.
+            Manifest dict from the registry or cache.
 
         Raises:
             Exception: If fetch fails.
         """
-        # If container is a plain string (margot's own external call sites), convert to Container.
-        # If it's already a Container (oras-py's internal polymorphic dispatch), use as-is.
+        # Normalize input to string URI for cache key
         if isinstance(container, str):
-            console.debug(f"GET manifest: {container}")
-            container = self.get_container(container)
+            uri_key = container
+            console.debug(f"GET manifest: {uri_key}")
         else:
-            console.debug(f"GET manifest: {container}")
+            # Container object: use its uri property
+            uri_key = container.uri
+            console.debug(f"GET manifest: {uri_key}")
 
-        return super().get_manifest(container, allowed_media_type, validation_schema)
+        # Check cache
+        if uri_key in self._manifest_cache:
+            console.debug(f"  [cache hit] {uri_key}")
+            return self._manifest_cache[uri_key]
+
+        # Cache miss: fetch from registry
+        console.debug(f"  [cache miss] fetching {uri_key}")
+
+        # Convert string URI to Container if needed
+        if isinstance(container, str):
+            container = self.get_container(container)
+
+        # Fetch via base class
+        manifest = super().get_manifest(container, allowed_media_type, validation_schema)
+
+        # Cache by string URI key
+        self._manifest_cache[uri_key] = manifest
+
+        return manifest
 
     def pull(self, uri: str, outdir: str) -> list[str]:
         """

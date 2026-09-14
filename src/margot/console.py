@@ -69,6 +69,16 @@ def _get_stderr() -> Console:
     return Console(file=sys.stderr)
 
 
+def read_stdin() -> str:
+    """Read all of stdin at call time (uses current sys.stdin for test compatibility).
+
+    Returns the raw string as read from sys.stdin, unstripped. The caller is responsible
+    for stripping whitespace if needed. This deferred evaluation allows test runners
+    (e.g. Typer CliRunner) to swap sys.stdin at call time.
+    """
+    return sys.stdin.read()
+
+
 def set_verbose(enabled: bool) -> None:
     """Enable or disable verbose output (step-level info)."""
     global _verbose  # noqa: PLW0603

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
+from yaml import YAMLError, safe_load
 
 from margot import console
 from margot.domain import uri as uri_domain
@@ -15,8 +15,8 @@ from margot.domain.models import (
     PackageType,
     artifact_type_to_package_type,
 )
-from margot.domain.uri import extract_tag, validate_semver_tag
-from margot.infra import credentials, oci
+from margot.infra import credentials
+from margot.infra.oci import OrasClient
 
 _PAYLOAD_MEDIA_TYPES: dict[PackageType, str] = {
     PackageType.COMPOSE: COMPOSE_LAYER_MEDIA_TYPE,
@@ -26,16 +26,147 @@ _PAYLOAD_MEDIA_TYPES: dict[PackageType, str] = {
 _MEDIA_TYPE_NAMES: dict[str, str] = {v: k.name.lower() for k, v in _PAYLOAD_MEDIA_TYPES.items()}
 
 
+@dataclass(frozen=True)
+class PreparedOCIRetrieval:
+    """Internal context for a single prepared OCI retrieval operation.
+
+    Encapsulates the results of OCI preparation: normalized URI, hostname, live client
+    instance, fetched manifest, and detected package type. This context is reused across
+    credential check, manifest fetch, and pull operations to avoid redundant I/O.
+
+    Attributes:
+        normalized_uri: The OCI reference in canonical form (no oci:// scheme).
+        hostname: The registry hostname extracted from the URI.
+        client: Live OrasClient instance, configured with credentials if available.
+        manifest: The fetched OCI manifest dict.
+        package_type: Detected PackageType (MARGO, COMPOSE, QUADLET, or UNKNOWN).
+    """
+
+    normalized_uri: str
+    hostname: str
+    client: OrasClient
+    manifest: dict[str, Any]
+    package_type: PackageType
+
+
 @dataclass
 class _LayerContext:
     """Context for downloading compose/quadlet layers."""
 
-    client: oci.OrasClient
+    client: OrasClient
     uri: str
     outdir: str
     matching_layers: list[dict[str, Any]]
     manifest_annotations: dict[str, Any] | None
     force: bool
+
+
+def prepare_oci_retrieval(uri: str) -> PreparedOCIRetrieval:
+    """Prepare an OCI retrieval: normalize, validate, check credentials, and fetch manifest once.
+
+    This is the single point where URI validation, credential expiry check, and manifest
+    fetch occur. The returned context is reused across pull operations to avoid redundant I/O.
+
+    Args:
+        uri: Full OCI reference, optionally with 'oci://' scheme prefix.
+            Example: 'public.ecr.aws/g2n4p2m7/margo:1.0.0' or 'oci://public.ecr.aws/g2n4p2m7/margo:1.0.0'
+
+    Returns:
+        PreparedOCIRetrieval context with normalized URI, hostname, client, manifest, and package type.
+
+    Raises:
+        ValueError: If URI is malformed or tagged OCI reference validation fails.
+        CredentialsExpiredError: If credentials for the registry have expired.
+        Exception: If manifest fetch fails.
+    """
+    # Normalize URI by stripping scheme
+    normalized_uri = uri_domain.strip_scheme(uri)
+
+    # Validate URI
+    uri_domain.validate_uri(normalized_uri)
+    console.info(f"URI validated: {normalized_uri}")
+
+    # Extract hostname and check credentials
+    hostname = uri_domain.extract_hostname(normalized_uri)
+    console.info(f"Checking credentials for {hostname}")
+    credentials.check_credentials(hostname)
+
+    # Create client with hostname to load stored credentials
+    client = OrasClient(hostname=hostname)
+
+    # Fetch manifest exactly once
+    manifest: dict[str, Any] = client.get_manifest(normalized_uri)
+    console.info("Manifest fetched.")
+
+    # Detect artifact type
+    artifact_type: str | None = manifest.get("artifactType")
+    package_type = artifact_type_to_package_type(artifact_type)
+    console.info(f"Detected artifact type: {package_type.value if package_type else 'unknown'}")
+
+    return PreparedOCIRetrieval(
+        normalized_uri=normalized_uri,
+        hostname=hostname,
+        client=client,
+        manifest=manifest,
+        package_type=package_type,
+    )
+
+
+def pull_prepared_context(
+    prepared: PreparedOCIRetrieval,
+    outdir: str,
+    *,
+    force: bool = False,
+    force_type: PackageType | None = None,
+    recursive: bool = False,
+) -> list[str]:
+    """Pull OCI artifact from a prepared context, avoiding credential and manifest re-fetch.
+
+    Uses the manifest already in the prepared context and routes through type-specific
+    handlers (margo, compose, quadlet, unknown).
+
+    Args:
+        prepared: PreparedOCIRetrieval context from prepare_oci_retrieval.
+        outdir: Destination directory (created if needed).
+        force: Bypass malicious annotation checks and unknown-type gate.
+        force_type: Override detected artifact type.
+        recursive: If margo, also pull declared components.
+
+    Returns:
+        List of paths to written files.
+
+    Raises:
+        ValueError: If compose/quadlet has no matching layers, or artifact type is unknown
+            and force=False.
+        Exception: If pull or layer download fails.
+    """
+    Path(outdir).mkdir(parents=True, exist_ok=True)
+    console.info(f"Output directory ready: {outdir}")
+
+    # Override package type if force_type is set
+    package_type = force_type if force_type is not None else prepared.package_type
+
+    # Dispatch to type-specific handlers
+    if package_type == PackageType.UNKNOWN:
+        return _handle_unknown_artifact(
+            prepared.client,
+            prepared.normalized_uri,
+            outdir,
+            prepared.manifest,
+            force,
+        )
+
+    if package_type == PackageType.MARGO:
+        return _handle_margo_artifact(prepared.client, prepared.normalized_uri, outdir, recursive, force)
+
+    # Handle compose/quadlet
+    return _handle_compose_or_quadlet_artifact(
+        prepared.client,
+        prepared.normalized_uri,
+        outdir,
+        (package_type, prepared.manifest),
+        force,
+    )
 
 
 def _available_layer_types(layers: list[dict]) -> str:
@@ -96,11 +227,11 @@ def _pull_recursive_components(outdir: str, root_paths: list[str], force: bool) 
     # Load and parse app.yaml
     try:
         with Path(app_yaml_path).open(encoding="utf-8") as f:
-            app_doc = yaml.safe_load(f)
+            app_doc = safe_load(f)
         if not app_doc:
             console.warning("app.yaml is empty or unparseable; skipping component recursion.")
             return result
-    except (OSError, yaml.YAMLError) as e:
+    except (OSError, YAMLError) as e:
         console.warning(f"Failed to load app.yaml: {e}; skipping component recursion.")
         return result
 
@@ -131,7 +262,7 @@ def _pull_recursive_components(outdir: str, root_paths: list[str], force: bool) 
 
 
 def _handle_unknown_artifact(
-    client: oci.OrasClient,
+    client: OrasClient,
     uri: str,
     outdir: str,
     manifest: dict[str, Any],
@@ -165,7 +296,7 @@ def _handle_unknown_artifact(
 
 
 def _handle_margo_artifact(
-    client: oci.OrasClient,
+    client: OrasClient,
     uri: str,
     outdir: str,
     recursive: bool,
@@ -252,7 +383,7 @@ def _validate_and_filter_layers(
 
 
 def _handle_compose_or_quadlet_artifact(
-    client: oci.OrasClient,
+    client: OrasClient,
     uri: str,
     outdir: str,
     package_type_and_manifest: tuple[PackageType, dict[str, Any]],
@@ -305,30 +436,14 @@ def pull_artifact(
     also pulls declared component artifacts into subdirectories named after each component.
     For other types (unknown): delegates to client.pull() for bulk download.
 
-    Steps:
-    1. Normalize URI by stripping 'oci://' scheme if present.
-    2. Validate URI (via domain/uri.py).
-    3. Guard: force_type requires force.
-    4. SemVer gate: reject non-SemVer tags unless force=True.
-    5. Create outdir.
-    6. Fetch manifest.
-    7. Detect artifact type via the artifactType field; override with force_type if set.
-    8. If package_type is MARGO:
-       a. Pull root layers via client.pull().
-       b. If recursive=True: locate app.yaml in pulled layers, extract component refs,
-          and recursively pull each component into outdir/<component-name>/.
-    9. If package_type not in _PAYLOAD_MEDIA_TYPES: use client.pull() (unknown types).
-    10. Otherwise (compose/quadlet): own the layer loop.
-        a. Get target mediaType for this package_type.
-        b. Filter manifest layers by that mediaType.
-        c. Hard-fail if no matching layers found.
-        d. For each layer: resolve filename and download individually.
-    11. Return flat list of all written file paths (root + component paths in order).
+    Uses a shared prepared context (prepare_oci_retrieval) to centralize URI validation,
+    credential checks, and manifest fetching — avoiding redundant I/O when oras-py's
+    Registry.pull() polymorphically calls self.get_manifest() internally.
 
     Args:
         uri: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0 or oci://public.ecr.aws/g2n4p2m7/margo:1.0.0).
         outdir: Destination directory (created if needed).
-        force: Bypass SemVer gate and malicious annotation checks.
+        force: Bypass malicious annotation checks and unknown-type gate.
         force_type: Override detected artifact type interpretation.
         recursive: If True and artifact is margo, also pull declared components. No-op for other types.
 
@@ -337,48 +452,19 @@ def pull_artifact(
 
     Raises:
         ValueError: If URI is malformed.
-        ValueError: If tag is not valid SemVer and force=False.
         ValueError: If compose/quadlet artifact has no matching layers.
         ValueError: If artifact type is unknown and force=False.
         CredentialsExpiredError: If credentials for the registry have expired.
         Exception: If pull or manifest fetch fails.
     """
-    # Normalize URI by stripping scheme
-    uri = uri_domain.strip_scheme(uri)
+    # Prepare OCI retrieval: normalize URI, validate, check credentials, fetch manifest once
+    prepared = prepare_oci_retrieval(uri)
 
-    uri_domain.validate_uri(uri)
-    console.info(f"URI validated: {uri}")
-
-    tag = extract_tag(uri)
-    if not validate_semver_tag(tag) and not force:
-        raise ValueError(f"Tag '{tag}' is not valid SemVer. Use --force to pull anyway.")
-    console.info(f"Tag '{tag}' is valid SemVer.")
-
-    Path(outdir).mkdir(parents=True, exist_ok=True)
-    console.info(f"Output directory ready: {outdir}")
-
-    hostname = uri_domain.extract_hostname(uri)
-    console.info(f"Checking credentials for {hostname}")
-    credentials.check_credentials(hostname)
-
-    client = oci.OrasClient(hostname=hostname)
-    manifest: dict[str, Any] = client.get_manifest(uri)
-    console.info("Manifest fetched.")
-
-    artifact_type: str | None = manifest.get("artifactType")
-    package_type = artifact_type_to_package_type(artifact_type)
-    console.info(f"Detected artifact type: {package_type.value if package_type else 'unknown'}")
-
-    if force_type is not None:
-        package_type = force_type
-        console.info(f"Artifact type overridden to: {force_type.value}")
-
-    # Dispatch to type-specific handlers
-    if package_type == PackageType.UNKNOWN:
-        return _handle_unknown_artifact(client, uri, outdir, manifest, force)
-
-    if package_type == PackageType.MARGO:
-        return _handle_margo_artifact(client, uri, outdir, recursive, force)
-
-    # Handle compose/quadlet
-    return _handle_compose_or_quadlet_artifact(client, uri, outdir, (package_type, manifest), force)
+    # Use prepared context for pull, passing through force and recursive flags
+    return pull_prepared_context(
+        prepared,
+        outdir,
+        force=force,
+        force_type=force_type,
+        recursive=recursive,
+    )

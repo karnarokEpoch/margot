@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for the suggestion. Check [FEATURES.md](https://github.com/karnarokEpoch/margot/blob/main/FEATURES.md)
+        Thanks for the suggestion. Check the [docs](https://karnarokepoch.github.io/margot/)
         and the [roadmap](https://github.com/karnarokEpoch/margot/blob/main/ROADMAP.md) first —
         it may already be planned.
 

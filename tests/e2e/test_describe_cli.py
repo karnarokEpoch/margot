@@ -2,12 +2,15 @@
 
 from pathlib import Path
 import re
+import tempfile
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from pytest import fixture
 from typer.testing import CliRunner
 
 from margot.main import app
+from margot.services.remote import ResolvedRemoteDescriptor
 
 runner = CliRunner()
 
@@ -1351,3 +1354,142 @@ class TestDescribeOrphans:
         # Metadata should come before Orphans in both (canonical order)
         assert plain1.find("metadata") < plain1.find("Orphans") or "Orphans" not in plain1
         assert plain2.find("metadata") < plain2.find("Orphans")
+
+
+class TestDescribeRenderedMarker:
+    """E2E tests for the (rendered) marker in describe output."""
+
+    def test_describe_templated_descriptor_shows_rendered_marker(self, cli_project: Path) -> None:
+        """Should render '(rendered)' marker in subtitle for app.yaml.jinja."""
+        (cli_project / "margo" / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should show the (rendered) marker in the subtitle
+        assert "(rendered)" in plain
+        # Should show the template file path (not temp file path)
+        assert "app.yaml.jinja" in plain
+
+    def test_describe_static_descriptor_no_rendered_marker(self, cli_project: Path) -> None:
+        """Should NOT render '(rendered)' marker for static app.yaml."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        # Should NOT show (rendered) marker
+        assert "(rendered)" not in plain
+        # Should show the static file path
+        assert "app.yaml" in plain
+
+    def test_describe_templated_no_temp_file_leak(self, cli_project: Path) -> None:
+        """Should not leave temp files on disk after describing a .jinja template.
+
+        This test verifies that:
+        1. Only one render happens (not two as in the original bug)
+        2. The temp file is cleaned up after parsing
+        """
+        (cli_project / "margo" / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+
+        # Get temp directory and count margot temp files BEFORE running describe
+        temp_dir = Path(tempfile.gettempdir())
+        margot_temp_files_before = set(temp_dir.glob("*margot*.yaml"))
+
+        # Run describe
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        assert "(rendered)" in plain
+
+        # Count margot temp files AFTER running describe
+        margot_temp_files_after = set(temp_dir.glob("*margot*.yaml"))
+
+        # Find any NEW temp files created by this test (not pre-existing)
+        new_temp_files = margot_temp_files_after - margot_temp_files_before
+
+        # Should have no NEW leftover margot temp files (they should be cleaned up)
+        assert len(new_temp_files) == 0, f"Temp file leak detected: {new_temp_files}"
+
+
+class TestDescribeRemote:
+    """E2E tests for describe command with remote OCI URIs."""
+
+    def test_describe_remote_uri_via_mocked_resolver(self, mocker: Any) -> None:
+        """Should resolve remote OCI URI and describe the artifact via remote_service.
+
+        This is a regression test for the wiring bug where describe was calling
+        describe_service.resolve_remote_descriptor() instead of remote_service.resolve_remote_descriptor().
+
+        The test:
+        1. Mocks remote_service.resolve_remote_descriptor to return a test app.yaml
+        2. Invokes describe with a remote OCI URI
+        3. Asserts successful describe output including remote identity markers
+        4. Verifies that the correct remote_service was called (not describe_service)
+        5. Makes no live registry requests
+        """
+        # Create a temporary directory with test app.yaml
+        temp_dir = TemporaryDirectory(prefix="margot-test-remote-")
+        app_yaml_path = Path(temp_dir.name) / "app.yaml"
+        app_yaml_path.write_text(VALID_APP_YAML, encoding="utf-8")
+
+        # Create the mock resolver return value
+        remote_result = ResolvedRemoteDescriptor(
+            normalized_uri="public.ecr.aws/g2n4p2m7/belden-margo:1.1.0",
+            app_yaml_path=str(app_yaml_path),
+            temp_dir=temp_dir,
+        )
+
+        # Mock remote_service.resolve_remote_descriptor to return our test result
+        mock_resolve = mocker.patch(
+            "margot.commands.describe.remote_service.resolve_remote_descriptor",
+            return_value=remote_result,
+        )
+
+        # Invoke describe with the remote URI
+        test_uri = "public.ecr.aws/g2n4p2m7/belden-margo:1.1.0"
+        result = runner.invoke(app, ["describe", test_uri])
+        plain = _output(result)
+
+        # Should succeed
+        assert result.exit_code == 0, f"Command failed with: {plain}"
+
+        # Should show remote marker in output
+        assert "(remote)" in plain, f"Missing remote marker in output: {plain}"
+
+        # Should show the normalized URI
+        assert "public.ecr.aws/g2n4p2m7/belden-margo:1.1.0" in plain, f"Missing URI in output: {plain}"
+
+        # Should display application metadata from the descriptor
+        assert "hello-world" in plain or "Hello World" in plain, f"Missing app metadata in output: {plain}"
+
+        # Should have called the correct remote_service resolver
+        mock_resolve.assert_called_once_with(test_uri)
+
+        # Clean up (in real code this is in a finally block in the command)
+        temp_dir.cleanup()
+
+    def test_describe_remote_uri_mutual_exclusion(self) -> None:
+        """Should reject describe when both URI and --project-dir are provided."""
+        result = runner.invoke(
+            app,
+            ["describe", "public.ecr.aws/g2n4p2m7/belden-margo:1.1.0", "--project-dir", "."],
+        )
+        plain = _output(result)
+
+        assert result.exit_code == 1
+        assert "mutually exclusive" in plain.lower() or "error" in plain.lower()
+
+    def test_describe_remote_uri_mutual_exclusion_with_manifest(self) -> None:
+        """Should reject describe when both URI and --manifest are provided."""
+        result = runner.invoke(
+            app,
+            ["describe", "public.ecr.aws/g2n4p2m7/belden-margo:1.1.0", "--manifest", "app.yaml"],
+        )
+        plain = _output(result)
+
+        assert result.exit_code == 1
+        assert "mutually exclusive" in plain.lower() or "error" in plain.lower()

@@ -12,6 +12,7 @@ class PackageType(StrEnum):
     MARGO = "margo"
     COMPOSE = "compose"
     QUADLET = "quadlet"
+    BUNDLE = "bundle"
     UNKNOWN = "unknown"
     ALL = "all"
 

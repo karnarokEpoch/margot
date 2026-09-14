@@ -28,6 +28,14 @@ import pytest
 Ruff PT013 (which would enforce `import pytest`) is disabled — selective imports apply to pytest too.
 But it's also the same for typer, or others pythonic modules.
 
+**Exemptions.** This rule applies to `src/` application code only. Test modules under
+`tests/` may use plain `import X` for stdlib namespaces. `src/margot/console.py` is the
+**sole** `import sys` exception in `src/` — it owns all access to `sys.stdin`, `sys.stdout`,
+and `sys.stderr`. These are evaluated at call time so test runners can swap the streams at
+runtime; a `from sys import stdout` would bind the stream object at import time and prevent
+test stream capture. All stdin/stdout/stderr access — whether for console output or input —
+routes through `console.py` functions (`_get_stdout()`, `_get_stderr()`, `read_stdin()`).
+
 ## Output / terminal output
 
 All terminal output goes through `margot.console` — never use `rprint`, `echo`, or `print` directly in commands, services, or infra.
