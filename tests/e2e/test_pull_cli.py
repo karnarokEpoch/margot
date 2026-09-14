@@ -117,15 +117,28 @@ class TestPullCLI:
 class TestPullCLIForce:
     """E2E tests for --force and --force-type CLI flags."""
 
-    def test_non_semver_uri_without_force_now_accepted(self) -> None:
+    def test_non_semver_uri_without_force_now_accepted(self, mocker: Any, tmp_path: Any) -> None:
         """Non-SemVer URI without --force should now be accepted (Item 1 change)."""
+        pulled_file = str(tmp_path / "margo.yaml")
+
+        # Mock pull_artifact to ensure no SemVer rejection occurs at CLI level
+        pull_artifact_mock = mocker.patch(
+            "margot.commands.pull.pull_service.pull_artifact",
+            return_value=[pulled_file],
+        )
+
+        # Invoke with non-SemVer tag (latest) without --force
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:latest"])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        # Should now proceed to credential/network checks rather than rejecting the tag
-        # Credentials error is expected since we're using a real URI without valid credentials
-        assert result.exit_code == 1
-        assert "Credentials" in plain or "expired" in plain or "not found" in plain.lower()
+        # Should accept the URI and pass it through to pull_artifact
+        assert result.exit_code == 0
+        # Verify pull_artifact was called with the non-SemVer URI
+        pull_artifact_mock.assert_called_once()
+        call_args = pull_artifact_mock.call_args[0]
+        assert "latest" in call_args[0]
+        # Verify no SemVer rejection occurred (the file was pulled successfully)
+        assert pulled_file in plain
 
     def test_non_semver_uri_without_force_now_works(self, mocker: Any, tmp_path: Any) -> None:
         """Non-SemVer URI without --force should now work (Item 1 change)."""
