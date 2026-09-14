@@ -509,6 +509,8 @@ ______________________________________________________________________
 
 ## Item 4 — Local container-daemon lookup for bundled images
 
+**Status:** Complete — implementation, tests, and documentation merged into `release/0.9.0` via [PR #90](https://github.com/karnarokEpoch/margot/pull/90).
+
 **Goal:** Before falling back to Item 3's registry pull, let `margot package` check whether an image is already
 present in a local container daemon (Podman or Docker) and, if so, save it from there — covering the case where a
 developer has built/tagged an image locally that has not been pushed to any registry yet. Runs in parallel with Item 5
@@ -621,6 +623,8 @@ developer has built/tagged an image locally that has not been pushed to any regi
 ______________________________________________________________________
 
 ## Item 5 — Multi-platform filtering for bundled images
+
+**Status:** Complete — implementation, tests, and documentation merged into `release/0.9.0` via [PR #91](https://github.com/karnarokEpoch/margot/pull/91).
 
 **Goal:** Let `margot package` filter which platform(s) of a multi-arch image index get pulled and saved, rather than
 always saving every platform present (Item 3's default). Purely additive on top of Item 3; does not change how images
