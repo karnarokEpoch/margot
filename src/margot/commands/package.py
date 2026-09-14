@@ -9,7 +9,7 @@ from margot.domain.models import PackageType
 from margot.services import package as package_service
 
 
-def package_cmd(
+def package_cmd(  # noqa: PLR0913
     t: Annotated[
         list[str] | None,
         Option(
@@ -41,6 +41,15 @@ def package_cmd(
             "fully offline/no-network behavior (Item 2 compatible).",
         ),
     ] = False,
+    platform: Annotated[
+        list[str] | None,
+        Option(
+            "--platform",
+            help="Filter bundled images to specific platform(s) (e.g. linux/amd64). "
+            "Repeatable. Default pulls all platforms in a multi-arch index. "
+            "Invalid with --no-images.",
+        ),
+    ] = None,
 ) -> None:
     """Create offline bundle from built artifacts."""
     try:
@@ -75,6 +84,7 @@ def package_cmd(
             build_dir=build_dir,
             output=output,
             include_images=not no_images,
+            platforms=platform,
         )
 
         console.success(f"Packaged: {bundle_path}")
