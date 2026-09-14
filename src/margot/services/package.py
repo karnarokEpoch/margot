@@ -1,14 +1,15 @@
 """Package service: orchestrate offline bundle creation from built artifacts."""
 
-import hashlib
-import json
+from hashlib import sha256
+from json import dumps as json_dumps
+from json import load as json_load
 from pathlib import Path
 from shutil import rmtree
-import tarfile
+from tarfile import open as tar_open
 from tempfile import mkdtemp
 from typing import Any
 
-import yaml
+from yaml import YAMLError, safe_load
 
 from margot import console
 from margot.domain.metadata import ComponentConfig, MargoYaml, load_margo_yaml
@@ -79,7 +80,7 @@ def _discover_image_references_compose(tgz_path: str) -> list[str]:
         if not compose_data:
             return []
         return _extract_images_from_compose(compose_data)
-    except yaml.YAMLError as e:
+    except YAMLError as e:
         console.debug(f"Error discovering compose images from {tgz_path}: {e}")
         return []
 
@@ -94,15 +95,15 @@ def _load_compose_from_tgz(tgz_path: str) -> dict[str, Any] | None:
         The parsed YAML dict, or None if not found/invalid.
     """
     try:
-        with tarfile.open(tgz_path, "r:gz") as tar:
+        with tar_open(tgz_path, "r:gz") as tar:
             # Try to find compose.yml or compose.yaml
             for member in tar.getmembers():
                 if member.name in ("compose.yml", "compose.yaml"):
                     f = tar.extractfile(member)
                     if f is None:
                         return None
-                    return yaml.safe_load(f.read())
-    except yaml.YAMLError:
+                    return safe_load(f.read())
+    except YAMLError:
         pass
     return None
 
@@ -155,7 +156,7 @@ def _discover_image_references_quadlet(tgz_path: str) -> list[str]:  # noqa: C90
     seen = set()
 
     try:
-        with tarfile.open(tgz_path, "r:gz") as tar:
+        with tar_open(tgz_path, "r:gz") as tar:
             for member in tar.getmembers():
                 if not member.name.endswith(".container"):
                     continue
@@ -248,7 +249,7 @@ def _create_oci_image_layout_tar(
 
                 # Parse the child manifest to get config and layers
                 with manifest_blob_path.open() as f:
-                    child_manifest = json.load(f)
+                    child_manifest = json_load(f)
 
                 child_manifests.append((child_descriptor, child_manifest))
 
@@ -274,7 +275,7 @@ def _create_oci_image_layout_tar(
             # Build index.json pointing to this single manifest
             manifest_digest = manifest.get("digest") or _compute_manifest_digest(manifest)
             # Size of the manifest serialized as JSON
-            manifest_json_str = json.dumps(manifest, separators=(",", ":"), sort_keys=True)
+            manifest_json_str = json_dumps(manifest, separators=(",", ":"), sort_keys=True)
             manifest_size = len(manifest_json_str.encode("utf-8"))
 
             index_json = {
@@ -291,13 +292,13 @@ def _create_oci_image_layout_tar(
 
         # Write oci-layout file (must be valid JSON)
         oci_layout = {"imageLayoutVersion": "1.0.0"}
-        (temp_dir / "oci-layout").write_text(json.dumps(oci_layout))
+        (temp_dir / "oci-layout").write_text(json_dumps(oci_layout))
 
         # Write index.json (must be valid JSON)
-        (temp_dir / "index.json").write_text(json.dumps(index_json))
+        (temp_dir / "index.json").write_text(json_dumps(index_json))
 
         # Create the final tarball
-        with tarfile.open(output_tar_path, "w") as tar:
+        with tar_open(output_tar_path, "w") as tar:
             tar.add(temp_dir, arcname=".", recursive=True)
 
         console.debug(f"Created OCI image layout tar: {output_tar_path}")
@@ -325,7 +326,7 @@ def _verify_blob_digest(blob_path: Path, expected_digest: str) -> None:
 
     # Compute actual digest
     if algo == "sha256":
-        actual_hash = hashlib.sha256(blob_path.read_bytes()).hexdigest()
+        actual_hash = sha256(blob_path.read_bytes()).hexdigest()
     else:
         msg = f"Unsupported digest algorithm: {algo}"
         raise OciRegistryError(msg)
@@ -380,8 +381,8 @@ def _compute_manifest_digest(manifest: dict[str, Any]) -> str:
     Returns:
         The digest in the format 'sha256:...' (computed from JSON).
     """
-    manifest_json = json.dumps(manifest, separators=(",", ":"), sort_keys=True)
-    digest = hashlib.sha256(manifest_json.encode("utf-8")).hexdigest()
+    manifest_json = json_dumps(manifest, separators=(",", ":"), sort_keys=True)
+    digest = sha256(manifest_json.encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
 
 
@@ -996,6 +997,6 @@ def _write_bundle_tarball(staging_root: Path, bundle_path: Path, root_dir_name: 
         root_dir_name: Name of the root directory inside the tarball.
     """
     console.debug(f"Writing bundle tarball: {bundle_path}")
-    with tarfile.open(bundle_path, "w:gz") as tar:
+    with tar_open(bundle_path, "w:gz") as tar:
         tar.add(staging_root, arcname=root_dir_name, recursive=True)
     console.debug(f"Bundle tarball written: {bundle_path}")

@@ -1,7 +1,6 @@
 """Auth commands: manage OCI registry credentials."""
 
 from datetime import UTC, datetime
-import sys
 from typing import Annotated
 
 from rich.table import Table
@@ -56,7 +55,7 @@ def login(
     if not password_stdin:
         console.fatal("Password required. Use --password-stdin.")
 
-    password = sys.stdin.read().strip()
+    password = console.read_stdin().strip()
     if not password:
         console.fatal("Empty password received from stdin.")
 
