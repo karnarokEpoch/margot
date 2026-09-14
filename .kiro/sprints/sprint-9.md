@@ -35,6 +35,8 @@ ______________________________________________________________________
 
 ## Item 1 — Shared remote OCI resolution for `describe` and `verify`
 
+**Status:** Complete — implementation is committed in [PR #87](https://github.com/karnarokEpoch/margot/pull/87), with shared MkDocs documentation in [PR #88](https://github.com/karnarokEpoch/margot/pull/88); all are awaiting merge.
+
 ### Context: current state (verified against source)
 
 - `describe` and `verify` currently resolve only local files: an explicit `--manifest`, or `margo.yaml` in
@@ -361,6 +363,8 @@ New `commands/package.py` + `services/package.py`, following the existing `comma
 ______________________________________________________________________
 
 ## Item 3 — Container image inclusion in offline bundles
+
+**Status:** Complete — implementation is committed in [PR #86](https://github.com/karnarokEpoch/margot/pull/86), with shared MkDocs documentation in [PR #88](https://github.com/karnarokEpoch/margot/pull/88); all are awaiting merge.
 
 **Goal:** Extend `margot package` (Item 2) to embed the container images referenced by a component's `image:` block
 into the bundle **by default**, so the resulting `.tgz` is fully self-contained for an offline/disconnected
