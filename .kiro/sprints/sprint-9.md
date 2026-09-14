@@ -225,6 +225,8 @@ ______________________________________________________________________
 
 ## Item 2 — `margot package`: offline bundle artifacts
 
+**Status:** Complete — implementation and documentation are committed on `release/0.9.0`.
+
 **Goal:** Bundle already-`build`-produced margo, compose, and quadlet outputs from `.dist/<version>/` into one
 self-contained `.tgz`, for deployment into disconnected/offline environments without registry access. `package` runs
 strictly after `build`; it never triggers a build itself, and it is never pushed to a registry — a bundle has no OCI
