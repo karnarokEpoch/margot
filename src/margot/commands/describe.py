@@ -35,6 +35,7 @@ from margot.domain.describe import (
     component_index,
 )
 from margot.services import describe as describe_service
+from margot.services import remote as remote_service
 
 DASH = "\u2014"  # em dash
 DOT = " \u00b7 "  # middle dot with spaces
@@ -690,7 +691,7 @@ def describe_cmd(
     try:
         if uri is not None:
             # Remote mode: resolve the remote descriptor
-            remote_result = describe_service.resolve_remote_descriptor(uri)
+            remote_result = remote_service.resolve_remote_descriptor(uri)
             try:
                 # Load descriptor from the pulled app.yaml
                 loaded = describe_service.load_descriptor_from_path(remote_result.app_yaml_path, remote_result.normalized_uri)
