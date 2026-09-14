@@ -88,3 +88,52 @@ def load_descriptor(project_dir: str = ".", manifest_path: str | None = None) ->
         if resolved.rendered:
             Path(resolved.path).unlink(missing_ok=True)
             console.debug(f"Removed temp file: {resolved.path}")
+
+
+def load_descriptor_from_path(descriptor_path: str, source_uri: str | None = None) -> LoadedDescriptor:
+    """Load an application description from an explicit static file path (e.g., a pulled remote app.yaml).
+
+    Does not perform any Jinja2 rendering or margo.yaml resolution. Enforces the same
+    Item 1 load gate (kind=ApplicationDescription). Suitable for loading a descriptor that
+    has already been resolved externally (e.g., pulled from a remote artifact).
+
+    Args:
+        descriptor_path: Absolute or relative path to the app.yaml file to load.
+        source_uri: Optional OCI reference or label for the source (used for display only).
+            If provided, replaces source_path in the returned LoadedDescriptor.
+
+    Returns:
+        A LoadedDescriptor with parsed descriptor, no metadata (meta=None), source_path
+        set to source_uri (if provided) or descriptor_path, rendered=False.
+
+    Raises:
+        ValueError: If the file is missing or YAML does not parse.
+        TypeError: If YAML does not parse to a mapping.
+        ValueError: If kind != ApplicationDescription.
+    """
+    source_path = Path(descriptor_path)
+    if not source_path.is_file():
+        raise ValueError(f"Application description not found: {descriptor_path}")
+
+    # Load the YAML
+    parsed = load_yaml(str(source_path))
+    console.info(f"Application description loaded: {descriptor_path}")
+
+    # Enforce: must be a mapping
+    if not isinstance(parsed, dict):
+        raise TypeError("Application description must parse into a mapping (dict), not a sequence or scalar.")
+
+    # Enforce: kind must be ApplicationDescription
+    kind = parsed.get("kind")
+    if kind != "ApplicationDescription":
+        raise ValueError(
+            f"Application description kind must be 'ApplicationDescription', got '{kind}'. Run 'margot verify' to debug."
+        )
+
+    console.info("Item 1 load gate passed: valid mapping with kind=ApplicationDescription")
+    return LoadedDescriptor(
+        descriptor=parsed,
+        meta=None,  # No margo.yaml for externally-resolved descriptors
+        source_path=source_uri or str(source_path),  # Use source_uri if provided
+        rendered=False,
+    )
