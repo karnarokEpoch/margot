@@ -1,7 +1,7 @@
 # Sprint 9 — Remote OCI resolution + offline bundle packaging
 
-**Goal:** Five independent items shipping in the same sprint/release, each on its own branch/worktree per
-`agent-workspace`:
+**Goal:** Six items shipping in the same sprint/release, each on its own branch/worktree per
+`agent-workspace` (Items 1–5 as originally planned; Item 6 added mid-sprint to correct Item 3's image-inclusion scope):
 
 - **Item 1 — Shared remote OCI resolution for `describe` and `verify`.** Let `margot describe` and `margot verify`
   inspect a published Margo application artifact directly, using the same OCI inspection and layer-pull mechanics as
@@ -27,6 +27,12 @@
 - **Item 5 — Multi-platform filtering for bundled images.** Adds a repeatable `--platform <os>/<arch>` flag to narrow
   which platform(s) of a multi-arch image index Item 3's registry path pulls and saves. Default stays "every platform
   present," unchanged from Item 3. Depends on Item 3; independent of and parallel to Item 4.
+- **Item 6 — Scan all component images for bundle inclusion.** Corrects Item 3's ambiguous, `image:`-block-gated
+  behavior: `margot package` scans already-built compose/quadlet content and pulls **every** referenced image
+  (including base/third-party images), independent of any `margo.yaml` `image:` block, so bundles are actually
+  self-contained. Credential checks become best-effort (anonymous pull attempted; only expired creds error, via the
+  aggregate failure path). Supersedes the `replace`-only scope in Item 3. Depends on Item 3 (shipped on
+  `release/0.9.0`); independent of Items 4 and 5.
 
 **Prerequisite (Item 1 only):** Sprint 8's local `describe` views are released. The former Sprint 9 machine-output/
 error-code plan has been renumbered to Sprint 10.
@@ -401,16 +407,25 @@ air-gapped builds needs `--no-images` to be immediately discoverable.
 
 #### Which image reference is pulled
 
-- Only the rendered **`replace`** value is pulled (per your #1) — the real production image reference the deployment
-  will actually run. The `search` placeholder is never fetched.
-- Resolve the image reference **by re-reading it from the already-built component content**, not by re-rendering
-  `ImageConfig` from `margo.yaml` a second time (per your #1 — "search it in the component, it's easier"). The
-  rendered `replace` value is already present verbatim in the built compose/quadlet `.tgz` content under
-  `.dist/<version>/`; `package` extracts/greps the built content for the image reference(s) actually present, rather
-  than recomputing the Jinja2 render path a second time and risking drift between what was built and what gets
-  bundled. Exact mechanism (parse compose YAML `image:` fields vs. quadlet `Image=` directives vs. a generic
-  reference-shaped string scan) needs to be pinned down at implementation time per component format — this sprint
-  item does not redesign compose/quadlet parsing, it adds a read-only extraction pass over already-built content.
+> **Revised by [Item 6](#item-6--scan-all-component-images-for-bundle-inclusion).** The
+> original text below scoped image inclusion to the rendered `image.replace` value and
+> gated the whole discovery on a component declaring an `image: {search, replace}` block
+> in `margo.yaml`. In use this proved too narrow: a component can reference images
+> (base images such as `nginx`/`postgres`, or images with no `search`/`replace` swap)
+> that no `image:` block declares, and a bundle that omits them is not self-contained.
+> Item 6 supersedes this: `package` scans the already-built component content and pulls
+> **every** image reference found, independent of any `image:` block. The paragraph below
+> is retained for provenance; where it conflicts with Item 6, Item 6 governs.
+
+- Resolve image references **by reading them from the already-built component content**,
+  not by re-rendering `ImageConfig` from `margo.yaml`. The built compose/quadlet `.tgz`
+  content under `.dist/<version>/` already carries the final, post-search-and-replace
+  image values, so scanning it is authoritative and cannot drift from what was built.
+  `package` extracts every image reference actually present (compose `services[*].image`,
+  quadlet `[Container] Image=`) — including third-party/base images — and pulls all of
+  them. It does not re-run the Jinja2 render path and does not require an `image:` block
+  to be present. This is a read-only extraction pass over already-built content, not a
+  redesign of compose/quadlet parsing. (See Item 6 for the full revised contract.)
 
 #### How the image is fetched and saved
 
@@ -496,10 +511,10 @@ air-gapped builds needs `--no-images` to be immediately discoverable.
 
 - Multi-platform filtering flag (which architecture(s) to pull) — Item 5.
 - Local container-daemon lookup (checking Podman/Docker local storage before the registry) — Item 4. Item 3 alone is
-  registry-only: if an image referenced by `replace` has not been pushed to the registry it names, `package` fails
-  clearly rather than finding it locally.
-- Re-deriving the image reference from `margo.yaml`'s `ImageConfig` template a second time — extraction reads already-
-  built content instead (per your #1).
+  registry-only: an image referenced by a component that has not been pushed to the registry it names causes
+  `package` to fail clearly rather than finding it locally.
+- Re-deriving image references from `margo.yaml`'s `ImageConfig` template — extraction reads already-built content
+  instead. (Item 6 broadens this to *all* image references in the built content, not just `replace`-derived ones.)
 - Shelling out to `podman`/`skopeo`/`docker` binaries for the save step — pulled and assembled via `infra/oci.py`
   directly.
 - Image signing, verification, or vulnerability scanning of bundled images.
@@ -690,3 +705,110 @@ are pulled, assembled, or named. Independent of Item 4; both depend only on Item
 - Auto-detecting the host's own platform as an implicit default filter — the default stays "everything," matching
   your explicit instruction; an implicit host-platform default was not requested and would be a silent behavior
   narrowing.
+
+______________________________________________________________________
+
+## Item 6 — Scan all component images for bundle inclusion
+
+**Status:** Planned.
+
+**Goal:** Make `margot package` image inclusion (Item 3) match its intent: a bundle must be *fully self-contained*.
+`package` scans the already-built compose/quadlet content and pulls **every** container image referenced there —
+independent of whether `margo.yaml` declares an `image: {search, replace}` block. This supersedes Item 3's original
+`replace`-only, `image:`-block-gated behavior, which silently produced non-autonomous bundles for the common case of
+a descriptor with no `image:` block (e.g. a component pinning `nginx:1.27` directly).
+
+### Context: current state (verified against source)
+
+- `services/package.py::_discover_and_include_images` already extracts image references by scanning built content:
+  `_discover_image_references_compose` parses `services[*].image` from the component `.tgz`, and
+  `_discover_image_references_quadlet` parses `[Container] Image=` directives. These functions already return **all**
+  references, deduplicated — they are not `replace`-scoped.
+- **The defect is the gate, not the scanner.** The whole discovery is guarded by `_has_image_configuration(meta,
+  types_to_include)`, which returns `True` only when `meta.compose.image` / `meta.quadlet.image` (the `margo.yaml`
+  `image:` block) is set. `_create_bundle` repeats the same gate. A descriptor with no `image:` block therefore
+  scans nothing, pulls nothing, and writes no `images/` folder — even though the scanner would have found the images.
+  There are also redundant per-type `compose_has_image_config` / `quadlet_has_image_config` conditionals inside
+  `_discover_and_include_images` enforcing the same gate a second time.
+- The pull loop already implements aggregate failure handling: each failed pull is `console.warning`-ed and collected
+  into `failed_pulls`, then after the loop a non-empty `failed_pulls` triggers `console.fatal` + raise. This matches
+  the desired "attempt all, then hard-fail with the full missing list" behavior — **except** the pre-loop
+  per-registry `check_credentials` call raises immediately on the first expired credential, short-circuiting before
+  other images are attempted, and it forces a credential check even for anonymously-pullable public registries.
+
+### Scope
+
+#### Always scan; drop the `image:`-block gate
+
+- Remove the `_has_image_configuration` early-return in `_discover_and_include_images` and the matching
+  `if include_images and _has_image_configuration(...)` guard in `_create_bundle`. When `include_images` is true,
+  discovery always runs for every requested component type.
+- Remove the redundant `compose_has_image_config` / `quadlet_has_image_config` conditionals; always scan the built
+  `.tgz` content of each requested/built type.
+- `_has_image_configuration` becomes dead code — delete it and its tests.
+- The `margo.yaml` `image: {search, replace}` block remains a **build-time** dev-local substitution concern only
+  (`services/build.py`). It has **no role** in packaging. No change to its schema.
+
+#### Pull every reference found
+
+- Every distinct image reference discovered across all bundled components is pulled and saved — including third-party
+  and base images (e.g. `docker.io/library/nginx:1.27`, `postgres:16`) that no `image:` block declares. Rationale:
+  without them the bundle is not autonomous for offline `podman load`.
+- Deduplicate by full reference (existing behavior). Existing `images/` naming, OCI-layout assembly, `--platform`
+  filtering (Item 5), and `--runtime` daemon lookup (Item 4) all apply unchanged to the now-larger reference set.
+- `--no-images` still opts out of the entire scan (unchanged).
+
+#### Credentials: best-effort, not a precondition
+
+- Because base images now in scope are frequently pullable **anonymously**, a missing stored credential for a
+  registry must **not** block the pull. Only an **expired** stored credential is an error, and it must be reported
+  through the same aggregate mechanism (below), not raised eagerly before other images are attempted.
+- Do not force `check_credentials` to hard-fail pre-loop. Move credential handling so every reference is attempted;
+  a registry with no stored credential is tried anonymously (the existing `OrasClient` anonymous path), and any
+  resulting auth failure is collected as a normal failed pull.
+
+#### Attempt-all-then-fail (confirm existing behavior)
+
+- Keep the loop's warn-per-failure + aggregate `failed_pulls` + final `console.fatal` + raise. The key change is that
+  **no** failure (including credential expiry / auth) short-circuits before every reference has been attempted, so the
+  final error lists the complete set of images that could not be included. If `failed_pulls` is non-empty, the whole
+  `package` hard-fails and no bundle tarball is written (staging cleaned up), consistent with Item 3's existing
+  no-partial-bundle contract.
+
+### Tests (TDD)
+
+- A descriptor with **no** `image:` block but built compose/quadlet content referencing images: `package` (default)
+  discovers and pulls every reference and writes them under `images/`. This is the exact `bhdo`-style regression that
+  motivated this item.
+- Multiple components referencing a mix of first-party and base images: all distinct references pulled; duplicates
+  across components pulled once.
+- A registry with **no** stored credential: anonymous pull attempted, not a hard pre-loop failure.
+- One unpullable image among several: all others are still attempted, each failure warned, and `package` hard-fails
+  at the end naming the complete set of failed references; no `images/`-bearing bundle is written.
+- Expired stored credential is surfaced via the aggregate failure path (all other images still attempted), not an
+  eager raise before the loop.
+- `--no-images` still skips the entire scan (no `images/`, no registry contact) — no regression.
+- `_has_image_configuration` and its tests are removed; no test still asserts the old `image:`-block gate.
+
+### Documentation and definition of done (Item 6)
+
+- Update `docs/commands/package.md`: image inclusion scans built component content and bundles **all** referenced
+  images (including base/third-party images), with no dependency on an `image:` block; remove/adjust any wording that
+  implied only `replace`-derived or `image:`-declared images are included. Clarify the credential behavior (anonymous
+  pull attempted; expired creds reported in the aggregate failure) and the attempt-all-then-fail contract.
+- Reconcile the Item 3 pages/notes that stated the `image:`-block prerequisite (including the note added by the
+  `--output` fix PR #92, "image inclusion requires an `image:` block") — that prerequisite is now incorrect.
+- `uv run pytest` passes, including the new Item 6 tests and the removal of `_has_image_configuration` tests.
+- `make docs-check` passes.
+- Lint/type checks pass.
+- Implementation is committed in conventional commits on its own branch/worktree per `agent-workspace`, based on the
+  current `release/0.9.0` (which already carries Items 1–5).
+
+### Out of scope (Item 6)
+
+- Any change to `margo.yaml`'s `image: {search, replace}` schema or to build-time substitution.
+- Reference *filtering* (allow/deny lists, "only my repository") — decision is to pull **all** references; a scoping
+  mechanism is not in scope.
+- New parsing formats beyond the existing compose `services[*].image` and quadlet `[Container] Image=` scanners.
+- Changing OCI-layout assembly, `images/` naming, `--platform`, or `--runtime` behavior — Item 6 only broadens *which*
+  references feed the existing pipeline.
