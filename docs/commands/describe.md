@@ -1,22 +1,61 @@
 # margot describe
 
 Render the Margo application description as a structured, visual view — rich panels, trees,
-and tables. Read-only, no schema validation, no network.
+and tables. Read-only, no schema validation.
 
 ```
-margot describe [--project-dir PATH] [--manifest PATH]
+margot describe [URI] [--project-dir PATH] [--manifest PATH]
                 [--section metadata|profiles|config-first|component-first|extensions|orphans]
+```
+
+Pass a tagged OCI URI to inspect a published artifact directly, without a local project:
+
+```bash
+margot describe public.ecr.aws/g2n4p2m7/margo:1.0.0
 ```
 
 ## Flags
 
 | Flag | Default | Description |
 |---|---|---|
-| `--project-dir` | `.` | Directory holding `margo.yaml`. |
-| `--manifest` | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. |
+| `URI` | — | Optional tagged OCI reference. Selects remote mode. |
+| `--project-dir` | `.` | Directory holding `margo.yaml`. Local mode only. |
+| `--manifest` | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. Local mode only. |
 | `--section` | all default sections | Filter to one or more sections. Multiple `--section` flags are allowed. |
 
-## Descriptor resolution
+## Local mode vs remote mode
+
+**No URI (local mode):** reads the descriptor from the local project — `--manifest` if given, otherwise resolved
+from `margo.yaml` in `--project-dir`. This is the default and existing behavior, unchanged.
+
+**URI supplied (remote mode):** pulls the published Margo artifact into a temporary directory, runs the same
+descriptor pipeline, then discards the temporary files. The URI is a full tagged OCI reference, for example
+`public.ecr.aws/g2n4p2m7/margo:1.0.0`. An `oci://`-prefixed URI is also accepted.
+
+**Mutual exclusion:** a URI cannot be combined with an explicitly supplied `--project-dir` or `--manifest`.
+Passing both is rejected before any I/O:
+
+> URI and --project-dir/--manifest are mutually exclusive — describe or verify either a remote artifact or a local project, not both.
+
+## Remote mode behavior
+
+1. Validates the URI syntax and checks registry credentials.
+2. Fetches the OCI manifest and requires the artifact to be a Margo application artifact
+   (`application/vnd.margo.app.v1+json`). Compose, quadlet, and unknown artifact types are rejected with a clear
+   error directing to `margot fetch <uri>` for raw-manifest inspection.
+3. Accepts any existing OCI tag — no SemVer requirement for read-only inspection.
+4. Pulls the artifact into a temporary directory (`recursive=False` — component artifacts are not recursively
+   downloaded). The pull is non-persistent; nothing is written to your project directory.
+5. Passes the pulled `app.yaml` through the same local descriptor pipeline: YAML parsing, `kind` gate,
+   configuration joins, orphan observations, and rich rendering.
+6. Removes the temporary directory after rendering, including on error.
+
+The identity panel identifies the remote source:
+
+- Subtitle: `<uri> (remote)`
+- OCI line: the same normalized URI
+
+## Descriptor resolution (local mode)
 
 Identical to [`margot verify`](verify.md): `--manifest` if given, otherwise `margo.yaml`
 `directory` → `app.yaml.jinja` (rendered to a temp file) or `app.yaml`. Never reads
@@ -105,7 +144,13 @@ On exit 1, the error message points at `margot verify`.
 # Describe the application descriptor in the current project
 margot describe
 
-# Show only the identity and deployment profiles
+# Inspect a published artifact from a registry
+margot describe public.ecr.aws/g2n4p2m7/margo:1.0.0
+
+# Remote mode respects all --section filters and ordering
+margot describe public.ecr.aws/g2n4p2m7/margo:1.0.0 --section metadata --section profiles
+
+# Show only the identity and deployment profiles (local)
 margot describe --section metadata --section profiles
 
 # Show the component-first configuration view
