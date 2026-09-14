@@ -31,6 +31,16 @@ def package_cmd(
         str | None,
         Option("--output", help="Output bundle path (default: .dist/<version>/<name>-<version>.tgz)"),
     ] = None,
+    no_images: Annotated[
+        bool,
+        Option(
+            "--no-images",
+            help="Exclude container images from bundle. By default, margot discovers and includes "
+            "container images referenced by compose/quadlet components as OCI image-layout tars, "
+            "requiring network access to pull from registries. Use this flag to restore "
+            "fully offline/no-network behavior (Item 2 compatible).",
+        ),
+    ] = False,
 ) -> None:
     """Create offline bundle from built artifacts."""
     try:
@@ -64,6 +74,7 @@ def package_cmd(
             project_dir=project_dir,
             build_dir=build_dir,
             output=output,
+            include_images=not no_images,
         )
 
         console.success(f"Packaged: {bundle_path}")
