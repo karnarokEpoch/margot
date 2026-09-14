@@ -1198,26 +1198,23 @@ def _create_bundle(  # noqa: PLR0913
                 component_versions.get(PackageType.QUADLET, []),
             )
 
-        # 3. Discover and include container images if requested and configured
+        # 3. Discover and include container images if requested
         if include_images:
-            if _has_image_configuration(meta, types_to_include):
-                try:
-                    _discover_and_include_images(
-                        staging_root,
-                        types_to_include,
-                        build_dir,
-                        meta,
-                        component_versions,
-                        runtime,
-                        platforms=platforms,
-                    )
-                except (CredentialsExpiredError, OciRegistryError):
-                    # Image pull failed; clean up staging and re-raise
-                    console.debug("Image discovery/pull failed, cleaning up staging directory")
-                    rmtree(tmp_parent, ignore_errors=True)
-                    raise
-            else:
-                console.info("No image configuration found in components; skipping image inclusion.")
+            try:
+                _discover_and_include_images(
+                    staging_root,
+                    types_to_include,
+                    build_dir,
+                    meta,
+                    component_versions,
+                    runtime,
+                    platforms=platforms,
+                )
+            except (CredentialsExpiredError, OciRegistryError):
+                # Image pull failed; clean up staging and re-raise
+                console.debug("Image discovery/pull failed, cleaning up staging directory")
+                rmtree(tmp_parent, ignore_errors=True)
+                raise
 
         # 4. Create the final tarball
         _write_bundle_tarball(staging_root, bundle_path, root_dir_name)
@@ -1226,31 +1223,6 @@ def _create_bundle(  # noqa: PLR0913
         rmtree(tmp_parent, ignore_errors=True)
 
     return str(bundle_path)
-
-
-def _has_image_configuration(meta: MargoYaml, types_to_include: set[PackageType]) -> bool:
-    """Check if any component/variant has image configuration.
-
-    Args:
-        meta: Loaded margo.yaml.
-        types_to_include: Component types to check.
-
-    Returns:
-        True if any component or variant has image configuration.
-    """
-    if PackageType.COMPOSE in types_to_include and meta.compose is not None:
-        if meta.compose.image is not None:
-            return True
-        if meta.compose.variants and any(v.image is not None for v in meta.compose.variants):
-            return True
-
-    if PackageType.QUADLET in types_to_include and meta.quadlet is not None:
-        if meta.quadlet.image is not None:
-            return True
-        if meta.quadlet.variants and any(v.image is not None for v in meta.quadlet.variants):
-            return True
-
-    return False
 
 
 def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
@@ -1264,13 +1236,13 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
 ) -> None:
     """Discover container images from compose/quadlet and include them in the bundle.
 
-    Only processes components/variants that have image configuration. If no image
-    configuration exists, this function returns early without creating the images/
-    directory or making any registry calls.
+    Scans all built component content to discover image references, regardless of any
+    image: configuration in margo.yaml. This ensures every referenced image (including
+    base/third-party images) is pulled and included in the bundle for offline deployment.
 
     Reads built component archives, discovers image references, validates them,
-    checks registry credentials, pulls manifests and layers, and saves each as
-    an OCI image-layout tar under images/ folder.
+    attempts pulls via local daemon lookup (if enabled) then registry fallback,
+    and saves each as an OCI image-layout tar under images/ folder.
 
     Args:
         staging_root: Root of the bundle staging directory.
@@ -1278,36 +1250,23 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
         build_dir: Build output directory.
         meta: Loaded margo.yaml.
         component_versions: Map of component type to list of versions.
+        runtime: Container daemon lookup strategy.
         platforms: List of platforms to include (e.g. ['linux/amd64', 'linux/arm64']).
                   Empty or None means all platforms.
 
     Raises:
-        CredentialsExpiredError: If a registry credential has expired.
         OciRegistryError: If pulling an image fails.
     """
     if platforms is None:
         platforms = []
-    # Early exit if no image configuration exists anywhere
-    if not _has_image_configuration(meta, types_to_include):
-        console.debug("No image configuration found; skipping image discovery")
-        return
 
     images_dir = staging_root / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
     discovered_refs = set()  # Track unique refs to avoid duplicate pulls
 
-    # Check if compose has image configuration
-    compose_has_image_config = (
-        PackageType.COMPOSE in types_to_include
-        and meta.compose is not None
-        and (
-            meta.compose.image is not None or (meta.compose.variants and any(v.image is not None for v in meta.compose.variants))
-        )
-    )
-
-    # Discover images from compose components only if configured
-    if compose_has_image_config:
+    # Discover images from compose components (scan all built content regardless of image: config)
+    if PackageType.COMPOSE in types_to_include and meta.compose is not None:
         for comp_version in component_versions.get(PackageType.COMPOSE, []):
             version_path = Path(build_dir) / comp_version
             for tgz in version_path.glob(f"{meta.name}-*.tgz"):
@@ -1318,17 +1277,8 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
                         discovered_refs.add(ref)
                         console.info(f"Found image reference: {ref}")
 
-    # Check if quadlet has image configuration
-    quadlet_has_image_config = (
-        PackageType.QUADLET in types_to_include
-        and meta.quadlet is not None
-        and (
-            meta.quadlet.image is not None or (meta.quadlet.variants and any(v.image is not None for v in meta.quadlet.variants))
-        )
-    )
-
-    # Discover images from quadlet components only if configured
-    if quadlet_has_image_config:
+    # Discover images from quadlet components (scan all built content regardless of image: config)
+    if PackageType.QUADLET in types_to_include and meta.quadlet is not None:
         for quad_version in component_versions.get(PackageType.QUADLET, []):
             version_path = Path(build_dir) / quad_version
             for tgz in version_path.glob(f"{meta.name}-*.tgz"):
@@ -1340,36 +1290,11 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
                         console.info(f"Found image reference: {ref}")
 
     if not discovered_refs:
-        console.debug("No image references found in configured components")
+        console.debug("No image references found in components")
         return
 
-    # Validate and check credentials for all unique registries before pulling any images
+    # Initialize OrasClients per registry (lazy; credentials are best-effort)
     registry_clients: dict[str, OrasClient] = {}
-    for ref in discovered_refs:
-        try:
-            validate_uri(ref)
-        except ValueError as e:
-            msg = f"Invalid image reference: {ref}: {e}"
-            raise OciRegistryError(msg) from e
-
-        try:
-            hostname = extract_hostname(ref)
-        except ValueError as e:
-            msg = f"Cannot extract hostname from image reference {ref}: {e}"
-            raise OciRegistryError(msg) from e
-
-        # Check credentials once per unique registry
-        if hostname not in registry_clients:
-            console.debug(f"Checking credentials for registry: {hostname}")
-            try:
-                check_credentials(hostname)
-            except CredentialsExpiredError:
-                console.fatal(f"Credentials for {hostname} have expired.")
-                raise
-
-            # Initialize client for this hostname (will load stored credentials)
-            registry_clients[hostname] = OrasClient(hostname=hostname)
-            console.debug(f"Initialized OrasClient for {hostname}")
 
     # Pull and materialize each image
     pulled_images: dict[str, str] = {}  # Track ref -> tar_path for deduplication
@@ -1392,13 +1317,44 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
         try:
             console.info(f"Pulling image: {ref}")
 
+            # Validate the reference
+            try:
+                validate_uri(ref)
+            except ValueError as e:
+                msg = f"Invalid image reference: {ref}: {e}"
+                raise OciRegistryError(msg) from e
+
+            # Extract hostname for registry operations
+            try:
+                hostname = extract_hostname(ref)
+            except ValueError as e:
+                msg = f"Cannot extract hostname from image reference {ref}: {e}"
+                raise OciRegistryError(msg) from e
+
+            # Initialize OrasClient for this registry if not already done
+            # Credentials are best-effort: attempt anonymous pull if no credential stored
+            if hostname not in registry_clients:
+                console.debug(f"Initializing OrasClient for {hostname}")
+                try:
+                    # Check if credential exists and is not expired
+                    check_credentials(hostname)
+                except CredentialsExpiredError:
+                    # Expired credential is an error; add to failed_pulls for aggregate reporting
+                    raise
+                except Exception:  # noqa: BLE001
+                    # Any other credential check error (e.g., no credential) is best-effort
+                    # and will attempt anonymous pull
+                    console.debug(f"No stored credential for {hostname}; will attempt anonymous pull")
+
+                registry_clients[hostname] = OrasClient(hostname=hostname)
+
             # Try daemon lookup first (if runtime != 'none')
             if runtime != RuntimeLookup.NONE.value:
                 daemon_tar = _lookup_image_with_runtime(
                     ref,
                     str(daemon_export_dir),
                     runtime,
-                    registry_clients.get(extract_hostname(ref)) or OrasClient(),
+                    registry_clients.get(hostname) or OrasClient(),
                 )
                 if daemon_tar:
                     # Copy the daemon export to the final location
@@ -1408,7 +1364,6 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     continue
 
             # Fall back to registry pull
-            hostname = extract_hostname(ref)
             oras_client = registry_clients[hostname]
 
             # Get the manifest (handles both single-arch and multi-arch)

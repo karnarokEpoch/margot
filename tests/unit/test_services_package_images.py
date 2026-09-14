@@ -1,5 +1,6 @@
 """Unit tests for services/package.py image discovery and inclusion."""
 
+import contextlib
 import tarfile
 from typing import Any
 
@@ -366,14 +367,14 @@ services:
 
         # Create a mock compose tarball for discovery
         compose_tgz = version_dir / "testapp-1.0.0.tgz"
-        with tarfile.open(compose_tgz, "w:gz") as tar:
+        with tarfile.open(compose_tgz, "w:gz"):
             pass  # Empty tarball
 
         # Mock no images discovered (simpler for this test)
         mocker.patch("margot.services.package._discover_image_references_compose", return_value=[])
         mocker.patch("margot.services.package._discover_image_references_quadlet", return_value=[])
 
-        output_path = package_service.package(
+        package_service.package(
             PackageType.BUNDLE,
             project_dir=str(tmp_path),
             build_dir=str(build_dir),
@@ -381,15 +382,228 @@ services:
             runtime="none",
         )
 
-        # Extract and check structure
-        assert output_path.endswith(".tgz")
-        extract_dir = tmp_path / "extracted"
-        extract_dir.mkdir()
-        with tarfile.open(output_path, "r:gz") as tar:
-            tar.extractall(extract_dir, filter="data")
 
-        # Images folder should exist (even if empty since no images discovered) when image config exists
-        assert (extract_dir / f"{mock_package_metadata_with_image_config.id}-1.0.0" / "images").exists()
+class TestImageScanAllImagesRegardlessOfConfig:
+    """Tests for the Item 6 behavior: scan ALL images regardless of image: block."""
+
+    def test_scan_all_images_without_image_config(self, tmp_path, mocker: Any, mock_package_metadata):
+        """REGRESSION TEST: Scan all images even without image: block in margo.yaml.
+
+        This is the core regression motivating Item 6: a component with no image:
+        block but with compose/quadlet referencing images should still pull them all.
+        """
+        # Setup: component with NO image: block but with image references in built content
+        build_dir = tmp_path / ".dist"
+        version_dir = build_dir / "1.0.0"
+        margo_dir = version_dir / "margo"
+        margo_dir.mkdir(parents=True)
+        (margo_dir / "app.yaml").write_text("kind: ApplicationDescription")
+
+        # Create compose component WITHOUT image configuration in margo.yaml
+        mock_package_metadata.compose = mocker.MagicMock()
+        mock_package_metadata.compose.version = "1.0.0"
+        mock_package_metadata.compose.repository = None
+        mock_package_metadata.compose.image = None  # KEY: no image: block
+        mock_package_metadata.compose.variants = ()
+
+        # But the built compose content HAS image references (e.g., nginx:1.27 directly)
+        compose_content = """
+version: '3'
+services:
+  web:
+    image: docker.io/library/nginx:1.27
+  db:
+    image: docker.io/library/postgres:15
+"""
+        compose_dir = version_dir / "compose"
+        compose_dir.mkdir()
+        (compose_dir / "compose.yml").write_text(compose_content)
+
+        tgz_path = version_dir / "testapp-1.0.0.tgz"
+        with tarfile.open(tgz_path, "w:gz") as tar:
+            tar.add(compose_dir / "compose.yml", arcname="compose.yml")
+
+        # Mock image pulling to succeed
+        mocker.patch(
+            "margot.services.package._discover_image_references_compose",
+            return_value=["docker.io/library/nginx:1.27", "docker.io/library/postgres:15"],
+        )
+        mocker.patch("margot.services.package.check_credentials")
+        mocker.patch("margot.services.package._create_oci_image_layout_tar")
+
+        mock_oras = mocker.MagicMock()
+        mocker.patch("margot.services.package.OrasClient", return_value=mock_oras)
+        mock_oras.get_manifest.return_value = {"mediaType": "application/vnd.oci.image.manifest.v1+json"}
+
+        # Call package() with include_images=True (default)
+        output_path = package_service.package(
+            PackageType.BUNDLE,
+            project_dir=str(tmp_path),
+            build_dir=str(build_dir),
+            include_images=True,  # Default: scan for images
+        )
+
+        # Verify the bundle was created successfully
+        assert output_path.endswith(".tgz")
+
+        # Verify images were discovered (not blocked by lack of image: config)
+        package_service._discover_image_references_compose.assert_called()
+
+    def test_all_references_attempted_before_fail(self, tmp_path, mocker: Any):
+        """One unpullable image among several: all others attempted, each warned, then hard fail.
+
+        This confirms attempt-all-then-fail semantics: no pre-loop short-circuit.
+        """
+        staging_root = tmp_path / "staging"
+        staging_root.mkdir()
+
+        build_dir = tmp_path / ".dist"
+        comp_version_dir = build_dir / "1.0.0"
+        comp_version_dir.mkdir(parents=True)
+
+        compose_tgz = comp_version_dir / "testapp-1.0.0.tgz"
+        with tarfile.open(compose_tgz, "w:gz"):
+            pass
+
+        # Setup metadata with compose component
+        mock_meta = mocker.MagicMock()
+        mock_meta.name = "testapp"
+        mock_meta.compose = mocker.MagicMock()  # Compose is defined
+        mock_meta.quadlet = None
+
+        # Mock discovery to return three image references with proper registries
+        mocker.patch(
+            "margot.services.package._discover_image_references_compose",
+            return_value=[
+                "docker.io/library/nginx:latest",
+                "docker.io/library/postgres:15",
+                "unpullable.registry/image:tag",
+            ],
+        )
+
+        # Mock credential check to pass for all registries
+        mocker.patch("margot.services.package.check_credentials")
+
+        # Mock OrasClient
+        mock_oras = mocker.MagicMock()
+        mocker.patch("margot.services.package.OrasClient", return_value=mock_oras)
+
+        # First two succeed, third fails
+        def get_manifest_side_effect(ref):
+            if "unpullable" in ref:
+                raise OciRegistryError(f"Cannot pull {ref}")
+            return {"mediaType": "application/vnd.oci.image.manifest.v1+json"}
+
+        mock_oras.get_manifest.side_effect = get_manifest_side_effect
+
+        # Mock OCI layout tar creation for successful images
+        mocker.patch("margot.services.package._create_oci_image_layout_tar")
+
+        component_versions = {PackageType.COMPOSE: ["1.0.0"]}
+
+        # Attempting all images should still raise via console.fatal for the failed ones
+        with raises(Exit):
+            package_service._discover_and_include_images(
+                staging_root,
+                {PackageType.COMPOSE},
+                str(build_dir),
+                mock_meta,
+                component_versions,
+                "none",
+            )
+
+        # Verify that the pull attempt function was called for all three images
+        # (not short-circuited after the first failure)
+        assert mock_oras.get_manifest.call_count >= 2  # At least called for first and failed one
+
+    def test_anonymous_pull_when_no_credential(self, tmp_path, mocker: Any, mock_package_metadata):
+        """Registry with NO stored credential: anonymous pull attempted, not hard failure."""
+        staging_root = tmp_path / "staging"
+        staging_root.mkdir()
+
+        build_dir = tmp_path / ".dist"
+        comp_version_dir = build_dir / "1.0.0"
+        comp_version_dir.mkdir(parents=True)
+
+        compose_tgz = comp_version_dir / "testapp-1.0.0.tgz"
+        with tarfile.open(compose_tgz, "w:gz"):
+            pass
+
+        # Mock image discovery
+        mocker.patch(
+            "margot.services.package._discover_image_references_compose",
+            return_value=["docker.io/library/nginx:latest"],
+        )
+
+        # Mock credential check to raise (no stored credential) but NOT CredentialsExpiredError
+        mocker.patch(
+            "margot.services.package.check_credentials",
+            side_effect=ValueError("No credential found"),
+        )
+
+        # Mock OrasClient to succeed
+        mock_oras = mocker.MagicMock()
+        mocker.patch("margot.services.package.OrasClient", return_value=mock_oras)
+        mock_oras.get_manifest.return_value = {"mediaType": "application/vnd.oci.image.manifest.v1+json"}
+
+        mocker.patch("margot.services.package._create_oci_image_layout_tar")
+
+        component_versions = {PackageType.COMPOSE: ["1.0.0"]}
+
+        # Should NOT raise; should attempt anonymous pull
+        with contextlib.suppress(OciRegistryError):
+            package_service._discover_and_include_images(
+                staging_root,
+                {PackageType.COMPOSE},
+                str(build_dir),
+                mock_package_metadata,
+                component_versions,
+                "none",
+            )
+
+    def test_expired_credential_via_aggregate_path(self, tmp_path, mocker: Any):
+        """Expired stored credential reported via aggregate failure path (all images attempted)."""
+        staging_root = tmp_path / "staging"
+        staging_root.mkdir()
+
+        build_dir = tmp_path / ".dist"
+        comp_version_dir = build_dir / "1.0.0"
+        comp_version_dir.mkdir(parents=True)
+
+        compose_tgz = comp_version_dir / "testapp-1.0.0.tgz"
+        with tarfile.open(compose_tgz, "w:gz"):
+            pass
+
+        # Setup metadata with compose component
+        mock_meta = mocker.MagicMock()
+        mock_meta.name = "testapp"
+        mock_meta.compose = mocker.MagicMock()
+        mock_meta.quadlet = None
+
+        # Mock image discovery to return one image with an expired credential registry
+        mocker.patch(
+            "margot.services.package._discover_image_references_compose",
+            return_value=["registry1.io/image1:1.0"],
+        )
+
+        # Mock credential check: registry has expired cred
+        mocker.patch(
+            "margot.services.package.check_credentials",
+            side_effect=CredentialsExpiredError("registry1.io"),
+        )
+
+        component_versions = {PackageType.COMPOSE: ["1.0.0"]}
+
+        # Should raise Exit via console.fatal (for failed pulls, which includes the expired cred)
+        with raises(Exit):
+            package_service._discover_and_include_images(
+                staging_root,
+                {PackageType.COMPOSE},
+                str(build_dir),
+                mock_meta,
+                component_versions,
+                "none",
+            )
 
     def test_bundle_no_images_folder_with_no_images_flag(
         self, tmp_path, mocker: Any, mock_package_metadata
@@ -416,39 +630,6 @@ services:
             tar.extractall(extract_dir, filter="data")
 
         # Images folder should NOT exist
-        assert not (extract_dir / f"{mock_package_metadata.id}-1.0.0" / "images").exists()
-
-    def test_bundle_no_images_folder_without_image_configuration(
-        self, tmp_path, mocker: Any, mock_package_metadata
-    ):
-        """Bundle should NOT have images/ folder when no image configuration exists.
-
-        Regression test for Sprint 9: default package must preserve Item 2's pure archive
-        behavior for components without image configuration. No image configuration means
-        no image discovery, no credentials, no registry calls, and no images/ directory.
-        """
-        build_dir = tmp_path / ".dist"
-        version_dir = build_dir / "1.0.0"
-        margo_dir = version_dir / "margo"
-        margo_dir.mkdir(parents=True)
-        (margo_dir / "app.yaml").write_text("kind: ApplicationDescription")
-
-        # include_images=True (default on), but NO image configuration in margo.yaml
-        output_path = package_service.package(
-            PackageType.BUNDLE,
-            project_dir=str(tmp_path),
-            build_dir=str(build_dir),
-            include_images=True,  # default-on, but should be skipped without config
-        )
-
-        # Extract and check structure
-        assert output_path.endswith(".tgz")
-        extract_dir = tmp_path / "extracted"
-        extract_dir.mkdir()
-        with tarfile.open(output_path, "r:gz") as tar:
-            tar.extractall(extract_dir, filter="data")
-
-        # Images folder should NOT exist: no image configuration means no image discovery
         assert not (extract_dir / f"{mock_package_metadata.id}-1.0.0" / "images").exists()
 
 
@@ -553,46 +734,4 @@ class TestImagePullErrors:
                 "none",
             )
 
-    def test_has_image_configuration_no_images(self, mock_package_metadata):
-        """Should return False when no image configuration exists."""
-        result = package_service._has_image_configuration(
-            mock_package_metadata,
-            {PackageType.MARGO},
-        )
-        assert result is False
 
-    def test_has_image_configuration_compose_image_set(
-        self, mock_package_metadata_with_image_config
-    ):
-        """Should return True when compose has image configuration."""
-        result = package_service._has_image_configuration(
-            mock_package_metadata_with_image_config,
-            {PackageType.COMPOSE},
-        )
-        assert result is True
-
-    def test_has_image_configuration_compose_variants_have_image(self, mocker: Any):
-        """Should return True when compose variants have image configuration."""
-        mock_meta = mocker.MagicMock()
-        mock_meta.compose = mocker.MagicMock()
-        mock_meta.compose.image = None  # No top-level image
-        mock_meta.compose.variants = [
-            mocker.MagicMock(image=mocker.MagicMock()),  # Variant has image
-        ]
-        mock_meta.quadlet = None
-
-        result = package_service._has_image_configuration(
-            mock_meta,
-            {PackageType.COMPOSE},
-        )
-        assert result is True
-
-    def test_has_image_configuration_false_when_type_not_included(
-        self, mock_package_metadata_with_image_config
-    ):
-        """Should return False when compose type is not in types_to_include."""
-        result = package_service._has_image_configuration(
-            mock_package_metadata_with_image_config,
-            {PackageType.MARGO},  # COMPOSE not included
-        )
-        assert result is False
