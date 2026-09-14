@@ -6,6 +6,7 @@ offline deployment in disconnected environments.
 ```
 margot package [-t margo|compose|quadlet] [--project-dir PATH]
                [--build-dir DIR] [--output PATH] [--no-images]
+               [--runtime podman|docker|none]
 ```
 
 !!! warning
@@ -14,11 +15,24 @@ margot package [-t margo|compose|quadlet] [--project-dir PATH]
     has compose or quadlet components with an `image: {search, replace}` configuration.
     Use `--no-images` to skip image retrieval entirely and produce a network-free bundle.
 
+!!! note "Optional: Local container daemon lookup"
+    If you have locally-built images (e.g., built but not yet pushed to a registry),
+    you can use `--runtime podman` or `--runtime docker` to pull them directly from your
+    local container daemon before falling back to the registry. By default, `margot package`
+    silently probes Podman, then Docker, then falls back to the registry — no configuration
+    needed. This requires the `podman` or `docker` Python SDK (installed as an optional
+    dependency by default).
+
 ## Prerequisites
 
 Artifacts must be built first. Run [`margot build`](build.md) before packaging.
 `package` never triggers a build itself — if the expected build output is missing,
 it fails and tells you to run `margot build` first.
+
+For the optional daemon lookup (when using `--runtime`), the Podman or Docker SDK must be
+installed, which is included by default in `margo-tooling`. The respective daemon
+(Podman or Docker) does not need to be running unless you're actually using local daemon
+lookup.
 
 ## Flags
 
@@ -28,7 +42,8 @@ it fails and tells you to run `margot build` first.
 | `--project-dir` | `.` | Project root directory (where `margo.yaml` lives). |
 | `--build-dir` | `.dist` | Directory containing built artifacts. |
 | `--output` | `.dist/<version>/<id>-<version>.tgz` | Override the output bundle path. |
-| `--no-images` | off | Skip image retrieval. No registry access, no `images/` folder. Use this for fully offline/no-network packaging. |
+| `--no-images` | off | Skip image retrieval. No registry access, no `images/` folder. Use this for fully offline/no-network packaging. Mutually exclusive with `--runtime`. |
+| `--runtime` | `auto` | Container daemon lookup strategy (optional, for local images): `podman` (Podman only), `docker` (Docker only), `none` (registry-only, no daemon contact), or `auto` (default: silently probe Podman → Docker → registry). Only meaningful when `--no-images` is not passed. Forcing a daemon (`podman`/`docker`) fails with a clear error if unreachable; `auto` silently falls back to registry. |
 
 ## What it does
 
@@ -41,6 +56,17 @@ under `images/`. This makes the bundle fully self-contained for offline loading 
 registry access is required at deploy time. This step requires network access and registry
 credentials for any eligible images.
 
+When `--runtime` is not `none`, `package` checks local container daemons first before
+pulling from the registry:
+- **`--runtime auto` (default):** Silently probe Podman → Docker → registry. If a local
+  daemon has the image, it's used; if not, falls back to registry without warning.
+- **`--runtime podman`:** Check Podman only, then registry. Fails with a clear error if
+  Podman socket is unreachable.
+- **`--runtime docker`:** Check Docker only, then registry. Fails with a clear error if
+  Docker socket is unreachable.
+- **`--runtime none`:** Skip daemon lookup entirely, registry-only (identical to Item 2
+  behavior).
+
 Pass `--no-images` to skip image retrieval entirely: no registry contact, no credential
 check, no `images/` folder. The bundle is then a plain local archive, identical to what
 `package` produced before image inclusion was added.
@@ -49,26 +75,30 @@ The bundle is named `<id>-<version>.tgz`, where `<id>` is the `id` field from
 `margo.yaml` and `<version>` is its `version` field. Both the archive filename and its
 internal root directory use `id`, not `name`.
 
-## Container image inclusion
+## Container image inclusion and local daemon lookup
 
-Images are eligible for inclusion when a compose or quadlet component (or variant) has an
-`image: {search, replace}` block in `margo.yaml`. The actual rendered image references are
-discovered from the already-built component archives — the `replace` value already written
-into the built content is what gets pulled, with no re-rendering of `margo.yaml`.
+For each eligible image reference (when `--no-images` is not passed):
 
-For each eligible image reference:
+1. **Local daemon lookup (if `--runtime` is not `none`):**
+   - `--runtime auto` (default): Silently try Podman socket, then Docker socket.
+   - `--runtime podman`: Try Podman only; fail with clear error if unreachable.
+   - `--runtime docker`: Try Docker only; fail with clear error if unreachable.
+   - `--runtime none`: Skip daemon lookup entirely.
 
-1. Registry credentials are checked before any manifest pull.
-2. The image manifest (or multi-platform image index) is fetched via the existing OCI
-   client.
-3. Duplicate image references across components are deduplicated — each distinct reference
-   is pulled once.
-4. The image blobs are assembled into an OCI image-layout tar archive
-   (`oci-layout` + `index.json` + `blobs/sha256/...`) under `images/` in the bundle.
-5. Both single-manifest images and multi-platform image indexes are supported; by default
-   all advertised platforms are included.
+2. **If found locally:** Export from daemon (Podman: OCI-archive natively; Docker: Docker SDK
+   export → normalized to OCI-layout) and save to `images/` folder.
 
-Runtime lookup and per-platform filtering are not currently configurable.
+3. **If not found locally or daemon lookup skipped:** Pull from registry via OCI client. Registry
+   credentials are checked before any pull.
+
+4. **Deduplication:** Same image reference across multiple components is pulled once.
+
+5. **Multi-platform:** All platforms in an image index are saved (future: Item 5 adds
+   per-platform filtering).
+
+All images are materialized as OCI image-layout tars (`oci-layout` + `index.json` +
+`blobs/sha256/...`), regardless of source, keeping `images/` format-uniform and loadable
+via `podman load` or `docker load`.
 
 ## Archive format
 
