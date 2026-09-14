@@ -38,8 +38,13 @@
     },
     "execute_bash": {
       "autoAllowReadonly": true,
+      "deniedCommands": [
+        "^\\s*python3?\\b",
+        "^\\s*pip3?\\b"
+      ],
       "allowedCommands": [
         "cat .*",
+        "cd .*",
         "diff.*",
         "echo .*",
         "find . .*",

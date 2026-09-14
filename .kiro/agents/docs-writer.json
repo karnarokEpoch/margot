@@ -47,8 +47,8 @@
     },
     "shell": {
       "autoAllowReadonly": true,
-      "denyByDefault": true,
       "allowedCommands": [
+        "cd .*",
         "make.*",
         "uv.*",
         "git.*"
