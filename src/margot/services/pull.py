@@ -15,7 +15,6 @@ from margot.domain.models import (
     PackageType,
     artifact_type_to_package_type,
 )
-from margot.domain.uri import extract_tag
 from margot.infra import credentials, oci
 
 _PAYLOAD_MEDIA_TYPES: dict[PackageType, str] = {

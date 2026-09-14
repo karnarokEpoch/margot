@@ -45,7 +45,7 @@ class TestRemoteResolver:
             artifact_type="application/vnd.margo.app.v1+json"
         )
         # Simulate pulling a margo artifact with app.yaml
-        def _fake_pull(uri: str, outdir: str) -> list[str]:
+        def _fake_pull(uri: str, outdir: str) -> list[str]:  # noqa: ARG001
             app_yaml_path = Path(outdir) / "app.yaml"
             app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
             return [str(app_yaml_path), str(Path(outdir) / "resources")]
@@ -68,7 +68,7 @@ class TestRemoteResolver:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_manifest()
 
-        def _fake_pull(uri: str, outdir: str) -> list[str]:
+        def _fake_pull(uri: str, outdir: str) -> list[str]:  # noqa: ARG001
             app_yaml_path = Path(outdir) / "app.yaml"
             app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
             return [str(app_yaml_path)]
@@ -146,7 +146,7 @@ class TestRemoteResolver:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_manifest()
 
-        def _fake_pull(uri: str, outdir: str) -> list[str]:
+        def _fake_pull(uri: str, outdir: str) -> list[str]:  # noqa: ARG001
             # Pull returns paths, but no app.yaml
             Path(outdir).mkdir(parents=True, exist_ok=True)
             Path(outdir) / "some-other-file.txt"
@@ -157,7 +157,7 @@ class TestRemoteResolver:
         mocker.patch("margot.services.remote.credentials.check_credentials")
         mocker.patch("margot.services.remote.oci.OrasClient", return_value=mock_client)
 
-        with raises(ValueError, match="app.yaml") as exc_info:
+        with raises(ValueError, match=r"app\.yaml") as exc_info:
             remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
 
         assert "no root app.yaml" in str(exc_info.value).lower()
@@ -167,7 +167,7 @@ class TestRemoteResolver:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_manifest()
 
-        def _fake_pull(uri: str, outdir: str) -> list[str]:
+        def _fake_pull(uri: str, outdir: str) -> list[str]:  # noqa: ARG001
             Path(outdir).mkdir(parents=True, exist_ok=True)
             # Don't create app.yaml, forcing an error
             return []
@@ -178,7 +178,7 @@ class TestRemoteResolver:
 
         # The test passes if no exception is raised from cleanup
         # (the temp directory should be cleaned up before raising ValueError)
-        with raises(ValueError, match="app.yaml"):
+        with raises(ValueError, match=r"app\.yaml"):
             remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
 
     def test_resolve_remote_pull_with_recursive_false(self, mocker: Any, tmp_path: Any) -> None:
@@ -224,7 +224,7 @@ class TestRemoteResolver:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_manifest()
 
-        def _fake_pull_artifact(uri: str, outdir: str, **kwargs: Any) -> list[str]:
+        def _fake_pull_artifact(uri: str, outdir: str, **kwargs: Any) -> list[str]:  # noqa: ARG001
             app_yaml_path = Path(outdir) / "app.yaml"
             Path(outdir).mkdir(parents=True, exist_ok=True)
             app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
