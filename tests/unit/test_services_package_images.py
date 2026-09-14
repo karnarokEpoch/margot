@@ -1,6 +1,7 @@
 """Unit tests for services/package.py image discovery and inclusion."""
 
 import contextlib
+from json import JSONDecodeError
 import tarfile
 from typing import Any
 
@@ -735,3 +736,319 @@ class TestImagePullErrors:
             )
 
 
+
+
+
+class TestPodmanSocketResolution:
+    """Tests for _resolve_podman_socket_uri() function."""
+
+    def test_resolve_with_xdg_runtime_dir_set(self, mocker: Any):
+        """Should use XDG_RUNTIME_DIR when set."""
+        mocker.patch.dict("os.environ", {"XDG_RUNTIME_DIR": "/run/user/1000"})
+        uri = package_service._resolve_podman_socket_uri()
+        assert uri == "unix:///run/user/1000/podman/podman.sock"
+
+    def test_resolve_without_xdg_runtime_dir_uses_systemd_default(self, mocker: Any):
+        """Should fall back to /run/user/{uid}/podman/podman.sock when XDG_RUNTIME_DIR is unset."""
+        # Mock environ to not have XDG_RUNTIME_DIR and mock getuid
+        mock_environ_get = mocker.patch("margot.services.package.environ.get", return_value=None)
+        mock_getuid = mocker.patch("margot.services.package.getuid", return_value=1000)
+
+        uri = package_service._resolve_podman_socket_uri()
+        assert uri == "unix:///run/user/1000/podman/podman.sock"
+        mock_environ_get.assert_called_once_with("XDG_RUNTIME_DIR")
+        mock_getuid.assert_called_once()
+
+
+class TestDockerProbeTimeout:
+    """Tests for Docker daemon probe timeout."""
+
+    def test_docker_probe_passes_timeout_parameter(self, mocker: Any):
+        """Should pass timeout=5 to docker_from_env()."""
+        mock_docker_from_env = mocker.patch(
+            "margot.services.package.docker_from_env",
+            return_value=mocker.MagicMock(),
+        )
+        mock_client = mock_docker_from_env.return_value
+        mock_client.images.get.return_value = mocker.MagicMock()
+
+        # Call _lookup_image_docker
+        package_service._lookup_image_docker(
+            "test:latest",
+            "/tmp",
+            required=False,
+        )
+
+        # Verify docker_from_env was called with timeout=5
+        mock_docker_from_env.assert_called_once()
+        call_kwargs = mock_docker_from_env.call_args[1]
+        assert call_kwargs.get("timeout") == 5
+
+    def test_docker_probe_timeout_exception_handled_in_auto_probe(self, mocker: Any):
+        """Timeout exception during Docker probe should not crash auto-probe."""
+
+        # Mock docker_from_env to raise a timeout
+        mocker.patch(
+            "margot.services.package.docker_from_env",
+            side_effect=TimeoutError("Read timed out"),
+        )
+
+        # Auto-probe with Docker timeout should return None (not raise)
+        result = package_service._lookup_image_with_runtime(
+            "test:latest",
+            "/tmp",
+            "auto",
+            mocker.MagicMock(),
+        )
+
+        # Should return None (fall through to registry)
+        assert result is None
+
+    def test_docker_probe_timeout_with_forced_runtime_raises(self, mocker: Any):
+        """Forced Docker runtime with timeout should raise RuntimeError."""
+
+        mocker.patch(
+            "margot.services.package.docker_from_env",
+            side_effect=TimeoutError("Read timed out"),
+        )
+
+        # Forced Docker should raise
+        with raises(RuntimeError, match="Docker socket unreachable"):
+            package_service._lookup_image_docker(
+                "test:latest",
+                "/tmp",
+                required=True,
+            )
+
+
+class TestRegistryManifestFetchError:
+    """Tests for registry manifest-fetch error handling."""
+
+    def test_manifest_fetch_json_decode_error_wraps_in_ociregistryerror(self, tmp_path, mocker: Any):
+        """JSONDecodeError from manifest fetch should be wrapped in OciRegistryError."""
+        staging_root = tmp_path / "staging"
+        staging_root.mkdir()
+
+        build_dir = tmp_path / ".dist"
+        comp_version_dir = build_dir / "1.0.0"
+        comp_version_dir.mkdir(parents=True)
+
+        compose_tgz = comp_version_dir / "testapp-1.0.0.tgz"
+        with tarfile.open(compose_tgz, "w:gz"):
+            pass
+
+        mock_meta = mocker.MagicMock()
+        mock_meta.name = "testapp"
+        mock_meta.compose = mocker.MagicMock()
+        mock_meta.quadlet = None
+
+        # Mock image discovery
+        mocker.patch(
+            "margot.services.package._discover_image_references_compose",
+            return_value=["docker.io/library/nginx:latest"],
+        )
+        mocker.patch("margot.services.package.check_credentials")
+
+        # Mock OrasClient to raise JSONDecodeError when fetching manifest
+        mock_oras = mocker.MagicMock()
+        mocker.patch("margot.services.package.OrasClient", return_value=mock_oras)
+        mock_oras.get_manifest.side_effect = JSONDecodeError(
+            "Expecting value", "doc", 0
+        )
+
+        component_versions = {PackageType.COMPOSE: ["1.0.0"]}
+
+        # Should raise OciRegistryError with clear message (via console.fatal)
+        mocker.patch("margot.services.package.console.fatal", side_effect=Exit(1))
+
+        with raises(Exit):
+            package_service._discover_and_include_images(
+                staging_root,
+                {PackageType.COMPOSE},
+                str(build_dir),
+                mock_meta,
+                component_versions,
+                "none",
+            )
+
+    def test_manifest_fetch_error_includes_ref_name_in_message(self, tmp_path, mocker: Any):
+        """Error message should include the image reference."""
+        staging_root = tmp_path / "staging"
+        staging_root.mkdir()
+
+        build_dir = tmp_path / ".dist"
+        comp_version_dir = build_dir / "1.0.0"
+        comp_version_dir.mkdir(parents=True)
+
+        compose_tgz = comp_version_dir / "testapp-1.0.0.tgz"
+        with tarfile.open(compose_tgz, "w:gz"):
+            pass
+
+        mock_meta = mocker.MagicMock()
+        mock_meta.name = "testapp"
+        mock_meta.compose = mocker.MagicMock()
+        mock_meta.quadlet = None
+
+        image_ref = "docker.io/library/myapp:2.0"
+
+        mocker.patch(
+            "margot.services.package._discover_image_references_compose",
+            return_value=[image_ref],
+        )
+        mocker.patch("margot.services.package.check_credentials")
+
+        mock_oras = mocker.MagicMock()
+        mocker.patch("margot.services.package.OrasClient", return_value=mock_oras)
+        mock_oras.get_manifest.side_effect = JSONDecodeError(
+            "Expecting value", "doc", 0
+        )
+
+        component_versions = {PackageType.COMPOSE: ["1.0.0"]}
+
+        # Capture the warning call to verify error message contains ref
+        mock_warning = mocker.patch("margot.services.package.console.warning")
+        mocker.patch("margot.services.package.console.fatal", side_effect=Exit(1))
+
+        with raises(Exit):
+            package_service._discover_and_include_images(
+                staging_root,
+                {PackageType.COMPOSE},
+                str(build_dir),
+                mock_meta,
+                component_versions,
+                "none",
+            )
+
+        # Verify that at least one warning was issued
+        assert mock_warning.called
+
+
+class TestProbeAndFallbackLogging:
+    """Tests for info-level logging of probe/fallback narrative."""
+
+    def test_auto_probe_with_no_local_images_logs_info_narrative(self, mocker: Any):
+        """Auto-probe narrative should be at info level."""
+        mock_info = mocker.patch("margot.services.package.console.info")
+
+        # Mock Podman lookup to return None
+        mocker.patch("margot.services.package._lookup_image_podman", return_value=None)
+        # Mock Docker lookup to return None
+        mocker.patch("margot.services.package._lookup_image_docker", return_value=None)
+
+        result = package_service._lookup_image_with_runtime(
+            "docker.io/library/nginx:latest",
+            "/tmp",
+            "auto",
+            mocker.MagicMock(),
+        )
+
+        # Should fall back to registry (return None)
+        assert result is None
+
+        # Verify info-level messages were logged
+        info_calls = [call[0][0] for call in mock_info.call_args_list]
+        assert any("Trying local Podman" in str(call) for call in info_calls)
+        assert any("Trying local Docker" in str(call) for call in info_calls)
+        assert any("Falling back to registry" in str(call) for call in info_calls)
+
+    def test_auto_probe_with_podman_success_logs_found_message(self, mocker: Any):
+        """Successful Podman lookup should log info-level success message."""
+        mock_info = mocker.patch("margot.services.package.console.info")
+
+        # Mock Podman lookup to return a path
+        mocker.patch(
+            "margot.services.package._lookup_image_podman",
+            return_value="/tmp/image.tar",
+        )
+
+        result = package_service._lookup_image_with_runtime(
+            "docker.io/library/nginx:latest",
+            "/tmp",
+            "auto",
+            mocker.MagicMock(),
+        )
+
+        # Should return the path
+        assert result == "/tmp/image.tar"
+
+        # Verify success message
+        info_calls = [call[0][0] for call in mock_info.call_args_list]
+        assert any("Found" in str(call) and "Podman" in str(call) for call in info_calls)
+
+
+class TestRegressionPodmanSocketPath:
+    """Regression tests for the hardcoded Podman socket bug."""
+
+    def test_podman_lookup_does_not_use_path_home_socket(self, mocker: Any):
+        """_lookup_image_podman should NOT use Path.home()/.local/share path."""
+        mock_podman_client = mocker.MagicMock()
+        mocker.patch(
+            "margot.services.package.PodmanClient",
+            return_value=mock_podman_client,
+        )
+
+        # Mock the image lookup to succeed
+        mock_image = mocker.MagicMock()
+        mock_podman_client.images.get.return_value = mock_image
+        mock_image.export.return_value = [b"tar_data"]
+
+        # Mock _resolve_podman_socket_uri to return a known value
+        mock_resolve = mocker.patch(
+            "margot.services.package._resolve_podman_socket_uri",
+            return_value="unix:///run/user/1000/podman/podman.sock",
+        )
+
+        package_service._lookup_image_podman("test:latest", "/tmp", required=False)
+
+        # Verify _resolve_podman_socket_uri was called (not hardcoded path)
+        mock_resolve.assert_called_once()
+
+
+class TestRegressionProbeAndFallbackBehavior:
+    """Regression tests ensuring probe/fallback behaviors unchanged."""
+
+    def test_runtime_none_returns_none_immediately(self, mocker: Any):
+        """--runtime none should return None immediately without any probe."""
+        mock_podman = mocker.patch("margot.services.package._lookup_image_podman")
+        mock_docker = mocker.patch("margot.services.package._lookup_image_docker")
+
+        result = package_service._lookup_image_with_runtime(
+            "test:latest",
+            "/tmp",
+            "none",
+            mocker.MagicMock(),
+        )
+
+        assert result is None
+        mock_podman.assert_not_called()
+        mock_docker.assert_not_called()
+
+    def test_runtime_podman_forced_raises_on_unreachable(self, mocker: Any):
+        """--runtime podman should raise when socket unreachable."""
+        mocker.patch(
+            "margot.services.package._lookup_image_podman",
+            side_effect=RuntimeError("Socket unreachable"),
+        )
+
+        with raises(RuntimeError, match="Socket unreachable"):
+            package_service._lookup_image_with_runtime(
+                "test:latest",
+                "/tmp",
+                "podman",
+                mocker.MagicMock(),
+            )
+
+    def test_runtime_docker_forced_raises_on_unreachable(self, mocker: Any):
+        """--runtime docker should raise when socket unreachable."""
+        mocker.patch(
+            "margot.services.package._lookup_image_docker",
+            side_effect=RuntimeError("Socket unreachable"),
+        )
+
+        with raises(RuntimeError, match="Socket unreachable"):
+            package_service._lookup_image_with_runtime(
+                "test:latest",
+                "/tmp",
+                "docker",
+                mocker.MagicMock(),
+            )

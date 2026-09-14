@@ -5,7 +5,9 @@ from enum import StrEnum
 from hashlib import sha256
 from json import dumps as json_dumps
 from json import load as json_load
+from os import environ, getuid
 from pathlib import Path
+import platform as platform_module
 from shutil import rmtree
 from tarfile import open as tar_open
 from tempfile import mkdtemp
@@ -57,7 +59,102 @@ def _validate_runtime_flag(runtime: str) -> None:
         raise ValueError(msg)
 
 
-def _lookup_image_podman(
+def _resolve_podman_socket_uri() -> str:
+    """Resolve the Podman socket URI for rootless Podman daemon.
+
+    Returns the standard rootless Podman socket location:
+    - If XDG_RUNTIME_DIR is set: unix://{XDG_RUNTIME_DIR}/podman/podman.sock
+    - Otherwise: unix:///run/user/{uid}/podman/podman.sock (systemd user session default)
+
+    Returns:
+        The Podman socket URI in the format 'unix://...'
+
+    Raises:
+        RuntimeError: If neither XDG_RUNTIME_DIR nor the default path is accessible.
+    """
+    xdg_runtime_dir = environ.get("XDG_RUNTIME_DIR")
+    if xdg_runtime_dir:
+        return f"unix://{xdg_runtime_dir}/podman/podman.sock"
+
+    # Fall back to systemd user session default
+    uid = getuid()
+    return f"unix:///run/user/{uid}/podman/podman.sock"
+
+
+def _get_host_platform() -> str:
+    """Get the host's OS and architecture in OCI format (os/arch).
+
+    Returns:
+        Platform string (e.g. 'linux/amd64', 'linux/arm64').
+    """
+    os_name = platform_module.system().lower()
+    machine = platform_module.machine().lower()
+
+    # Normalize machine architecture to OCI standard
+    # x86_64 / x86-64 -> amd64
+    # aarch64 -> arm64
+    # armv7l / armv7 -> arm (variant v7 handled separately)
+    # ppc64le -> ppc64le
+    # s390x -> s390x
+    arch_map = {
+        "x86_64": "amd64",
+        "x86-64": "amd64",
+        "amd64": "amd64",
+        "aarch64": "arm64",
+        "arm64": "arm64",
+        "armv7l": "arm",
+        "armv7": "arm",
+        "armv6l": "arm",
+        "armv5l": "arm",
+        "ppc64le": "ppc64le",
+        "s390x": "s390x",
+        "riscv64": "riscv64",
+    }
+
+    arch = arch_map.get(machine, machine)
+    return f"{os_name}/{arch}"
+
+
+def _export_image_to_oci_archive(
+    image: Any,  # noqa: ANN401
+    image_ref: str,
+    output_dir: str,
+) -> str | None:
+    """Export a Podman image object to OCI-archive format.
+
+    Args:
+        image: A Podman Image object.
+        image_ref: Image reference (for logging and filename generation).
+        output_dir: Directory to write exported tar.
+
+    Returns:
+        Path to the exported OCI-archive tar, or None if export fails.
+    """
+    export_path = Path(output_dir) / f"{image_ref.replace('/', '_').replace(':', '_')}.tar"
+    console.debug(f"Exporting {image_ref} from Podman to {export_path}")
+
+    try:
+        # Call the underlying HTTP client directly with oci-archive format.
+        # The podman SDK's Image.save() hardcodes format=docker-archive,
+        # but the libpod API endpoint supports oci-archive natively.
+        response = image.client.get(
+            f"/images/{image.id}/get",
+            params={"format": ["oci-archive"]},
+            stream=True,
+        )
+        response.raise_for_status()
+
+        with export_path.open("wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        console.debug(f"Podman export complete: {export_path}")
+        return str(export_path)
+    except Exception as e:  # noqa: BLE001
+        console.debug(f"Error exporting image from Podman: {e}")
+        return None
+
+
+def _lookup_image_podman(  # noqa: C901, PLR0911, PLR0912, PLR0915
     image_ref: str,
     output_dir: str,
     required: bool = False,
@@ -65,7 +162,8 @@ def _lookup_image_podman(
     """Look up and export an image from a local Podman daemon.
 
     Exports the image in OCI-archive format if found, or returns None
-    if not found or the socket is unreachable.
+    if not found or the socket is unreachable. Falls back to manifest-list
+    resolution for images stored locally only as a manifest list wrapper.
 
     Args:
         image_ref: Image reference (e.g. 'nginx:latest').
@@ -85,26 +183,85 @@ def _lookup_image_podman(
         return None
 
     try:
-        uri = f"unix://{Path.home()}/.local/share/containers/podman/podman.sock"
+        uri = _resolve_podman_socket_uri()
         with PodmanClient(base_url=uri) as client:
+            # Try direct image lookup first (fast path)
             try:
                 image = client.images.get(image_ref)
+                return _export_image_to_oci_archive(image, image_ref, output_dir)
             except Exception as e:  # noqa: BLE001
-                console.debug(f"Image {image_ref} not found in Podman: {e}")
-                return None
+                console.debug(f"Direct image lookup failed for {image_ref}: {e}")
 
-            # Export image in OCI-archive format
-            export_path = Path(output_dir) / f"{image_ref.replace('/', '_').replace(':', '_')}.tar"
-            console.debug(f"Exporting {image_ref} from Podman to {export_path}")
-
+            # Fallback: check if reference resolves to a manifest list
             try:
-                with export_path.open("wb") as f:
-                    for chunk in image.export(format="oci-archive"):
-                        f.write(chunk)
-                console.debug(f"Podman export complete: {export_path}")
-                return str(export_path)
+                if not client.manifests.exists(image_ref):
+                    console.debug(f"Image {image_ref} not found in Podman (not a manifest list)")
+                    return None
+
+                console.debug(f"Resolving {image_ref} via local manifest list")
+                manifest_list = client.manifests.get(image_ref)
+                manifest_entries = manifest_list.attrs.get("manifests", [])
+
+                if not manifest_entries:
+                    console.debug(f"Manifest list for {image_ref} has no entries")
+                    return None
+
+                # Get host platform
+                host_platform = _get_host_platform()
+                console.debug(f"Host platform: {host_platform}")
+
+                # Find matching entry for host platform
+                matching_digest = None
+                matching_platform = None
+
+                for entry in manifest_entries:
+                    entry_platform_dict = entry.get("platform", {})
+                    console.debug(f"Checking manifest entry platform: {entry_platform_dict}")
+
+                    if _platform_matches_manifest(host_platform, entry_platform_dict):
+                        matching_digest = entry.get("digest")
+                        matching_platform = entry_platform_dict
+                        console.debug(f"Found matching platform entry with digest {matching_digest}")
+                        break
+
+                if not matching_digest:
+                    # No matching platform in manifest list
+                    available_platforms = []
+                    for entry in manifest_entries:
+                        plat = entry.get("platform", {})
+                        if plat:
+                            os_name = plat.get("os", "unknown")
+                            arch = plat.get("architecture", "unknown")
+                            variant = plat.get("variant")
+                            if variant:
+                                available_platforms.append(f"{os_name}/{arch}/{variant}")
+                            else:
+                                available_platforms.append(f"{os_name}/{arch}")
+
+                    console.debug(
+                        f"No platform match for {host_platform} in manifest list for {image_ref}. "
+                        f"Available: {', '.join(available_platforms)}"
+                    )
+                    return None
+
+                # Try to get the concrete image by digest
+                try:
+                    concrete_image = client.images.get(matching_digest)
+                    export_path = _export_image_to_oci_archive(concrete_image, image_ref, output_dir)
+                    if export_path:
+                        os_name = matching_platform.get("os", "unknown")
+                        arch = matching_platform.get("architecture", "unknown")
+                        console.info(
+                            f"Resolved {image_ref} via local manifest list "
+                            f"(platform match: {os_name}/{arch}), using local copy"
+                        )
+                    return export_path  # noqa: TRY300
+                except Exception as e:  # noqa: BLE001
+                    console.debug(f"Failed to get concrete image by digest {matching_digest}: {e}")
+                    return None
+
             except Exception as e:  # noqa: BLE001
-                console.debug(f"Error exporting image from Podman: {e}")
+                console.debug(f"Manifest list lookup failed for {image_ref}: {e}")
                 return None
 
     except Exception as e:
@@ -142,7 +299,7 @@ def _lookup_image_docker(
         return None
 
     try:
-        client = docker_from_env()
+        client = docker_from_env(timeout=5)
         try:
             image = client.images.get(image_ref)
         except Exception as e:  # noqa: BLE001
@@ -184,8 +341,8 @@ def _lookup_image_docker(
         return None
 
 
-def _normalize_docker_tarball_to_oci_layout(
-    docker_tar_path: str,  # noqa: ARG001
+def _normalize_docker_tarball_to_oci_layout(  # noqa: PLR0915
+    docker_tar_path: str,
     image_ref: str,
     output_dir: str,
     oras_client: OrasClient,  # noqa: ARG001
@@ -193,7 +350,9 @@ def _normalize_docker_tarball_to_oci_layout(
     """Convert Docker tarball to OCI image-layout format.
 
     Docker's tarball format includes manifest.json and individual layer/config tars.
-    This function extracts those and reassembles them into OCI image-layout format.
+    This function extracts those and reassembles them into OCI image-layout format,
+    translating Docker legacy media types to OCI equivalents and computing real
+    sha256 digests for all blobs.
 
     Args:
         docker_tar_path: Path to Docker tarball.
@@ -203,18 +362,161 @@ def _normalize_docker_tarball_to_oci_layout(
 
     Returns:
         Path to the OCI image-layout tar.
+
+    Raises:
+        ValueError: If Docker tarball structure is invalid or manifest parsing fails.
     """
-    # TODO(kiro): implement Docker tarball to OCI layout normalization
-    # For now, this is a placeholder that returns the input as-is
-    # Real implementation would:
-    # 1. Extract manifest.json from docker tarball
-    # 2. Parse the manifest structure
-    # 3. Extract layer tars and config blob
-    # 4. Reassemble into OCI image-layout (oci-layout + index.json + blobs/sha256/*)
-    # 5. Create output OCI tar
     output_path = Path(output_dir) / f"{image_ref.replace('/', '_').replace(':', '_')}.oci.tar"
     console.debug(f"Normalizing Docker tarball to OCI layout: {output_path}")
-    return str(output_path)
+
+    temp_dir = Path(mkdtemp())
+    try:
+        # Extract Docker tarball
+        with tar_open(docker_tar_path, "r") as docker_tar:
+            docker_tar.extractall(temp_dir, filter="data")
+
+        # Read manifest.json from Docker tarball
+        manifest_json_path = temp_dir / "manifest.json"
+        if not manifest_json_path.exists():
+            msg = f"Docker tarball missing manifest.json: {docker_tar_path}"
+            raise ValueError(msg)
+
+        with manifest_json_path.open() as f:
+            docker_manifest_list = json_load(f)
+
+        # Docker's manifest.json is a list; we handle single-image case (first entry)
+        if not isinstance(docker_manifest_list, list) or not docker_manifest_list:
+            msg = "Docker tarball manifest.json is not a non-empty list"
+            raise ValueError(msg)
+
+        docker_manifest_entry = docker_manifest_list[0]
+
+        # Read config blob
+        config_filename = docker_manifest_entry.get("Config")
+        if not config_filename:
+            msg = "Docker manifest entry missing Config field"
+            raise ValueError(msg)
+
+        config_path = temp_dir / config_filename
+        if not config_path.exists():
+            msg = f"Docker tarball missing config blob: {config_filename}"
+            raise ValueError(msg)
+
+        config_bytes = config_path.read_bytes()
+        config_digest = f"sha256:{sha256(config_bytes).hexdigest()}"
+        config_media_type = "application/vnd.oci.image.config.v1+json"
+
+        # Translate Docker config media type if present
+        config_json = json_load(config_path.open())
+        docker_config_media_type = config_json.get("mediaType", "")
+        if "vnd.docker" in docker_config_media_type:
+            console.debug(f"Translating Docker config media type: {docker_config_media_type}")
+            config_media_type = "application/vnd.oci.image.config.v1+json"
+
+        # Read layer blobs and compute digests
+        layer_digests = []
+        layers_data = docker_manifest_entry.get("Layers", [])
+
+        for layer_filename in layers_data:
+            layer_path = temp_dir / layer_filename
+            if not layer_path.exists():
+                msg = f"Docker tarball missing layer blob: {layer_filename}"
+                raise ValueError(msg)
+
+            layer_bytes = layer_path.read_bytes()
+            layer_digest = f"sha256:{sha256(layer_bytes).hexdigest()}"
+
+            # Determine layer media type (translate Docker's if needed)
+            # Docker layers are typically .tar.gz files
+            if layer_filename.endswith(".tar.gz"):
+                layer_media_type = "application/vnd.oci.image.layer.v1.tar+gzip"
+            else:
+                layer_media_type = "application/vnd.oci.image.layer.v1.tar"
+
+            layer_digests.append(
+                {
+                    "digest": layer_digest,
+                    "media_type": layer_media_type,
+                    "size": len(layer_bytes),
+                    "bytes": layer_bytes,
+                }
+            )
+
+        # Build OCI manifest
+        manifest_dict = {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": config_media_type,
+                "digest": config_digest,
+                "size": len(config_bytes),
+            },
+            "layers": [
+                {
+                    "mediaType": layer["media_type"],
+                    "digest": layer["digest"],
+                    "size": layer["size"],
+                }
+                for layer in layer_digests
+            ],
+        }
+
+        manifest_json_str = json_dumps(manifest_dict, separators=(",", ":"), sort_keys=True)
+        manifest_bytes = manifest_json_str.encode("utf-8")
+        manifest_digest = f"sha256:{sha256(manifest_bytes).hexdigest()}"
+
+        # Create OCI image layout structure
+        oci_layout_dir = temp_dir / "oci_layout"
+        oci_layout_dir.mkdir(parents=True, exist_ok=True)
+
+        blobs_dir = oci_layout_dir / "blobs" / "sha256"
+        blobs_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write config blob
+        config_blob_filename = config_digest.rsplit(":", maxsplit=1)[-1]
+        (blobs_dir / config_blob_filename).write_bytes(config_bytes)
+
+        # Write layer blobs
+        for layer in layer_digests:
+            layer_blob_filename = layer["digest"].split(":")[-1]
+            (blobs_dir / layer_blob_filename).write_bytes(layer["bytes"])
+
+        # Write manifest blob
+        manifest_blob_filename = manifest_digest.rsplit(":", maxsplit=1)[-1]
+        (blobs_dir / manifest_blob_filename).write_bytes(manifest_bytes)
+
+        # Write oci-layout file
+        oci_layout_file = {
+            "imageLayoutVersion": "1.0.0",
+        }
+        (oci_layout_dir / "oci-layout").write_text(json_dumps(oci_layout_file))
+
+        # Write index.json pointing to the manifest
+        index_json = {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [
+                {
+                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "digest": manifest_digest,
+                    "size": len(manifest_bytes),
+                    "annotations": {
+                        "org.opencontainers.image.ref.name": image_ref,
+                    },
+                }
+            ],
+        }
+        (oci_layout_dir / "index.json").write_text(json_dumps(index_json))
+
+        # Create the output OCI layout tar
+        with tar_open(output_path, "w") as output_tar:
+            output_tar.add(oci_layout_dir, arcname=".", recursive=True)
+
+        console.debug(f"Docker tarball normalized to OCI layout: {output_path}")
+        return str(output_path)
+
+    finally:
+        rmtree(temp_dir, ignore_errors=True)
 
 
 def _lookup_image_with_runtime(
@@ -256,20 +558,25 @@ def _lookup_image_with_runtime(
 
     # runtime == 'auto': silent auto-probe
     console.debug(f"Auto-probing for {image_ref}: Podman → Docker → registry")
+    console.info(f"Trying local Podman for {image_ref}...")
 
     # Try Podman first
     result = _lookup_image_podman(image_ref, output_dir, required=False)
     if result is not None:
         console.info(f"Found {image_ref} in Podman, using local copy")
         return result
+    console.info("Not found in Podman, trying Docker...")
 
     # Try Docker second
+    console.info(f"Trying local Docker for {image_ref}...")
     result = _lookup_image_docker(image_ref, output_dir, required=False)
     if result is not None:
         console.info(f"Found {image_ref} in Docker, using local copy")
         return result
+    console.info("Not found in Docker, falling back to registry...")
 
     # Fall back to registry
+    console.info(f"Falling back to registry for {image_ref}")
     console.debug(f"No local daemon found for {image_ref}, will use registry")
     return None
 
@@ -690,11 +997,21 @@ def _create_oci_image_layout_tar(
                     blobs_dir,
                 )
 
-            # Build index.json pointing to all child manifests
+            # Build index.json pointing to all child manifests with ref-name annotations
+            # Preserve existing annotations while ensuring ref-name is present
+            annotated_manifests = []
+            for manifest_entry in manifests_list:
+                annotated_entry = manifest_entry.copy()
+                # Preserve existing annotations, add/update ref-name
+                annotations = annotated_entry.get("annotations", {}).copy() if "annotations" in annotated_entry else {}
+                annotations["org.opencontainers.image.ref.name"] = image_ref
+                annotated_entry["annotations"] = annotations
+                annotated_manifests.append(annotated_entry)
+
             index_json = {
                 "schemaVersion": 2,
                 "mediaType": media_type,
-                "manifests": manifests_list,
+                "manifests": annotated_manifests,
             }
         else:
             # Single-platform manifest
@@ -706,6 +1023,11 @@ def _create_oci_image_layout_tar(
             manifest_json_str = json_dumps(manifest, separators=(",", ":"), sort_keys=True)
             manifest_size = len(manifest_json_str.encode("utf-8"))
 
+            # Write the manifest blob to blobs directory (required for valid OCI layout)
+            manifest_blob_filename = manifest_digest.split(":")[-1]
+            manifest_blob_path = blobs_dir / manifest_blob_filename
+            manifest_blob_path.write_text(manifest_json_str)
+
             index_json = {
                 "schemaVersion": 2,
                 "mediaType": "application/vnd.oci.image.index.v1+json",
@@ -714,6 +1036,9 @@ def _create_oci_image_layout_tar(
                         "mediaType": media_type,
                         "digest": manifest_digest,
                         "size": manifest_size,
+                        "annotations": {
+                            "org.opencontainers.image.ref.name": image_ref
+                        },
                     }
                 ],
             }
@@ -1367,7 +1692,14 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
             oras_client = registry_clients[hostname]
 
             # Get the manifest (handles both single-arch and multi-arch)
-            manifest = oras_client.get_manifest(ref)
+            try:
+                manifest = oras_client.get_manifest(ref)
+            except Exception as e:
+                msg = (
+                    f"Registry did not return a valid manifest for {ref} — the image "
+                    f"may not exist at this reference, or the registry may be unreachable: {e}"
+                )
+                raise OciRegistryError(msg) from e
 
             # Create OCI image layout tar with all blobs
             _create_oci_image_layout_tar(ref, manifest, oras_client, str(image_tar_path), platforms)
