@@ -1,8 +1,7 @@
 """Remote OCI artifact resolver: pull and inspect remote Margo application descriptors.
 
 This service handles the complete lifecycle of remote descriptor resolution:
-- URI normalization and validation
-- Manifest fetching and artifact-type checking
+- Shared OCI preparation (URI normalization, validation, credential check, manifest fetch)
 - Margo-only gating (compose/quadlet/unknown fail before pull)
 - Pulling to a temporary directory (recursive=False)
 - Root app.yaml location and validation
@@ -16,9 +15,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from margot import console
-from margot.domain import uri as uri_domain
-from margot.domain.models import PackageType, artifact_type_to_package_type
-from margot.infra import credentials, oci
+from margot.domain.models import PackageType
 from margot.services import pull as pull_service
 
 
@@ -40,7 +37,8 @@ class ResolvedRemoteDescriptor:
 def resolve_remote_descriptor(uri: str) -> ResolvedRemoteDescriptor:
     """Resolve a remote Margo application descriptor and pull it to a temporary directory.
 
-    Validates the URI, fetches the manifest, verifies that the artifact is a Margo
+    Uses the shared prepare_oci_retrieval from services/pull to centralize URI validation,
+    credential checks, and manifest fetching. Verifies that the artifact is a Margo
     application descriptor (rejects compose/quadlet/unknown), pulls the artifact
     with recursive=False, and locates the root app.yaml. The temporary directory
     remains live; cleanup is the caller's responsibility.
@@ -54,8 +52,8 @@ def resolve_remote_descriptor(uri: str) -> ResolvedRemoteDescriptor:
         app.yaml, and a live TemporaryDirectory handle.
 
     Raises:
-        ValueError: If URI is malformed, tagged OCI reference validation fails, artifact
-            is not Margo, or app.yaml is not found in the pulled layers.
+        ValueError: If URI is malformed, artifact is not Margo, or app.yaml is not found
+            in the pulled layers.
         CredentialsExpiredError: If credentials for the registry have expired.
         Exception: If manifest fetch, pull, or other registry operation fails.
 
@@ -68,45 +66,25 @@ def resolve_remote_descriptor(uri: str) -> ResolvedRemoteDescriptor:
         finally:
             resolver.temp_dir.cleanup()
     """
-    # Normalize URI by stripping scheme
-    normalized_uri = uri_domain.strip_scheme(uri)
-
-    # Validate URI
-    uri_domain.validate_uri(normalized_uri)
-    console.info(f"URI validated: {normalized_uri}")
-
-    # Extract hostname and check credentials
-    hostname = uri_domain.extract_hostname(normalized_uri)
-    console.info(f"Checking credentials for {hostname}")
-    credentials.check_credentials(hostname)
-
-    # Fetch manifest and check artifact type
-    client = oci.OrasClient(hostname=hostname)
-    manifest = client.get_manifest(normalized_uri)
-    console.info("Manifest fetched.")
-
-    artifact_type = manifest.get("artifactType")
-    package_type = artifact_type_to_package_type(artifact_type)
-    console.info(f"Detected artifact type: {package_type.value if package_type else 'unknown'}")
+    # Prepare OCI retrieval: normalize URI, validate, check credentials, fetch manifest once
+    # This shared step avoids credential and manifest re-fetch when pull_prepared_context
+    # (and oras-py's internal Registry.pull) execute.
+    prepared = pull_service.prepare_oci_retrieval(uri)
 
     # Require PackageType.MARGO — reject compose, quadlet, unknown before pull
-    if package_type != PackageType.MARGO:
-        actual_type = artifact_type or "unknown"
+    if prepared.package_type != PackageType.MARGO:
+        actual_type = prepared.manifest.get("artifactType") or "unknown"
         raise ValueError(
-            f"Artifact at {normalized_uri} is not a Margo application descriptor "
+            f"Artifact at {prepared.normalized_uri} is not a Margo application descriptor "
             f"(type: {actual_type}). "
-            f"Run 'margot fetch {normalized_uri}' to inspect the raw manifest."
+            f"Run 'margot fetch {prepared.normalized_uri}' to inspect the raw manifest."
         )
 
     # Create temporary directory for pull
     temp_dir = TemporaryDirectory(prefix="margot-remote-")
     try:
-        # Pull the Margo artifact with recursive=False
-        pulled_paths = pull_service.pull_artifact(
-            normalized_uri,
-            outdir=temp_dir.name,
-            recursive=False,
-        )
+        # Pull the Margo artifact with recursive=False, using the prepared context
+        pulled_paths = pull_service.pull_prepared_context(prepared, temp_dir.name, recursive=False)
         console.info(f"Pulled {len(pulled_paths)} layer(s).")
 
         # Locate app.yaml in pulled paths
@@ -120,14 +98,14 @@ def resolve_remote_descriptor(uri: str) -> ResolvedRemoteDescriptor:
             # Clean up before raising
             temp_dir.cleanup()
             msg = (
-                f"Artifact at {normalized_uri} is a Margo application descriptor "
+                f"Artifact at {prepared.normalized_uri} is a Margo application descriptor "
                 f"but has no root app.yaml layer. Verify the artifact is valid."
             )
             raise ValueError(msg)  # noqa: TRY301
 
         console.info(f"Application description located: {app_yaml_path}")
         return ResolvedRemoteDescriptor(
-            normalized_uri=normalized_uri,
+            normalized_uri=prepared.normalized_uri,
             app_yaml_path=app_yaml_path,
             temp_dir=temp_dir,
         )

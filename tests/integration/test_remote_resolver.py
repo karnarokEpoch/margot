@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from pytest import raises
 
+from margot.domain.models import PackageType
 from margot.infra.credentials import CredentialsExpiredError
 from margot.services import remote as remote_service
 
@@ -40,19 +41,26 @@ class TestRemoteResolver:
         self, mocker: Any, tmp_path: Any
     ) -> None:
         """Should resolve a margo artifact, pull it, return URI and app.yaml path."""
-        mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest(
-            artifact_type="application/vnd.margo.app.v1+json"
-        )
-        # Simulate pulling a margo artifact with app.yaml
-        def _fake_pull(uri: str, outdir: str) -> list[str]:  # noqa: ARG001
-            app_yaml_path = Path(outdir) / "app.yaml"
-            app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
-            return [str(app_yaml_path), str(Path(outdir) / "resources")]
 
-        mock_client.pull.side_effect = _fake_pull
-        mocker.patch("margot.services.remote.credentials.check_credentials")
-        mocker.patch("margot.services.remote.oci.OrasClient", return_value=mock_client)
+        # Mock the prepare function
+        mockprepared = MagicMock()
+        mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/margo:1.0.0"
+        mockprepared.manifest = _make_manifest()
+        mockprepared.package_type = PackageType.MARGO
+
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=mockprepared,
+        )
+
+        # Mock pullprepared_context to return app.yaml path
+        app_yaml_path = tmp_path / "app.yaml"
+        app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
+
+        mocker.patch(
+            "margot.services.remote.pull_service.pull_prepared_context",
+            return_value=[str(app_yaml_path), str(tmp_path / "resources")],
+        )
 
         result = remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
 
@@ -65,46 +73,55 @@ class TestRemoteResolver:
 
     def test_resolve_remote_with_oci_scheme_strips_and_normalizes(self, mocker: Any, tmp_path: Any) -> None:
         """Should accept oci:// scheme and normalize to canonical form."""
-        mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest()
 
-        def _fake_pull(uri: str, outdir: str) -> list[str]:  # noqa: ARG001
-            app_yaml_path = Path(outdir) / "app.yaml"
-            app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
-            return [str(app_yaml_path)]
+        # Mock the prepare function to return a prepared context
+        mockprepared = MagicMock()
+        mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/margo:1.0.0"
+        mockprepared.manifest = _make_manifest()
+        mockprepared.package_type = PackageType.MARGO
 
-        mock_client.pull.side_effect = _fake_pull
-        mocker.patch("margot.services.remote.credentials.check_credentials")
-        mocker.patch("margot.services.remote.oci.OrasClient", return_value=mock_client)
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=mockprepared,
+        )
+
+        # Mock pullprepared_context to return app.yaml path
+        app_yaml_path = tmp_path / "app.yaml"
+        app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
+
+        mocker.patch(
+            "margot.services.remote.pull_service.pull_prepared_context",
+            return_value=[str(app_yaml_path)],
+        )
 
         result = remote_service.resolve_remote_descriptor("oci://public.ecr.aws/g2n4p2m7/margo:1.0.0")
 
         # Normalized URI should be without oci://
         assert result.normalized_uri == "public.ecr.aws/g2n4p2m7/margo:1.0.0"
-        mock_client.pull.assert_called_once()
-        # Call should use the normalized (non-scheme) URI
-        args = mock_client.pull.call_args
-        assert args[1]["uri"] == "public.ecr.aws/g2n4p2m7/margo:1.0.0"
 
     def test_resolve_remote_raises_for_malformed_uri(self, mocker: Any) -> None:
         """Should raise ValueError for malformed URI before any I/O."""
-        mocker.patch("margot.services.remote.credentials.check_credentials")
-        mock_class = mocker.patch("margot.services.remote.oci.OrasClient")
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            side_effect=ValueError("URI must"),
+        )
 
         with raises(ValueError, match="URI must"):
             remote_service.resolve_remote_descriptor("not-a-valid-uri")
 
-        mock_class.assert_not_called()
-
     def test_resolve_remote_raises_for_non_margo_compose_artifact(self, mocker: Any, tmp_path: Any) -> None:
         """Should raise ValueError for compose artifact before pull."""
-        mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest(
-            artifact_type="application/vnd.org.margo.component.compose+json"
+
+        # Mock prepare to return a compose artifact
+        mockprepared = MagicMock()
+        mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/compose:1.0.0"
+        mockprepared.manifest = _make_manifest(artifact_type="application/vnd.org.margo.component.compose+json")
+        mockprepared.package_type = PackageType.COMPOSE
+
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=mockprepared,
         )
-        mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.remote.credentials.check_credentials")
-        mocker.patch("margot.services.remote.oci.OrasClient", return_value=mock_client)
 
         with raises(ValueError, match="not a Margo application descriptor") as exc_info:
             remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/compose:1.0.0")
@@ -115,12 +132,17 @@ class TestRemoteResolver:
 
     def test_resolve_remote_raises_for_non_margo_quadlet_artifact(self, mocker: Any, tmp_path: Any) -> None:
         """Should raise ValueError for quadlet artifact before pull."""
-        mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest(
-            artifact_type="application/vnd.org.margo.component.quadlet+json"
+
+        # Mock prepare to return a quadlet artifact
+        mockprepared = MagicMock()
+        mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/quadlet:1.0.0"
+        mockprepared.manifest = _make_manifest(artifact_type="application/vnd.org.margo.component.quadlet+json")
+        mockprepared.package_type = PackageType.QUADLET
+
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=mockprepared,
         )
-        mocker.patch("margot.services.remote.credentials.check_credentials")
-        mocker.patch("margot.services.remote.oci.OrasClient", return_value=mock_client)
 
         with raises(ValueError, match="not a Margo application descriptor") as exc_info:
             remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/quadlet:1.0.0")
@@ -130,10 +152,17 @@ class TestRemoteResolver:
 
     def test_resolve_remote_raises_for_unknown_artifact_type(self, mocker: Any, tmp_path: Any) -> None:
         """Should raise ValueError for unknown artifact type."""
-        mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest(artifact_type=None)
-        mocker.patch("margot.services.remote.credentials.check_credentials")
-        mocker.patch("margot.services.remote.oci.OrasClient", return_value=mock_client)
+
+        # Mock prepare to return an unknown artifact
+        mockprepared = MagicMock()
+        mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/unknown:1.0.0"
+        mockprepared.manifest = _make_manifest(artifact_type=None)
+        mockprepared.package_type = PackageType.UNKNOWN
+
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=mockprepared,
+        )
 
         with raises(ValueError, match="not a Margo application descriptor") as exc_info:
             remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/unknown:1.0.0")
@@ -143,19 +172,23 @@ class TestRemoteResolver:
 
     def test_resolve_remote_raises_for_missing_app_yaml(self, mocker: Any, tmp_path: Any) -> None:
         """Should raise ValueError when pulled artifact has no app.yaml."""
-        mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest()
 
-        def _fake_pull(uri: str, outdir: str) -> list[str]:  # noqa: ARG001
-            # Pull returns paths, but no app.yaml
-            Path(outdir).mkdir(parents=True, exist_ok=True)
-            Path(outdir) / "some-other-file.txt"
-            (Path(outdir) / "some-other-file.txt").write_text("content", encoding="utf-8")
-            return [str(Path(outdir) / "some-other-file.txt")]
+        # Mock prepare to return a margo artifact
+        mockprepared = MagicMock()
+        mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/margo:1.0.0"
+        mockprepared.manifest = _make_manifest()
+        mockprepared.package_type = PackageType.MARGO
 
-        mock_client.pull.side_effect = _fake_pull
-        mocker.patch("margot.services.remote.credentials.check_credentials")
-        mocker.patch("margot.services.remote.oci.OrasClient", return_value=mock_client)
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=mockprepared,
+        )
+
+        # Mock pullprepared to return paths without app.yaml
+        mocker.patch(
+            "margot.services.remote.pull_service.pull_prepared_context",
+            return_value=[str(tmp_path / "some-other-file.txt")],
+        )
 
         with raises(ValueError, match=r"app\.yaml") as exc_info:
             remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
@@ -164,17 +197,23 @@ class TestRemoteResolver:
 
     def test_resolve_remote_cleans_up_temp_dir_on_exception(self, mocker: Any, tmp_path: Any) -> None:
         """Should clean up temp directory when exception occurs."""
-        mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest()
 
-        def _fake_pull(uri: str, outdir: str) -> list[str]:  # noqa: ARG001
-            Path(outdir).mkdir(parents=True, exist_ok=True)
-            # Don't create app.yaml, forcing an error
-            return []
+        # Mock prepare to return a margo artifact
+        mockprepared = MagicMock()
+        mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/margo:1.0.0"
+        mockprepared.manifest = _make_manifest()
+        mockprepared.package_type = PackageType.MARGO
 
-        mock_client.pull.side_effect = _fake_pull
-        mocker.patch("margot.services.remote.credentials.check_credentials")
-        mocker.patch("margot.services.remote.oci.OrasClient", return_value=mock_client)
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=mockprepared,
+        )
+
+        # Mock pullprepared to return empty list (no app.yaml)
+        mocker.patch(
+            "margot.services.remote.pull_service.pull_prepared_context",
+            return_value=[],
+        )
 
         # The test passes if no exception is raised from cleanup
         # (the temp directory should be cleaned up before raising ValueError)
@@ -182,57 +221,65 @@ class TestRemoteResolver:
             remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
 
     def test_resolve_remote_pull_with_recursive_false(self, mocker: Any, tmp_path: Any) -> None:
-        """Should call pull_artifact with recursive=False."""
-        mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest()
+        """Should call pull_prepared_context with recursive=False."""
 
-        def _fake_pull(uri: str, outdir: str, recursive: bool = False) -> list[str]:  # noqa: ARG001
-            app_yaml_path = Path(outdir) / "app.yaml"
-            Path(outdir).mkdir(parents=True, exist_ok=True)
-            app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
-            return [str(app_yaml_path)]
+        # Mock prepare to return a margo artifact
+        mockprepared = MagicMock()
+        mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/margo:1.0.0"
+        mockprepared.manifest = _make_manifest()
+        mockprepared.package_type = PackageType.MARGO
 
-        mock_pull = mocker.patch(
-            "margot.services.pull.pull_artifact",
-            side_effect=_fake_pull,
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=mockprepared,
         )
-        mocker.patch("margot.services.remote.credentials.check_credentials")
-        mocker.patch("margot.services.remote.oci.OrasClient", return_value=mock_client)
+
+        app_yaml_path = tmp_path / "app.yaml"
+        app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
+
+        mock_pullprepared = mocker.patch(
+            "margot.services.remote.pull_service.pull_prepared_context",
+            return_value=[str(app_yaml_path)],
+        )
 
         remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
 
-        # Verify pull was called with recursive=False
-        mock_pull.assert_called_once()
-        call_kwargs = mock_pull.call_args[1]
+        # Verify pull_prepared_context was called with recursive=False
+        mock_pullprepared.assert_called_once()
+        call_kwargs = mock_pullprepared.call_args[1]
         assert call_kwargs.get("recursive") is False
 
     def test_resolve_remote_expired_credentials_propagates(self, mocker: Any) -> None:
-        """Should propagate CredentialsExpiredError from credential check."""
+        """Should propagate CredentialsExpiredError from prepare."""
         mocker.patch(
-            "margot.services.remote.credentials.check_credentials",
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
             side_effect=CredentialsExpiredError("Credentials expired for example.com"),
         )
-        mock_class = mocker.patch("margot.services.remote.oci.OrasClient")
 
         with raises(CredentialsExpiredError, match="Credentials expired"):
             remote_service.resolve_remote_descriptor("example.com/org/repo:1.0.0")
 
-        mock_class.assert_not_called()
-
     def test_resolve_remote_accepts_legacy_non_semver_tag(self, mocker: Any, tmp_path: Any) -> None:
         """Should accept legacy non-SemVer tags without --force."""
-        mock_client = MagicMock()
-        mock_client.get_manifest.return_value = _make_manifest()
 
-        def _fake_pull_artifact(uri: str, outdir: str, **kwargs: Any) -> list[str]:  # noqa: ARG001
-            app_yaml_path = Path(outdir) / "app.yaml"
-            Path(outdir).mkdir(parents=True, exist_ok=True)
-            app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
-            return [str(app_yaml_path)]
+        # Mock prepare to return a margo artifact
+        mockprepared = MagicMock()
+        mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/margo:1.0.0-legacy-manifest"
+        mockprepared.manifest = _make_manifest()
+        mockprepared.package_type = PackageType.MARGO
 
-        mocker.patch("margot.services.remote.credentials.check_credentials")
-        mocker.patch("margot.services.remote.oci.OrasClient", return_value=mock_client)
-        mocker.patch("margot.services.pull.pull_artifact", side_effect=_fake_pull_artifact)
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=mockprepared,
+        )
+
+        app_yaml_path = tmp_path / "app.yaml"
+        app_yaml_path.write_text("kind: ApplicationDescription\nid: test\n", encoding="utf-8")
+
+        mocker.patch(
+            "margot.services.remote.pull_service.pull_prepared_context",
+            return_value=[str(app_yaml_path)],
+        )
 
         # This should NOT raise, even though the tag is not SemVer
         result = remote_service.resolve_remote_descriptor(

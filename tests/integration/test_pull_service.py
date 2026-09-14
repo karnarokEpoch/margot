@@ -44,7 +44,7 @@ class TestPullArtifactService:
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
 
@@ -60,7 +60,7 @@ class TestPullArtifactService:
         )
         mock_client.pull.return_value = expected_paths
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
 
@@ -88,7 +88,7 @@ class TestPullArtifactService:
 
         mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
 
@@ -126,7 +126,7 @@ class TestPullArtifactService:
 
         mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
 
@@ -141,7 +141,7 @@ class TestPullArtifactService:
     def test_raises_value_error_on_empty_uri(self, mocker: Any, tmp_path: Any) -> None:
         """Should raise ValueError before making any client call when URI is empty."""
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mock_class = mocker.patch("margot.services.pull.oci.OrasClient")
+        mock_class = mocker.patch("margot.services.pull.OrasClient")
 
         with raises(ValueError, match="URI must not be empty"):
             pull_service.pull_artifact("", outdir=str(tmp_path))
@@ -154,7 +154,7 @@ class TestPullArtifactService:
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.side_effect = Exception("Network error")
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         with raises(Exception, match="Network error"):
             pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
@@ -165,7 +165,7 @@ class TestPullArtifactService:
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.return_value = []
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
 
@@ -181,7 +181,7 @@ class TestPullArtifactForce:
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         # This should NOT raise anymore — legacy non-SemVer tags are now allowed without force
         pull_service.pull_artifact(
@@ -197,7 +197,7 @@ class TestPullArtifactForce:
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         # 'latest' is not SemVer, but should be accepted now without force
         pull_service.pull_artifact(
@@ -229,7 +229,7 @@ class TestPullArtifactForce:
 
         mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         # Must not raise — force_type without force is valid for a SemVer tag + known type
         result = pull_service.pull_artifact(
@@ -263,7 +263,7 @@ class TestPullArtifactForce:
 
         mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
@@ -303,7 +303,7 @@ class TestPullArtifactForce:
 
         mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
@@ -327,7 +327,7 @@ class TestPullArtifactForce:
             artifact_type="application/vnd.docker.container.image.v1+json",
         )
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         with raises(ValueError, match=r"Unknown artifact type.*--force"):
             pull_service.pull_artifact(
@@ -344,7 +344,7 @@ class TestPullArtifactForce:
         )
         mock_client.pull.return_value = [str(tmp_path / "layer.tar.gz")]
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
@@ -360,7 +360,7 @@ class TestPullArtifactForce:
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_manifest(artifact_type=None)
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         with raises(ValueError, match=r"Unknown artifact type.*\(none\).*--force"):
             pull_service.pull_artifact(
@@ -387,7 +387,7 @@ class TestPullLayerLoop:
             layers=layers,
         )
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         with raises(ValueError, match="No layer with mediaType"):
             pull_service.pull_artifact(
@@ -424,7 +424,7 @@ class TestPullLayerLoop:
 
         mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
@@ -462,7 +462,7 @@ class TestPullLayerLoop:
 
         mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
@@ -500,7 +500,7 @@ class TestPullLayerLoop:
 
         mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
@@ -526,7 +526,7 @@ class TestPullArtifactVerbose:
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
         out, err = capture_console
         pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
         err_text = err.getvalue()
@@ -543,7 +543,7 @@ class TestPullArtifactVerbose:
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
         out, err = capture_console
         pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
         assert err.getvalue() == ""
@@ -587,7 +587,7 @@ class TestPullArtifactAuth:
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
         mock_check_credentials = mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
 
@@ -599,7 +599,7 @@ class TestPullArtifactAuth:
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mock_oras_client_cls = mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mock_oras_client_cls = mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
 
@@ -607,7 +607,7 @@ class TestPullArtifactAuth:
 
     def test_pull_expired_credentials_propagates(self, mocker: Any, tmp_path: Any) -> None:
         """Should propagate CredentialsExpiredError raised by check_credentials before constructing a client."""
-        mock_oras_client_cls = mocker.patch("margot.services.pull.oci.OrasClient")
+        mock_oras_client_cls = mocker.patch("margot.services.pull.OrasClient")
         mocker.patch(
             "margot.services.pull.credentials.check_credentials",
             side_effect=CredentialsExpiredError("Credentials for public.ecr.aws have expired."),
@@ -631,7 +631,7 @@ class TestPullArtifactAuth:
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.return_value = [pulled_file]
         mocker.patch("margot.services.pull.credentials.check_credentials", side_effect=_warn_and_proceed)
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
         _out, err = capture_console
 
         result = pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
@@ -648,7 +648,7 @@ class TestPullArtifactAuth:
         mock_client.pull.return_value = [pulled_file]
         # check_credentials with no tracked expiry returns None silently (real behavior, not mocked away)
         mocker.patch("margot.services.pull.credentials.load_expiry", return_value=None)
-        mock_oras_client_cls = mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mock_oras_client_cls = mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact("public.ecr.aws/g2n4p2m7/margo:1.0.0", outdir=str(tmp_path))
 
@@ -743,7 +743,7 @@ deploymentProfiles:
 
         mock_client.pull.side_effect = pull_side_effect
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
@@ -801,7 +801,7 @@ deploymentProfiles:
 
         mock_client.pull.side_effect = pull_side_effect
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         # Capture warnings
         warning_mock = mocker.patch("margot.services.pull.console.warning")
@@ -832,7 +832,7 @@ deploymentProfiles:
         mock_client.pull.return_value = root_paths
 
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         warning_mock = mocker.patch("margot.services.pull.console.warning")
 
@@ -863,7 +863,7 @@ deploymentProfiles:
         mock_client.pull.return_value = root_paths
 
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         warning_mock = mocker.patch("margot.services.pull.console.warning")
 
@@ -901,7 +901,7 @@ deploymentProfiles:
 
         mock_client.download_blob.side_effect = _fake_download
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         result_recursive = pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:1.0.0",
@@ -989,7 +989,7 @@ deploymentProfiles:
 
         mock_client.pull.side_effect = pull_side_effect
         mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
 
         warning_mock = mocker.patch("margot.services.pull.console.warning")
 
