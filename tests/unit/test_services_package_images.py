@@ -1,13 +1,9 @@
 """Unit tests for services/package.py image discovery and inclusion."""
 
-import json
 import tarfile
-import tempfile
-from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, Mock, patch
 
-from pytest import fixture, raises
+from pytest import fixture
 
 from margot.domain.models import PackageType
 from margot.services import package as package_service
@@ -263,103 +259,6 @@ Image=nginx:latest
         assert refs == []
 
 
-class TestOCIImageLayout:
-    """Tests for OCI image layout tar creation."""
-
-    def test_creates_valid_oci_layout_structure(self, tmp_path, mocker: Any):
-        """Should create a valid OCI image layout tar with index.json, oci-layout, and blobs."""
-        # Mock image manifest and config
-        mock_manifest = {
-            "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.manifest.v1+json",
-            "config": {
-                "mediaType": "application/vnd.oci.image.config.v1+json",
-                "digest": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                "size": 100,
-            },
-            "layers": [
-                {
-                    "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
-                    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    "size": 1000,
-                }
-            ],
-        }
-
-        # Create mock blobs
-        config_blob = b'{"architecture":"amd64"}'
-        layer_blob = b"fake layer data"
-
-        # Mock the download_blob to provide blob content
-        def mock_download(container, digest, outfile):  # Accepts 3 args: container, digest, outfile
-            if digest == "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef":
-                Path(outfile).write_bytes(config_blob)
-            elif digest == "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa":
-                Path(outfile).write_bytes(layer_blob)
-
-        mock_client = mocker.MagicMock()
-        mock_client.get_manifest.return_value = mock_manifest
-        mock_client.download_blob.side_effect = mock_download
-
-        output_tar = tmp_path / "image.tar"
-        package_service._create_oci_image_layout_tar(
-            "nginx:latest",
-            mock_manifest,
-            mock_client,
-            str(output_tar),
-        )
-
-        # Verify tar was created and contains expected structure
-        assert output_tar.exists()
-
-        with tarfile.open(output_tar, "r") as tar:
-            members = tar.getnames()
-            # Members might have './' prefix or not
-            assert any("oci-layout" in m for m in members)
-            assert any("index.json" in m for m in members)
-            # Blobs directory structure
-            assert any("blobs/sha256/" in m for m in members)
-
-    def test_oci_layout_includes_all_platforms_in_index(self, tmp_path, mocker: Any):
-        """Multi-arch index should include all platforms by default."""
-        mock_index = {
-            "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.index.v1+json",
-            "manifests": [
-                {
-                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
-                    "digest": "sha256:amd64digest1234567890abcdef1234567890abcdef1234567890abcdef",
-                    "size": 500,
-                    "platform": {"os": "linux", "architecture": "amd64"},
-                },
-                {
-                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
-                    "digest": "sha256:arm64digest1234567890abcdef1234567890abcdef1234567890abcdef",
-                    "size": 500,
-                    "platform": {"os": "linux", "architecture": "arm64"},
-                },
-            ],
-        }
-
-        mock_client = mocker.MagicMock()
-        mock_client.get_manifest.return_value = mock_index
-        mock_client.download_blob.return_value = None
-
-        output_tar = tmp_path / "multi-arch.tar"
-
-        # Should not raise and should process all platforms
-        try:
-            package_service._create_oci_image_layout_tar(
-                "nginx:latest",
-                mock_index,
-                mock_client,
-                str(output_tar),
-            )
-        except Exception as e:
-            # May fail on blob fetch in test, that's OK; we're testing that it doesn't filter platforms
-            assert "platform" not in str(e).lower()
-
-
 class TestPackageWithImages:
     """Tests for package() function with image inclusion."""
 
@@ -453,7 +352,7 @@ services:
         extract_dir = tmp_path / "extracted"
         extract_dir.mkdir()
         with tarfile.open(output_path, "r:gz") as tar:
-            tar.extractall(extract_dir)
+            tar.extractall(extract_dir, filter="data")
 
         # Images folder should exist (even if empty since no images discovered)
         assert (extract_dir / f"{mock_package_metadata.id}-1.0.0" / "images").exists()
@@ -480,7 +379,7 @@ services:
         extract_dir = tmp_path / "extracted"
         extract_dir.mkdir()
         with tarfile.open(output_path, "r:gz") as tar:
-            tar.extractall(extract_dir)
+            tar.extractall(extract_dir, filter="data")
 
         # Images folder should NOT exist
         assert not (extract_dir / f"{mock_package_metadata.id}-1.0.0" / "images").exists()

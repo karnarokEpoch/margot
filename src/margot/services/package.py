@@ -1,6 +1,7 @@
 """Package service: orchestrate offline bundle creation from built artifacts."""
 
 import hashlib
+import json
 from pathlib import Path
 from shutil import rmtree
 import tarfile
@@ -13,8 +14,10 @@ from margot import console
 from margot.domain.metadata import ComponentConfig, MargoYaml, load_margo_yaml
 from margot.domain.models import PackageType
 from margot.domain.tags import validate_oci_tag, validate_semver
+from margot.domain.uri import extract_hostname, validate_uri
+from margot.infra.credentials import CredentialsExpiredError, check_credentials
 from margot.infra.filesystem import copy_tree
-from margot.infra.oci import OrasClient
+from margot.infra.oci import OciRegistryError, OrasClient
 
 
 def _resolve_component_versions(
@@ -214,6 +217,7 @@ def _create_oci_image_layout_tar(
 
     Raises:
         ValueError: If the manifest structure is invalid.
+        OciRegistryError: If blob download or verification fails.
     """
     temp_dir = Path(mkdtemp())
     try:
@@ -235,12 +239,16 @@ def _create_oci_image_layout_tar(
                 console.debug(f"Pulling child manifest {child_digest} from index")
 
                 # Download the child manifest blob
-                manifest_blob_path = blobs_dir / child_digest.split(":")[-1]
+                manifest_blob_filename = child_digest.split(":")[-1]
+                manifest_blob_path = blobs_dir / manifest_blob_filename
                 oras_client.download_blob(image_ref, child_digest, str(manifest_blob_path))
 
+                # Verify blob digest
+                _verify_blob_digest(manifest_blob_path, child_digest)
+
                 # Parse the child manifest to get config and layers
-                with Path(manifest_blob_path).open() as f:
-                    child_manifest = yaml.safe_load(f) or {}
+                with manifest_blob_path.open() as f:
+                    child_manifest = json.load(f)
 
                 child_manifests.append((child_descriptor, child_manifest))
 
@@ -265,6 +273,10 @@ def _create_oci_image_layout_tar(
 
             # Build index.json pointing to this single manifest
             manifest_digest = manifest.get("digest") or _compute_manifest_digest(manifest)
+            # Size of the manifest serialized as JSON
+            manifest_json_str = json.dumps(manifest, separators=(",", ":"), sort_keys=True)
+            manifest_size = len(manifest_json_str.encode("utf-8"))
+
             index_json = {
                 "schemaVersion": 2,
                 "mediaType": "application/vnd.oci.image.index.v1+json",
@@ -272,17 +284,17 @@ def _create_oci_image_layout_tar(
                     {
                         "mediaType": media_type,
                         "digest": manifest_digest,
-                        "size": len(yaml.dump(manifest).encode("utf-8")),
+                        "size": manifest_size,
                     }
                 ],
             }
 
-        # Write oci-layout file
+        # Write oci-layout file (must be valid JSON)
         oci_layout = {"imageLayoutVersion": "1.0.0"}
-        (temp_dir / "oci-layout").write_text(yaml.dump(oci_layout))
+        (temp_dir / "oci-layout").write_text(json.dumps(oci_layout))
 
-        # Write index.json
-        (temp_dir / "index.json").write_text(yaml.dump(index_json))
+        # Write index.json (must be valid JSON)
+        (temp_dir / "index.json").write_text(json.dumps(index_json))
 
         # Create the final tarball
         with tarfile.open(output_tar_path, "w") as tar:
@@ -292,6 +304,35 @@ def _create_oci_image_layout_tar(
 
     finally:
         rmtree(temp_dir, ignore_errors=True)
+
+
+def _verify_blob_digest(blob_path: Path, expected_digest: str) -> None:
+    """Verify that a downloaded blob matches its expected digest.
+
+    Args:
+        blob_path: Path to the blob file.
+        expected_digest: Expected digest in format 'sha256:...' or similar.
+
+    Raises:
+        OciRegistryError: If the digest does not match.
+    """
+    # Parse the expected digest
+    if ":" not in expected_digest:
+        msg = f"Invalid digest format: {expected_digest}"
+        raise OciRegistryError(msg)
+
+    algo, expected_hex = expected_digest.split(":", 1)
+
+    # Compute actual digest
+    if algo == "sha256":
+        actual_hash = hashlib.sha256(blob_path.read_bytes()).hexdigest()
+    else:
+        msg = f"Unsupported digest algorithm: {algo}"
+        raise OciRegistryError(msg)
+
+    if actual_hash != expected_hex:
+        msg = f"Blob digest mismatch: {blob_path.name}. Expected {expected_digest}, got {algo}:{actual_hash}"
+        raise OciRegistryError(msg)
 
 
 def _download_manifest_blobs(
@@ -313,8 +354,10 @@ def _download_manifest_blobs(
     config_digest = config.get("digest", "")
     if config_digest:
         console.debug(f"Downloading config blob {config_digest}")
-        config_blob_path = blobs_dir / config_digest.split(":")[-1]
+        config_blob_filename = config_digest.split(":")[-1]
+        config_blob_path = blobs_dir / config_blob_filename
         oras_client.download_blob(image_ref, config_digest, str(config_blob_path))
+        _verify_blob_digest(config_blob_path, config_digest)
 
     # Download layer blobs
     layers = manifest.get("layers", [])
@@ -322,8 +365,10 @@ def _download_manifest_blobs(
         layer_digest = layer.get("digest", "")
         if layer_digest:
             console.debug(f"Downloading layer blob {layer_digest}")
-            layer_blob_path = blobs_dir / layer_digest.split(":")[-1]
+            layer_blob_filename = layer_digest.split(":")[-1]
+            layer_blob_path = blobs_dir / layer_blob_filename
             oras_client.download_blob(image_ref, layer_digest, str(layer_blob_path))
+            _verify_blob_digest(layer_blob_path, layer_digest)
 
 
 def _compute_manifest_digest(manifest: dict[str, Any]) -> str:
@@ -335,7 +380,7 @@ def _compute_manifest_digest(manifest: dict[str, Any]) -> str:
     Returns:
         The digest in the format 'sha256:...' (computed from JSON).
     """
-    manifest_json = yaml.dump(manifest, sort_keys=True)
+    manifest_json = json.dumps(manifest, separators=(",", ":"), sort_keys=True)
     digest = hashlib.sha256(manifest_json.encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
 
@@ -647,6 +692,10 @@ def _create_bundle(  # noqa: PLR0913
 
     Returns:
         Path to created bundle .tgz file.
+
+    Raises:
+        CredentialsExpiredError: If a registry credential has expired.
+        OciRegistryError: If pulling an image fails.
     """
     margo_build_path = Path(build_dir) / margo_version
     root_dir_name = f"{meta.id}-{margo_version}"
@@ -699,13 +748,19 @@ def _create_bundle(  # noqa: PLR0913
 
         # 3. Discover and include container images if requested
         if include_images:
-            _discover_and_include_images(
-                staging_root,
-                types_to_include,
-                build_dir,
-                meta,
-                component_versions,
-            )
+            try:
+                _discover_and_include_images(
+                    staging_root,
+                    types_to_include,
+                    build_dir,
+                    meta,
+                    component_versions,
+                )
+            except (CredentialsExpiredError, OciRegistryError):
+                # Image pull failed; clean up staging and re-raise
+                console.debug("Image discovery/pull failed, cleaning up staging directory")
+                rmtree(tmp_parent, ignore_errors=True)
+                raise
 
         # 4. Create the final tarball
         _write_bundle_tarball(staging_root, bundle_path, root_dir_name)
@@ -716,7 +771,7 @@ def _create_bundle(  # noqa: PLR0913
     return str(bundle_path)
 
 
-def _discover_and_include_images(  # noqa: C901
+def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0915
     staging_root: Path,
     types_to_include: set[PackageType],
     build_dir: str,
@@ -725,8 +780,9 @@ def _discover_and_include_images(  # noqa: C901
 ) -> None:
     """Discover container images from compose/quadlet and include them in the bundle.
 
-    Reads built component archives, discovers image references, pulls them from
-    registries, and saves each as an OCI image-layout tar under images/ folder.
+    Reads built component archives, discovers image references, validates them,
+    checks registry credentials, pulls manifests and layers, and saves each as
+    an OCI image-layout tar under images/ folder.
 
     Args:
         staging_root: Root of the bundle staging directory.
@@ -734,6 +790,10 @@ def _discover_and_include_images(  # noqa: C901
         build_dir: Build output directory.
         meta: Loaded margo.yaml.
         component_versions: Map of component type to list of versions.
+
+    Raises:
+        CredentialsExpiredError: If a registry credential has expired.
+        OciRegistryError: If pulling an image fails.
     """
     images_dir = staging_root / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -768,13 +828,81 @@ def _discover_and_include_images(  # noqa: C901
         console.info("No container images referenced in components")
         return
 
-    # For now, we'll implement placeholder for pulling images
-    # In a full implementation, this would:
-    # 1. Check credentials per registry
-    # 2. Pull manifests
-    # 3. Create OCI layouts
-    # This is deferred to allow testing of the image discovery piece first
-    console.info(f"Will pull {len(discovered_refs)} unique image(s) (not yet implemented)")
+    # Validate and check credentials for all unique registries before pulling any images
+    registry_clients: dict[str, OrasClient] = {}
+    for ref in discovered_refs:
+        try:
+            validate_uri(ref)
+        except ValueError as e:
+            msg = f"Invalid image reference: {ref}: {e}"
+            raise OciRegistryError(msg) from e
+
+        try:
+            hostname = extract_hostname(ref)
+        except ValueError as e:
+            msg = f"Cannot extract hostname from image reference {ref}: {e}"
+            raise OciRegistryError(msg) from e
+
+        # Check credentials once per unique registry
+        if hostname not in registry_clients:
+            console.debug(f"Checking credentials for registry: {hostname}")
+            try:
+                check_credentials(hostname)
+            except CredentialsExpiredError:
+                console.fatal(f"Credentials for {hostname} have expired.")
+                raise
+
+            # Initialize client for this hostname (will load stored credentials)
+            registry_clients[hostname] = OrasClient(hostname=hostname)
+            console.debug(f"Initialized OrasClient for {hostname}")
+
+    # Pull and materialize each image
+    pulled_images: dict[str, str] = {}  # Track ref -> tar_path for deduplication
+    failed_pulls: list[tuple[str, Exception]] = []
+
+    for ref in discovered_refs:
+        if ref in pulled_images:
+            # Already pulled this exact ref (deduplicated)
+            continue
+
+        hostname = extract_hostname(ref)
+        oras_client = registry_clients[hostname]
+
+        try:
+            # Create a safe deterministic filename from the image ref
+            # nginx:latest -> nginx_latest.tar
+            # public.ecr.aws/org/repo:1.0 -> public_ecr_aws_org_repo_1_0.tar
+            safe_filename = (
+                ref.replace("/", "_").replace(":", "_").replace(".", "_") + ".tar"
+            )
+            image_tar_path = images_dir / safe_filename
+
+            console.info(f"Pulling image: {ref}")
+
+            # Get the manifest (handles both single-arch and multi-arch)
+            manifest = oras_client.get_manifest(ref)
+
+            # Create OCI image layout tar with all blobs
+            _create_oci_image_layout_tar(ref, manifest, oras_client, str(image_tar_path))
+
+            console.info(f"Pulled and materialized: {ref} → {safe_filename}")
+            pulled_images[ref] = str(image_tar_path)
+
+        except (OciRegistryError, CredentialsExpiredError) as e:
+            console.warning(f"Failed to pull image {ref}: {e}")
+            failed_pulls.append((ref, e))
+        except Exception as e:  # noqa: BLE001
+            console.warning(f"Unexpected error pulling image {ref}: {e}")
+            failed_pulls.append((ref, e))
+
+    # If any pulls failed, abort the entire package operation
+    if failed_pulls:
+        msg = f"Failed to pull {len(failed_pulls)} image(s): "
+        refs_str = ", ".join(ref for ref, _ in failed_pulls)
+        console.fatal(f"{msg}{refs_str}")
+        raise OciRegistryError(msg + refs_str)
+
+    console.info(f"Successfully pulled and materialized {len(pulled_images)} unique image(s)")
 
 
 def _add_component_to_bundle(  # noqa: PLR0913
