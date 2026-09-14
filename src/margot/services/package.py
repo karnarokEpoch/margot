@@ -1133,6 +1133,9 @@ def _create_bundle(  # noqa: PLR0913
         output_override: Override output DIRECTORY (or None for default .dist/<version>/).
                         The bundle filename is always <id>-<version>.tgz and is not overridable.
         include_images: Whether to discover and include container images (default True).
+        runtime: Container daemon lookup strategy: 'auto' (default, probe Podman → Docker),
+                'podman' (Podman only), 'docker' (Docker only), or 'none' (registry-only).
+                Only meaningful when include_images=True.
         platforms: List of platforms to include (e.g. ['linux/amd64', 'linux/arm64']).
                   Empty or None means all platforms.
 
@@ -1205,6 +1208,8 @@ def _create_bundle(  # noqa: PLR0913
                         build_dir,
                         meta,
                         component_versions,
+                        runtime,
+                        platforms=platforms,
                     )
                 except (CredentialsExpiredError, OciRegistryError):
                     # Image pull failed; clean up staging and re-raise
