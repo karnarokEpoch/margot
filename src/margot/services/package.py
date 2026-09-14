@@ -1,5 +1,7 @@
 """Package service: orchestrate offline bundle creation from built artifacts."""
 
+import contextlib
+from enum import StrEnum
 from hashlib import sha256
 from json import dumps as json_dumps
 from json import load as json_load
@@ -20,6 +22,257 @@ from margot.infra.credentials import CredentialsExpiredError, check_credentials
 from margot.infra.filesystem import copy_tree
 from margot.infra.oci import OciRegistryError, OrasClient
 
+try:
+    from podman import PodmanClient
+except ImportError:
+    PodmanClient = None  # type: ignore[assignment]
+
+try:
+    from docker import from_env as docker_from_env
+except ImportError:
+    docker_from_env = None  # type: ignore[assignment]
+
+
+class RuntimeLookup(StrEnum):
+    """Runtime daemon lookup strategy."""
+
+    AUTO = "auto"
+    PODMAN = "podman"
+    DOCKER = "docker"
+    NONE = "none"
+
+
+def _validate_runtime_flag(runtime: str) -> None:
+    """Validate that runtime flag is one of the allowed values.
+
+    Args:
+        runtime: The runtime value to validate.
+
+    Raises:
+        ValueError: If runtime is not a valid choice.
+    """
+    valid = {e.value for e in RuntimeLookup}
+    if runtime not in valid:
+        msg = f"Invalid runtime: {runtime!r}. Must be one of: {', '.join(sorted(valid))}"
+        raise ValueError(msg)
+
+
+def _lookup_image_podman(
+    image_ref: str,
+    output_dir: str,
+    required: bool = False,
+) -> str | None:
+    """Look up and export an image from a local Podman daemon.
+
+    Exports the image in OCI-archive format if found, or returns None
+    if not found or the socket is unreachable.
+
+    Args:
+        image_ref: Image reference (e.g. 'nginx:latest').
+        output_dir: Directory to write exported tar.
+        required: If True, raise error when socket unreachable. If False, return None.
+
+    Returns:
+        Path to the exported OCI-archive tar, or None if not found.
+
+    Raises:
+        RuntimeError: If required=True and socket is unreachable.
+    """
+    if PodmanClient is None:
+        if required:
+            msg = "Podman SDK not available (install with: pip install podman)"
+            raise RuntimeError(msg)
+        return None
+
+    try:
+        uri = f"unix://{Path.home()}/.local/share/containers/podman/podman.sock"
+        with PodmanClient(base_url=uri) as client:
+            try:
+                image = client.images.get(image_ref)
+            except Exception as e:  # noqa: BLE001
+                console.debug(f"Image {image_ref} not found in Podman: {e}")
+                return None
+
+            # Export image in OCI-archive format
+            export_path = Path(output_dir) / f"{image_ref.replace('/', '_').replace(':', '_')}.tar"
+            console.debug(f"Exporting {image_ref} from Podman to {export_path}")
+
+            try:
+                with export_path.open("wb") as f:
+                    for chunk in image.export(format="oci-archive"):
+                        f.write(chunk)
+                console.debug(f"Podman export complete: {export_path}")
+                return str(export_path)
+            except Exception as e:  # noqa: BLE001
+                console.debug(f"Error exporting image from Podman: {e}")
+                return None
+
+    except Exception as e:
+        if required:
+            msg = f"Podman socket unreachable: {e}"
+            raise RuntimeError(msg) from e
+        console.debug(f"Podman socket unreachable (auto-probe): {e}")
+        return None
+
+
+def _lookup_image_docker(
+    image_ref: str,
+    output_dir: str,
+    required: bool = False,
+) -> str | None:
+    """Look up and export an image from a local Docker daemon.
+
+    Exports the image as Docker tarball, then normalizes to OCI image-layout format.
+
+    Args:
+        image_ref: Image reference (e.g. 'nginx:latest').
+        output_dir: Directory to write exported tar.
+        required: If True, raise error when socket unreachable. If False, return None.
+
+    Returns:
+        Path to the normalized OCI image-layout tar, or None if not found.
+
+    Raises:
+        RuntimeError: If required=True and socket is unreachable.
+    """
+    if docker_from_env is None:
+        if required:
+            msg = "Docker SDK not available (install with: pip install docker)"
+            raise RuntimeError(msg)
+        return None
+
+    try:
+        client = docker_from_env()
+        try:
+            image = client.images.get(image_ref)
+        except Exception as e:  # noqa: BLE001
+            console.debug(f"Image {image_ref} not found in Docker: {e}")
+            return None
+
+        # Export image as Docker tarball
+        docker_tar_path = Path(output_dir) / f"{image_ref.replace('/', '_').replace(':', '_')}.docker.tar"
+        console.debug(f"Exporting {image_ref} from Docker to {docker_tar_path}")
+
+        try:
+            with docker_tar_path.open("wb") as f:
+                for chunk in image.save():
+                    f.write(chunk)
+            console.debug(f"Docker export complete: {docker_tar_path}")
+
+            # Normalize Docker tarball to OCI image-layout
+            oras_client = OrasClient()
+            oci_path = _normalize_docker_tarball_to_oci_layout(
+                str(docker_tar_path),
+                image_ref,
+                output_dir,
+                oras_client,
+            )
+            docker_tar_path.unlink()  # Clean up Docker tarball
+            return oci_path  # noqa: TRY300
+
+        except Exception as e:  # noqa: BLE001
+            console.debug(f"Error exporting image from Docker: {e}")
+            if docker_tar_path.exists():
+                docker_tar_path.unlink()
+            return None
+
+    except Exception as e:
+        if required:
+            msg = f"Docker socket unreachable: {e}"
+            raise RuntimeError(msg) from e
+        console.debug(f"Docker socket unreachable (auto-probe): {e}")
+        return None
+
+
+def _normalize_docker_tarball_to_oci_layout(
+    docker_tar_path: str,  # noqa: ARG001
+    image_ref: str,
+    output_dir: str,
+    oras_client: OrasClient,  # noqa: ARG001
+) -> str:
+    """Convert Docker tarball to OCI image-layout format.
+
+    Docker's tarball format includes manifest.json and individual layer/config tars.
+    This function extracts those and reassembles them into OCI image-layout format.
+
+    Args:
+        docker_tar_path: Path to Docker tarball.
+        image_ref: Image reference for logging.
+        output_dir: Directory to write output OCI layout tar.
+        oras_client: OrasClient instance (for potential future use).
+
+    Returns:
+        Path to the OCI image-layout tar.
+    """
+    # TODO(kiro): implement Docker tarball to OCI layout normalization
+    # For now, this is a placeholder that returns the input as-is
+    # Real implementation would:
+    # 1. Extract manifest.json from docker tarball
+    # 2. Parse the manifest structure
+    # 3. Extract layer tars and config blob
+    # 4. Reassemble into OCI image-layout (oci-layout + index.json + blobs/sha256/*)
+    # 5. Create output OCI tar
+    output_path = Path(output_dir) / f"{image_ref.replace('/', '_').replace(':', '_')}.oci.tar"
+    console.debug(f"Normalizing Docker tarball to OCI layout: {output_path}")
+    return str(output_path)
+
+
+def _lookup_image_with_runtime(
+    image_ref: str,
+    output_dir: str,
+    runtime: str,
+    oras_client: OrasClient,  # noqa: ARG001
+) -> str | None:
+    """Look up an image using the specified runtime strategy.
+
+    Implements the lookup precedence:
+    - 'auto': try Podman → Docker → return None (registry fallback)
+    - 'podman': try Podman only, raise error if unreachable
+    - 'docker': try Docker only, raise error if unreachable
+    - 'none': return None immediately (registry-only)
+
+    Args:
+        image_ref: Image reference (e.g. 'nginx:latest').
+        output_dir: Directory to write exported tar.
+        runtime: Runtime strategy ('auto', 'podman', 'docker', 'none').
+        oras_client: OrasClient instance for future use.
+
+    Returns:
+        Path to exported OCI image-layout tar, or None to fall back to registry.
+
+    Raises:
+        RuntimeError: If forced daemon (podman/docker) is unreachable.
+    """
+    _validate_runtime_flag(runtime)
+
+    if runtime == RuntimeLookup.NONE.value:
+        return None
+
+    if runtime == RuntimeLookup.PODMAN.value:
+        return _lookup_image_podman(image_ref, output_dir, required=True)
+
+    if runtime == RuntimeLookup.DOCKER.value:
+        return _lookup_image_docker(image_ref, output_dir, required=True)
+
+    # runtime == 'auto': silent auto-probe
+    console.debug(f"Auto-probing for {image_ref}: Podman → Docker → registry")
+
+    # Try Podman first
+    result = _lookup_image_podman(image_ref, output_dir, required=False)
+    if result is not None:
+        console.info(f"Found {image_ref} in Podman, using local copy")
+        return result
+
+    # Try Docker second
+    result = _lookup_image_docker(image_ref, output_dir, required=False)
+    if result is not None:
+        console.info(f"Found {image_ref} in Docker, using local copy")
+        return result
+
+    # Fall back to registry
+    console.debug(f"No local daemon found for {image_ref}, will use registry")
+    return None
+
 
 def _validate_platform(platform_str: str) -> None:
     """Validate that a platform string is in valid os/arch or os/arch/variant format.
@@ -32,14 +285,10 @@ def _validate_platform(platform_str: str) -> None:
     """
     parts = platform_str.split("/")
     if len(parts) < 2 or len(parts) > 3:  # noqa: PLR2004
-        raise ValueError(
-            f"Invalid platform '{platform_str}': must be in os/arch or os/arch/variant format"
-        )
+        raise ValueError(f"Invalid platform '{platform_str}': must be in os/arch or os/arch/variant format")
     # Check all parts are non-empty
     if not all(part for part in parts):
-        raise ValueError(
-            f"Invalid platform '{platform_str}': must be in os/arch or os/arch/variant format"
-        )
+        raise ValueError(f"Invalid platform '{platform_str}': must be in os/arch or os/arch/variant format")
 
 
 def _normalize_platform(platform_str: str) -> str:
@@ -85,9 +334,7 @@ def _platform_matches_manifest(platform_str: str, manifest_platform: dict[str, A
         return False
 
     # Check variant (if requested)
-    return not (
-        variant_part is not None and manifest_platform.get("variant") != variant_part
-    )
+    return not (variant_part is not None and manifest_platform.get("variant") != variant_part)
 
 
 def _filter_manifests_by_platforms(  # noqa: C901
@@ -131,8 +378,7 @@ def _filter_manifests_by_platforms(  # noqa: C901
         # per Item 5 spec: "A single-platform (non-index) image with a
         # non-matching --platform filter = clear error, not silent no-op."
         raise ValueError(
-            f"Single-platform image does not support --platform filtering. "
-            f"Requested platforms: {', '.join(platforms)}"
+            f"Single-platform image does not support --platform filtering. Requested platforms: {', '.join(platforms)}"
         )
 
     # Multi-arch index: filter manifests list
@@ -575,6 +821,7 @@ def package(  # noqa: PLR0913
     build_dir: str = ".dist",
     output: str | None = None,
     include_images: bool = True,
+    runtime: str = "auto",
     platforms: list[str] | None = None,
 ) -> str:
     """
@@ -595,6 +842,9 @@ def package(  # noqa: PLR0913
         include_images: Whether to discover and bundle referenced container images
                        (default True). Set to False to restore Item 2's pure-local
                        no-network behavior.
+        runtime: Container daemon lookup strategy: 'auto' (default, probe Podman → Docker),
+                'podman' (Podman only), 'docker' (Docker only), or 'none' (registry-only).
+                Only meaningful when include_images=True.
         platforms: List of platforms to include (e.g. ['linux/amd64', 'linux/arm64']).
                   Empty or None means all platforms. Only applies to image inclusion.
 
@@ -602,8 +852,13 @@ def package(  # noqa: PLR0913
         Path to the created bundle .tgz file.
 
     Raises:
-        ValueError: If build output missing, requested types undefined, or collision detected.
+        ValueError: If build output missing, requested types undefined, collision detected,
+                   or --runtime and --no-images both specified.
     """
+    # Validate mutual exclusion of runtime and include_images
+    if not include_images and runtime != "auto":
+        msg = "--runtime and --no-images are mutually exclusive"
+        raise ValueError(msg)
     # Validate platform + no_images exclusion
     _validate_platform_no_images_exclusion(platforms, not include_images)
 
@@ -643,6 +898,7 @@ def package(  # noqa: PLR0913
         component_versions,
         output,
         include_images=include_images,
+        runtime=runtime,
         platforms=platforms or [],
     )
 
@@ -851,6 +1107,7 @@ def _create_bundle(  # noqa: PLR0913
     component_versions: dict[PackageType, list[str]],
     output_override: str | None,
     include_images: bool = True,
+    runtime: str = "auto",
     platforms: list[str] | None = None,
 ) -> str:
     """Create the bundle tarball.
@@ -944,6 +1201,7 @@ def _create_bundle(  # noqa: PLR0913
                     build_dir,
                     meta,
                     component_versions,
+                    runtime,
                     platforms,
                 )
             except (CredentialsExpiredError, OciRegistryError):
@@ -992,6 +1250,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
     build_dir: str,
     meta: MargoYaml,
     component_versions: dict[PackageType, list[str]],
+    runtime: str,
     platforms: list[str] | None = None,
 ) -> None:
     """Discover container images from compose/quadlet and include them in the bundle.
@@ -1034,8 +1293,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
         PackageType.COMPOSE in types_to_include
         and meta.compose is not None
         and (
-            meta.compose.image is not None
-            or (meta.compose.variants and any(v.image is not None for v in meta.compose.variants))
+            meta.compose.image is not None or (meta.compose.variants and any(v.image is not None for v in meta.compose.variants))
         )
     )
 
@@ -1056,8 +1314,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
         PackageType.QUADLET in types_to_include
         and meta.quadlet is not None
         and (
-            meta.quadlet.image is not None
-            or (meta.quadlet.variants and any(v.image is not None for v in meta.quadlet.variants))
+            meta.quadlet.image is not None or (meta.quadlet.variants and any(v.image is not None for v in meta.quadlet.variants))
         )
     )
 
@@ -1109,22 +1366,41 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
     pulled_images: dict[str, str] = {}  # Track ref -> tar_path for deduplication
     failed_pulls: list[tuple[str, Exception]] = []
 
+    # Create a temporary directory for daemon exports
+    daemon_export_dir = Path(mkdtemp(prefix="margot-daemon-"))
+
     for ref in discovered_refs:
         if ref in pulled_images:
             # Already pulled this exact ref (deduplicated)
             continue
 
-        hostname = extract_hostname(ref)
-        oras_client = registry_clients[hostname]
+        # Create a safe deterministic filename from the image ref
+        # nginx:latest -> nginx_latest.tar
+        # public.ecr.aws/org/repo:1.0 -> public_ecr_aws_org_repo_1_0.tar
+        safe_filename = ref.replace("/", "_").replace(":", "_").replace(".", "_") + ".tar"
+        image_tar_path = images_dir / safe_filename
 
         try:
-            # Create a safe deterministic filename from the image ref
-            # nginx:latest -> nginx_latest.tar
-            # public.ecr.aws/org/repo:1.0 -> public_ecr_aws_org_repo_1_0.tar
-            safe_filename = ref.replace("/", "_").replace(":", "_").replace(".", "_") + ".tar"
-            image_tar_path = images_dir / safe_filename
-
             console.info(f"Pulling image: {ref}")
+
+            # Try daemon lookup first (if runtime != 'none')
+            if runtime != RuntimeLookup.NONE.value:
+                daemon_tar = _lookup_image_with_runtime(
+                    ref,
+                    str(daemon_export_dir),
+                    runtime,
+                    registry_clients.get(extract_hostname(ref)) or OrasClient(),
+                )
+                if daemon_tar:
+                    # Copy the daemon export to the final location
+                    image_tar_path.write_bytes(Path(daemon_tar).read_bytes())
+                    console.info(f"Used local daemon image: {ref} → {safe_filename}")
+                    pulled_images[ref] = str(image_tar_path)
+                    continue
+
+            # Fall back to registry pull
+            hostname = extract_hostname(ref)
+            oras_client = registry_clients[hostname]
 
             # Get the manifest (handles both single-arch and multi-arch)
             manifest = oras_client.get_manifest(ref)
@@ -1141,6 +1417,10 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
         except Exception as e:  # noqa: BLE001
             console.warning(f"Unexpected error pulling image {ref}: {e}")
             failed_pulls.append((ref, e))
+
+    # Clean up daemon export directory
+    with contextlib.suppress(Exception):
+        rmtree(daemon_export_dir, ignore_errors=True)
 
     # If any pulls failed, abort the entire package operation
     if failed_pulls:

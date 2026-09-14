@@ -41,6 +41,16 @@ def package_cmd(  # noqa: PLR0913
             "fully offline/no-network behavior (Item 2 compatible).",
         ),
     ] = False,
+    runtime: Annotated[
+        str,
+        Option(
+            "--runtime",
+            help="Container daemon lookup strategy: 'podman' (Podman only), 'docker' (Docker only), "
+            "'none' (registry-only, skip daemon lookup), or 'auto' (default: probe Podman → Docker → registry). "
+            "When omitted, silently probes local container daemons before falling back to registry. "
+            "Forced values ('podman'/'docker') fail clearly if the daemon is unreachable.",
+        ),
+    ] = "auto",
     platform: Annotated[
         list[str] | None,
         Option(
@@ -53,6 +63,11 @@ def package_cmd(  # noqa: PLR0913
 ) -> None:
     """Create offline bundle from built artifacts."""
     try:
+        # Validate runtime and --no-images mutual exclusion
+        if no_images and runtime != "auto":
+            msg = "--runtime and --no-images are mutually exclusive"
+            console.fatal(msg)
+
         # Determine package type
         if not t:
             # No explicit type: bundle all found types
@@ -62,9 +77,7 @@ def package_cmd(  # noqa: PLR0913
             valid_types = ("margo", "compose", "quadlet", "bundle")
             for type_str in t:
                 if type_str not in valid_types:
-                    console.fatal(
-                        f"invalid --type '{type_str}'. Must be one of: margo, compose, quadlet, bundle"
-                    )
+                    console.fatal(f"invalid --type '{type_str}'. Must be one of: margo, compose, quadlet, bundle")
 
             if len(t) == 1 and t[0] == "bundle":
                 package_type = PackageType.BUNDLE
@@ -84,6 +97,7 @@ def package_cmd(  # noqa: PLR0913
             build_dir=build_dir,
             output=output,
             include_images=not no_images,
+            runtime=runtime,
             platforms=platform,
         )
 
