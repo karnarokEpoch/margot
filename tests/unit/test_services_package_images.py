@@ -378,6 +378,7 @@ services:
             project_dir=str(tmp_path),
             build_dir=str(build_dir),
             include_images=True,
+            runtime="none",
         )
 
         # Extract and check structure
@@ -495,6 +496,7 @@ class TestImagePullErrors:
                 str(build_dir),
                 mock_package_metadata_with_image_config,
                 component_versions,
+                "none",
             )
 
     def test_discover_and_include_images_pull_failure_fatal(
@@ -548,6 +550,7 @@ class TestImagePullErrors:
                 str(build_dir),
                 mock_package_metadata_with_image_config,
                 component_versions,
+                "none",
             )
 
     def test_has_image_configuration_no_images(self, mock_package_metadata):
