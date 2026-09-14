@@ -6,6 +6,7 @@ offline deployment in disconnected environments.
 ```
 margot package [-t margo|compose|quadlet] [--project-dir PATH]
                [--build-dir DIR] [--output PATH] [--no-images]
+               [--platform os/arch ...]
 ```
 
 !!! warning
@@ -29,6 +30,7 @@ it fails and tells you to run `margot build` first.
 | `--build-dir` | `.dist` | Directory containing built artifacts. |
 | `--output` | `.dist/<version>/<id>-<version>.tgz` | Override the output bundle path. |
 | `--no-images` | off | Skip image retrieval. No registry access, no `images/` folder. Use this for fully offline/no-network packaging. |
+| `--platform` | all platforms | Filter bundled images to specific platform(s), in `os/arch` or `os/arch/variant` format (e.g. `linux/amd64`, `linux/arm/v7`). Repeatable. Default pulls all platforms in a multi-arch image index. Cannot be combined with `--no-images`. |
 
 ## What it does
 
@@ -63,12 +65,38 @@ For each eligible image reference:
    client.
 3. Duplicate image references across components are deduplicated — each distinct reference
    is pulled once.
-4. The image blobs are assembled into an OCI image-layout tar archive
+4. If `--platform` is specified, the image index is filtered to only the requested
+   platform(s); single-platform images cannot be filtered and raise a clear error if
+   `--platform` is used with a non-matching platform.
+5. The image blobs are assembled into an OCI image-layout tar archive
    (`oci-layout` + `index.json` + `blobs/sha256/...`) under `images/` in the bundle.
-5. Both single-manifest images and multi-platform image indexes are supported; by default
-   all advertised platforms are included.
+6. Both single-manifest images and multi-platform image indexes are supported. By default,
+   all advertised platforms are included; use `--platform` to narrow to specific
+   platform(s).
 
-Runtime lookup and per-platform filtering are not currently configurable.
+### Platform filtering
+
+By default, `--platform` is omitted and all platforms in a multi-arch image index are
+pulled and saved.
+
+Use `--platform` to narrow image saves to specific platform(s):
+
+```bash
+# Pull only linux/amd64 and linux/arm64 images
+margot package --platform linux/amd64 --platform linux/arm64
+```
+
+Platform names follow the OCI standard: `os/arch` or `os/arch/variant` (e.g. `linux/arm/v7`).
+
+If a requested platform is not present in an image's index, `package` fails with a clear
+error naming both the requested platform(s) and the platform(s) actually available in the
+image.
+
+Single-platform (non-index) images cannot be filtered with `--platform`; if `--platform`
+is used and an image is single-platform, `package` fails with a clear error.
+
+`--platform` cannot be combined with `--no-images` (nothing to filter); `package` fails
+with a clear error if both are set.
 
 ## Archive format
 
@@ -197,7 +225,7 @@ com-example-nginx-1.0.0.tgz
         └── nginx-1.0.0.tgz
 ```
 
-Bundle without image retrieval (fully offline/no-network):
+Bundle only without image retrieval (fully offline/no-network):
 
 ```bash
 margot build
@@ -208,6 +236,13 @@ Bundle only a specific component type:
 
 ```bash
 margot package -t compose
+```
+
+Bundle with platform filtering (e.g. only linux/amd64 and linux/arm64):
+
+```bash
+margot build
+margot package --platform linux/amd64 --platform linux/arm64
 ```
 
 Override the output path:
