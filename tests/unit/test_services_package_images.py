@@ -24,6 +24,31 @@ def mock_package_metadata(mocker: Any):
     return mock_meta
 
 
+@fixture
+def mock_package_metadata_with_image_config(mocker: Any):
+    """Mock MargoYaml loader with image configuration enabled."""
+    mock_meta = mocker.MagicMock()
+    mock_meta.name = "testapp"
+    mock_meta.version = "1.0.0"
+    mock_meta.id = "com-test-app"
+    mock_meta.directory = "margo"
+    mock_meta.repository = "public.ecr.aws/g2n4p2m7/margo"
+
+    # Set up compose with image configuration
+    mock_compose = mocker.MagicMock()
+    mock_compose.version = "1.0.0"  # Compose version
+    mock_compose.repository = None  # Use global repo
+    mock_compose.image = mocker.MagicMock()
+    mock_compose.image.search = "test:1.0.0"
+    mock_compose.image.replace = "public.ecr.aws/g2n4p2m7/test:1.0.0"
+    mock_compose.variants = ()
+    mock_meta.compose = mock_compose
+    mock_meta.quadlet = None
+
+    mocker.patch("margot.services.package.load_margo_yaml", return_value=mock_meta)
+    return mock_meta
+
+
 class TestDiscoverImageReferencesCompose:
     """Tests for _discover_image_references_compose()."""
 
@@ -328,13 +353,18 @@ services:
         mock_discover_quadlet.assert_not_called()
         assert output_path.endswith(".tgz")
 
-    def test_bundle_structure_with_images_folder(self, tmp_path, mocker: Any, mock_package_metadata):
-        """Bundle should include images/ folder when include_images=True."""
+    def test_bundle_structure_with_images_folder(self, tmp_path, mocker: Any, mock_package_metadata_with_image_config):
+        """Bundle should include images/ folder when include_images=True and image config exists."""
         build_dir = tmp_path / ".dist"
         version_dir = build_dir / "1.0.0"
         margo_dir = version_dir / "margo"
         margo_dir.mkdir(parents=True)
         (margo_dir / "app.yaml").write_text("kind: ApplicationDescription")
+
+        # Create a mock compose tarball for discovery
+        compose_tgz = version_dir / "testapp-1.0.0.tgz"
+        with tarfile.open(compose_tgz, "w:gz") as tar:
+            pass  # Empty tarball
 
         # Mock no images discovered (simpler for this test)
         mocker.patch("margot.services.package._discover_image_references_compose", return_value=[])
@@ -354,8 +384,8 @@ services:
         with tarfile.open(output_path, "r:gz") as tar:
             tar.extractall(extract_dir, filter="data")
 
-        # Images folder should exist (even if empty since no images discovered)
-        assert (extract_dir / f"{mock_package_metadata.id}-1.0.0" / "images").exists()
+        # Images folder should exist (even if empty since no images discovered) when image config exists
+        assert (extract_dir / f"{mock_package_metadata_with_image_config.id}-1.0.0" / "images").exists()
 
     def test_bundle_no_images_folder_with_no_images_flag(
         self, tmp_path, mocker: Any, mock_package_metadata
@@ -382,4 +412,37 @@ services:
             tar.extractall(extract_dir, filter="data")
 
         # Images folder should NOT exist
+        assert not (extract_dir / f"{mock_package_metadata.id}-1.0.0" / "images").exists()
+
+    def test_bundle_no_images_folder_without_image_configuration(
+        self, tmp_path, mocker: Any, mock_package_metadata
+    ):
+        """Bundle should NOT have images/ folder when no image configuration exists.
+
+        Regression test for Sprint 9: default package must preserve Item 2's pure archive
+        behavior for components without image configuration. No image configuration means
+        no image discovery, no credentials, no registry calls, and no images/ directory.
+        """
+        build_dir = tmp_path / ".dist"
+        version_dir = build_dir / "1.0.0"
+        margo_dir = version_dir / "margo"
+        margo_dir.mkdir(parents=True)
+        (margo_dir / "app.yaml").write_text("kind: ApplicationDescription")
+
+        # include_images=True (default on), but NO image configuration in margo.yaml
+        output_path = package_service.package(
+            PackageType.BUNDLE,
+            project_dir=str(tmp_path),
+            build_dir=str(build_dir),
+            include_images=True,  # default-on, but should be skipped without config
+        )
+
+        # Extract and check structure
+        assert output_path.endswith(".tgz")
+        extract_dir = tmp_path / "extracted"
+        extract_dir.mkdir()
+        with tarfile.open(output_path, "r:gz") as tar:
+            tar.extractall(extract_dir, filter="data")
+
+        # Images folder should NOT exist: no image configuration means no image discovery
         assert not (extract_dir / f"{mock_package_metadata.id}-1.0.0" / "images").exists()

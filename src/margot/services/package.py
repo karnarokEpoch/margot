@@ -740,8 +740,8 @@ def _create_bundle(  # noqa: PLR0913
                 component_versions.get(PackageType.QUADLET, []),
             )
 
-        # 3. Discover and include container images if requested
-        if include_images:
+        # 3. Discover and include container images if requested and configured
+        if include_images and _has_image_configuration(meta, types_to_include):
             try:
                 _discover_and_include_images(
                     staging_root,
@@ -765,6 +765,31 @@ def _create_bundle(  # noqa: PLR0913
     return str(bundle_path)
 
 
+def _has_image_configuration(meta: MargoYaml, types_to_include: set[PackageType]) -> bool:
+    """Check if any component/variant has image configuration.
+
+    Args:
+        meta: Loaded margo.yaml.
+        types_to_include: Component types to check.
+
+    Returns:
+        True if any component or variant has image configuration.
+    """
+    if PackageType.COMPOSE in types_to_include and meta.compose is not None:
+        if meta.compose.image is not None:
+            return True
+        if meta.compose.variants and any(v.image is not None for v in meta.compose.variants):
+            return True
+
+    if PackageType.QUADLET in types_to_include and meta.quadlet is not None:
+        if meta.quadlet.image is not None:
+            return True
+        if meta.quadlet.variants and any(v.image is not None for v in meta.quadlet.variants):
+            return True
+
+    return False
+
+
 def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0915
     staging_root: Path,
     types_to_include: set[PackageType],
@@ -773,6 +798,10 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0915
     component_versions: dict[PackageType, list[str]],
 ) -> None:
     """Discover container images from compose/quadlet and include them in the bundle.
+
+    Only processes components/variants that have image configuration. If no image
+    configuration exists, this function returns early without creating the images/
+    directory or making any registry calls.
 
     Reads built component archives, discovers image references, validates them,
     checks registry credentials, pulls manifests and layers, and saves each as
@@ -789,13 +818,28 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0915
         CredentialsExpiredError: If a registry credential has expired.
         OciRegistryError: If pulling an image fails.
     """
+    # Early exit if no image configuration exists anywhere
+    if not _has_image_configuration(meta, types_to_include):
+        console.debug("No image configuration found; skipping image discovery")
+        return
+
     images_dir = staging_root / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
     discovered_refs = set()  # Track unique refs to avoid duplicate pulls
 
-    # Discover images from compose components
-    if PackageType.COMPOSE in types_to_include and meta.compose is not None:
+    # Check if compose has image configuration
+    compose_has_image_config = (
+        PackageType.COMPOSE in types_to_include
+        and meta.compose is not None
+        and (
+            meta.compose.image is not None
+            or (meta.compose.variants and any(v.image is not None for v in meta.compose.variants))
+        )
+    )
+
+    # Discover images from compose components only if configured
+    if compose_has_image_config:
         for comp_version in component_versions.get(PackageType.COMPOSE, []):
             version_path = Path(build_dir) / comp_version
             for tgz in version_path.glob(f"{meta.name}-*.tgz"):
@@ -806,8 +850,18 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0915
                         discovered_refs.add(ref)
                         console.info(f"Found image reference: {ref}")
 
-    # Discover images from quadlet components
-    if PackageType.QUADLET in types_to_include and meta.quadlet is not None:
+    # Check if quadlet has image configuration
+    quadlet_has_image_config = (
+        PackageType.QUADLET in types_to_include
+        and meta.quadlet is not None
+        and (
+            meta.quadlet.image is not None
+            or (meta.quadlet.variants and any(v.image is not None for v in meta.quadlet.variants))
+        )
+    )
+
+    # Discover images from quadlet components only if configured
+    if quadlet_has_image_config:
         for quad_version in component_versions.get(PackageType.QUADLET, []):
             version_path = Path(build_dir) / quad_version
             for tgz in version_path.glob(f"{meta.name}-*.tgz"):
@@ -819,7 +873,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0915
                         console.info(f"Found image reference: {ref}")
 
     if not discovered_refs:
-        console.info("No container images referenced in components")
+        console.debug("No image references found in configured components")
         return
 
     # Validate and check credentials for all unique registries before pulling any images
