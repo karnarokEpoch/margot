@@ -160,4 +160,3 @@ class TestOrasClientManifestCache:
         result2 = client.get_manifest(uri2)
         assert result2 == manifest2
         assert result2["version"] == "2"
-
