@@ -117,16 +117,18 @@ class TestPullCLI:
 class TestPullCLIForce:
     """E2E tests for --force and --force-type CLI flags."""
 
-    def test_non_semver_uri_without_force_exits_1(self) -> None:
-        """Non-SemVer URI without --force should exit 1 with 'not valid SemVer' in output."""
+    def test_non_semver_uri_without_force_now_accepted(self) -> None:
+        """Non-SemVer URI without --force should now be accepted (Item 1 change)."""
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:latest"])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
+        # Should now proceed to credential/network checks rather than rejecting the tag
+        # Credentials error is expected since we're using a real URI without valid credentials
         assert result.exit_code == 1
-        assert "not valid SemVer" in plain
+        assert "Credentials" in plain or "expired" in plain or "not found" in plain.lower()
 
-    def test_non_semver_uri_with_force_exits_0(self, mocker: Any, tmp_path: Any) -> None:
-        """Non-SemVer URI with --force should exit 0 and show the warning message."""
+    def test_non_semver_uri_without_force_now_works(self, mocker: Any, tmp_path: Any) -> None:
+        """Non-SemVer URI without --force should now work (Item 1 change)."""
         pulled_file = str(tmp_path / "margo.yaml")
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_margo_manifest()
@@ -134,11 +136,12 @@ class TestPullCLIForce:
         mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
-        result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:latest", "--force"])
+        # Latest tag should work without --force now
+        result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:latest"])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
         assert result.exit_code == 0
-        assert "warning: --force is active" in plain
+        assert "Pulled:" in plain or "pulled" in plain.lower()
 
     def test_force_type_without_force_auto_enables_force(self, mocker: Any, tmp_path: Any) -> None:
         """--force-type without --force should exit 0 and warn that force was auto-enabled."""

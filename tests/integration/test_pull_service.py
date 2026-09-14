@@ -176,28 +176,33 @@ class TestPullArtifactForce:
     """Integration tests for force/force-type parameters in pull_artifact()."""
 
     def test_non_semver_tag_without_force_raises(self, mocker: Any, tmp_path: Any) -> None:
-        """Non-SemVer tag without --force should raise ValueError."""
-        mocker.patch("margot.services.pull.credentials.check_credentials")
-        mocker.patch("margot.services.pull.oci.OrasClient")
-
-        with raises(ValueError, match="not valid SemVer"):
-            pull_service.pull_artifact(
-                "public.ecr.aws/g2n4p2m7/margo:latest",
-                outdir=str(tmp_path),
-            )
-
-    def test_non_semver_tag_with_force_proceeds(self, mocker: Any, tmp_path: Any) -> None:
-        """Non-SemVer tag with force=True should proceed and call client.pull."""
+        """Legacy non-SemVer tags should now be accepted without --force (Item 1 change)."""
         mock_client = MagicMock()
         mock_client.get_manifest.return_value = _make_manifest()
         mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
         mocker.patch("margot.services.pull.credentials.check_credentials")
         mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
 
+        # This should NOT raise anymore — legacy non-SemVer tags are now allowed without force
+        pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0-legacy-manifest",
+            outdir=str(tmp_path),
+        )
+
+        mock_client.pull.assert_called_once()
+
+    def test_non_semver_tag_with_force_proceeds(self, mocker: Any, tmp_path: Any) -> None:
+        """Non-SemVer tag 'latest' should be accepted without force (Item 1 change)."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_manifest()
+        mock_client.pull.return_value = [str(tmp_path / "margo.yaml")]
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.oci.OrasClient", return_value=mock_client)
+
+        # 'latest' is not SemVer, but should be accepted now without force
         pull_service.pull_artifact(
             "public.ecr.aws/g2n4p2m7/margo:latest",
             outdir=str(tmp_path),
-            force=True,
         )
 
         mock_client.pull.assert_called_once()

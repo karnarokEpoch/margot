@@ -3,11 +3,12 @@
 from collections.abc import Iterable, Sequence
 
 from rich.markup import escape
-from typer import Option
+from typer import Argument, Option
 
 from margot import console
 from margot.domain.validation import Severity, ValidationFinding, VerifyResult, has_errors
 from margot.schemas import SCHEMA_A_SHORT_COMMIT
+from margot.services import remote as remote_service
 from margot.services import verify as verify_service
 from margot.validation.error_formatter import format_findings, summarize
 
@@ -24,32 +25,76 @@ STRICT_NO_OP = "--strict has no effect without --recommend or --only-recommend. 
 
 
 def verify_cmd(  # noqa: PLR0913
-    project_dir: str = Option(".", "--project-dir", help="Directory containing margo.yaml."),
+    uri: str | None = Argument(
+        None,
+        help="Optional OCI reference to a remote Margo artifact. "
+        "Mutually exclusive with --project-dir and --manifest.",
+    ),
+    project_dir: str | None = Option(
+        None,
+        "--project-dir",
+        help="Directory containing margo.yaml "
+        "(defaults to current directory if no URI).",
+    ),
     manifest: str | None = Option(None, "--manifest", help="Path to app.yaml or app.yaml.jinja."),
     schema: str | None = Option(None, "--schema", help="Override the vendored Margo spec schema."),
-    recommended_schema: str | None = Option(None, "--recommended-schema", help="Override the bundled margot recommended schema."),
+    recommended_schema: str | None = Option(
+        None, "--recommended-schema", help="Override the bundled margot recommended schema."
+    ),
     recommend: bool = Option(False, "--recommend", help="Also lint against the margot recommended schema."),
     strict: bool = Option(False, "--strict", help="Make any recommended-schema finding fail the run."),
     only_recommend: bool = Option(
-        False, "--only-recommend", help="Lint against the recommended schema only, skipping the Margo spec schema."
+        False,
+        "--only-recommend",
+        help="Lint against the recommended schema only, skipping the Margo spec schema.",
     ),
 ) -> None:
-    """Validate the Margo application description against the Margo spec schema."""
+    """Validate the Margo application description against the Margo spec schema.
+
+    Provide either a remote OCI reference as the first argument, or validate a local project
+    via --project-dir or --manifest. They are mutually exclusive.
+    """
+    # Mutual exclusion: URI vs local-mode flags
+    if uri is not None and (project_dir is not None or manifest is not None):
+        console.fatal(
+            "URI and --project-dir/--manifest are mutually exclusive "
+            "— describe or verify either a remote artifact or a local project, not both."
+        )
+
     if recommend and only_recommend:
         console.fatal(MUTUALLY_EXCLUSIVE)
     if strict and not (recommend or only_recommend):
         console.warning(STRICT_NO_OP)
 
     try:
-        result = verify_service.verify(
-            project_dir=project_dir,
-            manifest_path=manifest,
-            schema_path=schema,
-            recommended_schema_path=recommended_schema,
-            recommend=recommend,
-            strict=strict,
-            only_recommend=only_recommend,
-        )
+        if uri is not None:
+            # Remote mode: resolve the remote descriptor
+            remote_result = remote_service.resolve_remote_descriptor(uri)
+            try:
+                # Pass the pulled app.yaml as manifest path to verify
+                result = verify_service.verify(
+                    project_dir=remote_result.normalized_uri,  # Use URI for logging
+                    manifest_path=remote_result.app_yaml_path,
+                    schema_path=schema,
+                    recommended_schema_path=recommended_schema,
+                    recommend=recommend,
+                    strict=strict,
+                    only_recommend=only_recommend,
+                )
+            finally:
+                remote_result.temp_dir.cleanup()
+        else:
+            # Local mode: use provided or default project_dir
+            local_project_dir = project_dir or "."
+            result = verify_service.verify(
+                project_dir=local_project_dir,
+                manifest_path=manifest,
+                schema_path=schema,
+                recommended_schema_path=recommended_schema,
+                recommend=recommend,
+                strict=strict,
+                only_recommend=only_recommend,
+            )
     except ValueError as e:
         console.fatal(str(e))
     except Exception as e:  # noqa: BLE001

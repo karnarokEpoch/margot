@@ -15,7 +15,7 @@ from margot.domain.models import (
     PackageType,
     artifact_type_to_package_type,
 )
-from margot.domain.uri import extract_tag, validate_semver_tag
+from margot.domain.uri import extract_tag
 from margot.infra import credentials, oci
 
 _PAYLOAD_MEDIA_TYPES: dict[PackageType, str] = {
@@ -309,26 +309,25 @@ def pull_artifact(
     1. Normalize URI by stripping 'oci://' scheme if present.
     2. Validate URI (via domain/uri.py).
     3. Guard: force_type requires force.
-    4. SemVer gate: reject non-SemVer tags unless force=True.
-    5. Create outdir.
-    6. Fetch manifest.
-    7. Detect artifact type via the artifactType field; override with force_type if set.
-    8. If package_type is MARGO:
+    4. Create outdir.
+    5. Fetch manifest.
+    6. Detect artifact type via the artifactType field; override with force_type if set.
+    7. If package_type is MARGO:
        a. Pull root layers via client.pull().
        b. If recursive=True: locate app.yaml in pulled layers, extract component refs,
           and recursively pull each component into outdir/<component-name>/.
-    9. If package_type not in _PAYLOAD_MEDIA_TYPES: use client.pull() (unknown types).
-    10. Otherwise (compose/quadlet): own the layer loop.
-        a. Get target mediaType for this package_type.
-        b. Filter manifest layers by that mediaType.
-        c. Hard-fail if no matching layers found.
-        d. For each layer: resolve filename and download individually.
-    11. Return flat list of all written file paths (root + component paths in order).
+    8. If package_type not in _PAYLOAD_MEDIA_TYPES: use client.pull() (unknown types).
+    9. Otherwise (compose/quadlet): own the layer loop.
+       a. Get target mediaType for this package_type.
+       b. Filter manifest layers by that mediaType.
+       c. Hard-fail if no matching layers found.
+       d. For each layer: resolve filename and download individually.
+    10. Return flat list of all written file paths (root + component paths in order).
 
     Args:
         uri: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0 or oci://public.ecr.aws/g2n4p2m7/margo:1.0.0).
         outdir: Destination directory (created if needed).
-        force: Bypass SemVer gate and malicious annotation checks.
+        force: Bypass malicious annotation checks and unknown-type gate.
         force_type: Override detected artifact type interpretation.
         recursive: If True and artifact is margo, also pull declared components. No-op for other types.
 
@@ -337,7 +336,6 @@ def pull_artifact(
 
     Raises:
         ValueError: If URI is malformed.
-        ValueError: If tag is not valid SemVer and force=False.
         ValueError: If compose/quadlet artifact has no matching layers.
         ValueError: If artifact type is unknown and force=False.
         CredentialsExpiredError: If credentials for the registry have expired.
@@ -348,11 +346,6 @@ def pull_artifact(
 
     uri_domain.validate_uri(uri)
     console.info(f"URI validated: {uri}")
-
-    tag = extract_tag(uri)
-    if not validate_semver_tag(tag) and not force:
-        raise ValueError(f"Tag '{tag}' is not valid SemVer. Use --force to pull anyway.")
-    console.info(f"Tag '{tag}' is valid SemVer.")
 
     Path(outdir).mkdir(parents=True, exist_ok=True)
     console.info(f"Output directory ready: {outdir}")
