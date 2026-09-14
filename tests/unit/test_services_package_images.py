@@ -3,9 +3,12 @@
 import tarfile
 from typing import Any
 
-from pytest import fixture
+from pytest import fixture, raises
+from typer._click.exceptions import Exit
 
 from margot.domain.models import PackageType
+from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.oci import OciRegistryError
 from margot.services import package as package_service
 
 
@@ -446,3 +449,147 @@ services:
 
         # Images folder should NOT exist: no image configuration means no image discovery
         assert not (extract_dir / f"{mock_package_metadata.id}-1.0.0" / "images").exists()
+
+
+class TestImagePullErrors:
+    """Tests for error handling during image discovery/pull."""
+
+    def test_discover_and_include_images_credentials_expired(
+        self, tmp_path, mocker: Any, mock_package_metadata_with_image_config
+    ):
+        """Should handle CredentialsExpiredError appropriately and re-raise."""
+        staging_root = tmp_path / "staging"
+        staging_root.mkdir()
+
+        # Create mock build directory with tarball
+        build_dir = tmp_path / ".dist"
+        comp_version_dir = build_dir / "1.0.0"
+        comp_version_dir.mkdir(parents=True)
+
+        compose_tgz = comp_version_dir / "testapp-1.0.0.tgz"
+        with tarfile.open(compose_tgz, "w:gz"):
+            pass  # Empty tarball
+
+        # Mock image discovery to return a full image reference with registry
+        mocker.patch(
+            "margot.services.package._discover_image_references_compose",
+            return_value=["docker.io/library/nginx:latest"],
+        )
+
+        # Mock credential check to raise CredentialsExpiredError
+        mocker.patch(
+            "margot.services.package.check_credentials",
+            side_effect=CredentialsExpiredError("docker.io"),
+        )
+
+        # Mock console.fatal to raise Exit instead of doing real cleanup
+        mocker.patch("margot.services.package.console.fatal", side_effect=Exit(1))
+
+        component_versions = {PackageType.COMPOSE: ["1.0.0"]}
+
+        # The function should exit via console.fatal
+        with raises(Exit):
+            package_service._discover_and_include_images(
+                staging_root,
+                {PackageType.COMPOSE},
+                str(build_dir),
+                mock_package_metadata_with_image_config,
+                component_versions,
+            )
+
+    def test_discover_and_include_images_pull_failure_fatal(
+        self, tmp_path, mocker: Any, mock_package_metadata_with_image_config
+    ):
+        """Should report and raise when image pulls fail."""
+        staging_root = tmp_path / "staging"
+        staging_root.mkdir()
+
+        # Mock image discovery to return a reference
+        mocker.patch(
+            "margot.services.package._discover_image_references_compose",
+            return_value=["docker.io/library/nginx:latest"],
+        )
+
+        # Mock credential check to pass
+        mocker.patch("margot.services.package.check_credentials")
+
+        # Mock OrasClient initialization
+        mock_oras = mocker.MagicMock()
+        mocker.patch("margot.services.package.OrasClient", return_value=mock_oras)
+
+        # Mock manifest retrieval to fail
+        mock_oras.get_manifest.side_effect = OciRegistryError("connection refused")
+
+        component_versions = {PackageType.COMPOSE: ["1.0.0"]}
+
+        # Create a mock tarball for discovery
+        build_dir = tmp_path / ".dist"
+        comp_version_dir = build_dir / "1.0.0"
+        comp_version_dir.mkdir(parents=True)
+
+        compose_tgz = comp_version_dir / "testapp-1.0.0.tgz"
+        with tarfile.open(compose_tgz, "w:gz"):
+            pass  # Empty
+
+        # Mock discovery to still find images before the pull fails
+        mocker.patch(
+            "margot.services.package._discover_image_references_compose",
+            return_value=["docker.io/library/nginx:latest"],
+        )
+
+        # Mock console.fatal to raise Exit (since failed pulls call it)
+        mocker.patch("margot.services.package.console.fatal", side_effect=Exit(1))
+
+        # Should raise Exit via console.fatal (for failed pulls)
+        with raises(Exit):
+            package_service._discover_and_include_images(
+                staging_root,
+                {PackageType.COMPOSE},
+                str(build_dir),
+                mock_package_metadata_with_image_config,
+                component_versions,
+            )
+
+    def test_has_image_configuration_no_images(self, mock_package_metadata):
+        """Should return False when no image configuration exists."""
+        result = package_service._has_image_configuration(
+            mock_package_metadata,
+            {PackageType.MARGO},
+        )
+        assert result is False
+
+    def test_has_image_configuration_compose_image_set(
+        self, mock_package_metadata_with_image_config
+    ):
+        """Should return True when compose has image configuration."""
+        result = package_service._has_image_configuration(
+            mock_package_metadata_with_image_config,
+            {PackageType.COMPOSE},
+        )
+        assert result is True
+
+    def test_has_image_configuration_compose_variants_have_image(self, mocker: Any):
+        """Should return True when compose variants have image configuration."""
+        mock_meta = mocker.MagicMock()
+        mock_meta.compose = mocker.MagicMock()
+        mock_meta.compose.image = None  # No top-level image
+        mock_meta.compose.variants = [
+            mocker.MagicMock(image=mocker.MagicMock()),  # Variant has image
+        ]
+        mock_meta.quadlet = None
+
+        result = package_service._has_image_configuration(
+            mock_meta,
+            {PackageType.COMPOSE},
+        )
+        assert result is True
+
+    def test_has_image_configuration_false_when_type_not_included(
+        self, mock_package_metadata_with_image_config
+    ):
+        """Should return False when compose type is not in types_to_include."""
+        result = package_service._has_image_configuration(
+            mock_package_metadata_with_image_config,
+            {PackageType.MARGO},  # COMPOSE not included
+        )
+        assert result is False
