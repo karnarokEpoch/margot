@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
+from yaml import YAMLError, safe_load
 
 from margot import console
 from margot.domain import uri as uri_domain
@@ -227,11 +227,11 @@ def _pull_recursive_components(outdir: str, root_paths: list[str], force: bool) 
     # Load and parse app.yaml
     try:
         with Path(app_yaml_path).open(encoding="utf-8") as f:
-            app_doc = yaml.safe_load(f)
+            app_doc = safe_load(f)
         if not app_doc:
             console.warning("app.yaml is empty or unparseable; skipping component recursion.")
             return result
-    except (OSError, yaml.YAMLError) as e:
+    except (OSError, YAMLError) as e:
         console.warning(f"Failed to load app.yaml: {e}; skipping component recursion.")
         return result
 
