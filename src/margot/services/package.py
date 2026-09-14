@@ -444,8 +444,6 @@ def package(
     # If including images, check credentials first (before any network access)
     if include_images:
         console.info("Checking credentials before image discovery...")
-        # We'll check credentials per-registry once we discover unique image registries
-        # For now, this is just a placeholder for the future credential checking pass
 
     # Create the bundle
     bundle_path = _create_bundle(
@@ -558,9 +556,7 @@ def _verify_build_outputs_exist(
             version_path = Path(build_dir) / comp_version
             tarballs = list(version_path.glob(f"{meta.name}-*.tgz"))
             if not tarballs:
-                raise ValueError(
-                    f"Built compose artifact not found in {version_path}. Run 'margot build' first."
-                )
+                raise ValueError(f"Built compose artifact not found in {version_path}. Run 'margot build' first.")
 
     # Check quadlet: must be in its own version folder(s)
     if PackageType.QUADLET in types_to_include:
@@ -572,9 +568,7 @@ def _verify_build_outputs_exist(
             version_path = Path(build_dir) / quad_version
             tarballs = list(version_path.glob(f"{meta.name}-*.tgz"))
             if not tarballs:
-                raise ValueError(
-                    f"Built quadlet artifact not found in {version_path}. Run 'margot build' first."
-                )
+                raise ValueError(f"Built quadlet artifact not found in {version_path}. Run 'margot build' first.")
 
 
 def _check_for_collisions(
@@ -872,9 +866,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0915
             # Create a safe deterministic filename from the image ref
             # nginx:latest -> nginx_latest.tar
             # public.ecr.aws/org/repo:1.0 -> public_ecr_aws_org_repo_1_0.tar
-            safe_filename = (
-                ref.replace("/", "_").replace(":", "_").replace(".", "_") + ".tar"
-            )
+            safe_filename = ref.replace("/", "_").replace(":", "_").replace(".", "_") + ".tar"
             image_tar_path = images_dir / safe_filename
 
             console.info(f"Pulling image: {ref}")
