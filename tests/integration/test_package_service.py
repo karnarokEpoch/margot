@@ -401,18 +401,20 @@ quadlet:
             )
 
     def test_output_override_works(self, fake_project_with_all_components: Path) -> None:
-        """Should respect --output override path."""
+        """Should respect --output override as a DIRECTORY, with enforced filename."""
         project = fake_project_with_all_components
-        custom_output = project / "custom" / "bundle.tgz"
+        custom_output_dir = project / "custom"
 
         bundle_path = package_service.package(
             PackageType.MARGO,
             project_dir=str(project),
             build_dir=str(project / ".dist"),
-            output=str(custom_output),
+            output=str(custom_output_dir),
         )
 
-        assert bundle_path == str(custom_output)
+        # Bundle filename should be enforced: <id>-<version>.tgz
+        expected_bundle_path = custom_output_dir / "testapp-1.0.0.tgz"
+        assert bundle_path == str(expected_bundle_path)
         assert Path(bundle_path).exists()
 
 

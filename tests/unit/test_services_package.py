@@ -2,6 +2,7 @@
 
 from pytest import fixture, raises
 
+from margot import console
 from margot.domain.models import PackageType
 from margot.services import package as package_service
 
@@ -157,3 +158,162 @@ class TestResolveComponentVersions:
         })()
         result = package_service._resolve_component_versions(mock_component, PackageType.COMPOSE)
         assert result == []
+
+
+class TestCreateBundleOutputDirectory:
+    """Tests for _create_bundle output directory behavior (FIX A)."""
+
+    def test_output_override_is_directory_not_literal_path(self, tmp_path, mocker):
+        """--output should be treated as a DIRECTORY; filename is always enforced."""
+
+        # Setup mocks
+        mock_meta = mocker.MagicMock()
+        mock_meta.id = "com-test-app"
+        mock_meta.version = "1.0.0"
+
+        # Mock all helper functions to avoid actual I/O
+        mocker.patch("margot.services.package.load_margo_yaml", return_value=mock_meta)
+        mocker.patch("margot.services.package._has_image_configuration", return_value=False)
+        mocker.patch("margot.services.package._write_bundle_tarball")
+        mocker.patch("margot.services.package.copy_tree")
+
+        # Mock margo source directory
+        margo_src = tmp_path / ".dist" / "1.0.0" / "margo"
+        margo_src.mkdir(parents=True)
+        (margo_src / "app.yaml").write_text("test")
+
+        # Call _create_bundle with a directory-like output override
+        output_dir = tmp_path / "custom_output"
+        bundle_path = package_service._create_bundle(
+            mock_meta,
+            {package_service.PackageType.MARGO},
+            str(tmp_path / ".dist"),
+            "1.0.0",
+            {},
+            str(output_dir),
+            include_images=False,
+        )
+
+        # Verify the bundle path has the enforced filename, not the literal path
+        assert bundle_path == str(output_dir / "com-test-app-1.0.0.tgz")
+        assert output_dir.exists()
+
+    def test_default_output_still_uses_build_dir(self, tmp_path, mocker):
+        """Without --output, should use .dist/<version>/ by default."""
+
+        # Setup mocks
+        mock_meta = mocker.MagicMock()
+        mock_meta.id = "com-test-app"
+        mock_meta.version = "1.0.0"
+
+        mocker.patch("margot.services.package.load_margo_yaml", return_value=mock_meta)
+        mocker.patch("margot.services.package._has_image_configuration", return_value=False)
+        mocker.patch("margot.services.package._write_bundle_tarball")
+        mocker.patch("margot.services.package.copy_tree")
+
+        # Mock margo source directory
+        margo_src = tmp_path / ".dist" / "1.0.0" / "margo"
+        margo_src.mkdir(parents=True)
+        (margo_src / "app.yaml").write_text("test")
+
+        # Call without output override
+        bundle_path = package_service._create_bundle(
+            mock_meta,
+            {package_service.PackageType.MARGO},
+            str(tmp_path / ".dist"),
+            "1.0.0",
+            {},
+            None,  # No output override
+            include_images=False,
+        )
+
+        # Should be in .dist/1.0.0/
+        assert bundle_path == str(tmp_path / ".dist" / "1.0.0" / "com-test-app-1.0.0.tgz")
+
+
+class TestImageSkipMessage:
+    """Tests for FIX B: surface silent image-skip via console.info."""
+
+    def test_image_skip_message_emitted_when_no_config(self, tmp_path, mocker, capture_console, reset_console):
+        """When include_images=True but no image config exists, should emit info message."""
+
+        reset_console  # noqa: B018
+        console.set_verbose(True)  # Make info messages visible
+
+        # Setup mocks
+        mock_meta = mocker.MagicMock()
+        mock_meta.id = "com-test-app"
+        mock_meta.version = "1.0.0"
+        mock_meta.name = "testapp"
+        mock_meta.repository = "public.ecr.aws/g2n4p2m7/test"
+        mock_meta.compose = None
+        mock_meta.quadlet = None
+
+        mocker.patch("margot.services.package.load_margo_yaml", return_value=mock_meta)
+        mocker.patch("margot.services.package._write_bundle_tarball")
+        mocker.patch("margot.services.package.copy_tree")
+        mocker.patch("margot.services.package._add_component_to_bundle")
+        mocker.patch("margot.services.package._verify_build_outputs_exist")
+        mocker.patch("margot.services.package._check_for_collisions")
+        mocker.patch("margot.services.package._resolve_bundle_types", return_value={package_service.PackageType.MARGO})
+        mocker.patch("margot.services.package._resolve_component_versions_map", return_value={})
+
+        # Mock margo source
+        margo_src = tmp_path / ".dist" / "1.0.0" / "margo"
+        margo_src.mkdir(parents=True)
+        (margo_src / "app.yaml").write_text("test")
+
+        _out, err = capture_console
+
+        # Call package() with include_images=True but no image configuration
+        package_service.package(
+            package_service.PackageType.BUNDLE,
+            project_dir=str(tmp_path),
+            build_dir=str(tmp_path / ".dist"),
+            include_images=True,
+        )
+
+        err_text = err.getvalue()
+        assert "No image configuration found in components; skipping image inclusion." in err_text
+
+    def test_no_message_when_include_images_false(self, tmp_path, mocker, capture_console, reset_console):
+        """When include_images=False, should NOT emit the skip message."""
+
+        reset_console  # noqa: B018
+        console.set_verbose(True)
+
+        # Setup mocks
+        mock_meta = mocker.MagicMock()
+        mock_meta.id = "com-test-app"
+        mock_meta.version = "1.0.0"
+        mock_meta.name = "testapp"
+        mock_meta.repository = "public.ecr.aws/g2n4p2m7/test"
+        mock_meta.compose = None
+        mock_meta.quadlet = None
+
+        mocker.patch("margot.services.package.load_margo_yaml", return_value=mock_meta)
+        mocker.patch("margot.services.package._write_bundle_tarball")
+        mocker.patch("margot.services.package.copy_tree")
+        mocker.patch("margot.services.package._add_component_to_bundle")
+        mocker.patch("margot.services.package._verify_build_outputs_exist")
+        mocker.patch("margot.services.package._check_for_collisions")
+        mocker.patch("margot.services.package._resolve_bundle_types", return_value={package_service.PackageType.MARGO})
+        mocker.patch("margot.services.package._resolve_component_versions_map", return_value={})
+
+        # Mock margo source
+        margo_src = tmp_path / ".dist" / "1.0.0" / "margo"
+        margo_src.mkdir(parents=True)
+        (margo_src / "app.yaml").write_text("test")
+
+        _out, err = capture_console
+
+        # Call with include_images=False
+        package_service.package(
+            package_service.PackageType.BUNDLE,
+            project_dir=str(tmp_path),
+            build_dir=str(tmp_path / ".dist"),
+            include_images=False,
+        )
+
+        err_text = err.getvalue()
+        assert "No image configuration found in components; skipping image inclusion." not in err_text
