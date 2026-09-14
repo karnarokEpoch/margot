@@ -6,7 +6,7 @@ offline deployment in disconnected environments.
 ```
 margot package [-t margo|compose|quadlet] [--project-dir PATH]
                [--build-dir DIR] [--output PATH] [--no-images]
-               [--runtime podman|docker|none]
+               [--runtime podman|docker|none] [--platform os/arch ...]
 ```
 
 !!! warning
@@ -37,13 +37,14 @@ lookup.
 ## Flags
 
 | Flag | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `--type` / `-t` | bundle all found types | Component type to include: `margo`, `compose`, or `quadlet`. Repeatable — pass once per type to select a subset. Omit to bundle every type that was built. |
 | `--project-dir` | `.` | Project root directory (where `margo.yaml` lives). |
 | `--build-dir` | `.dist` | Directory containing built artifacts. |
 | `--output` | `.dist/<version>/<id>-<version>.tgz` | Override the output bundle path. |
 | `--no-images` | off | Skip image retrieval. No registry access, no `images/` folder. Use this for fully offline/no-network packaging. Mutually exclusive with `--runtime`. |
 | `--runtime` | `auto` | Container daemon lookup strategy (optional, for local images): `podman` (Podman only), `docker` (Docker only), `none` (registry-only, no daemon contact), or `auto` (default: silently probe Podman → Docker → registry). Only meaningful when `--no-images` is not passed. Forcing a daemon (`podman`/`docker`) fails with a clear error if unreachable; `auto` silently falls back to registry. |
+| `--platform` | all platforms | Filter bundled images to specific platform(s), in `os/arch` or `os/arch/variant` format (e.g. `linux/amd64`, `linux/arm/v7`). Repeatable. Default pulls all platforms in a multi-arch image index. Cannot be combined with `--no-images`. |
 
 ## What it does
 
@@ -58,6 +59,7 @@ credentials for any eligible images.
 
 When `--runtime` is not `none`, `package` checks local container daemons first before
 pulling from the registry:
+
 - **`--runtime auto` (default):** Silently probe Podman → Docker → registry. If a local
   daemon has the image, it's used; if not, falls back to registry without warning.
 - **`--runtime podman`:** Check Podman only, then registry. Fails with a clear error if
@@ -93,12 +95,36 @@ For each eligible image reference (when `--no-images` is not passed):
 
 4. **Deduplication:** Same image reference across multiple components is pulled once.
 
-5. **Multi-platform:** All platforms in an image index are saved (future: Item 5 adds
-   per-platform filtering).
+5. **Multi-platform:** All platforms in an image index are saved by default; use
+   `--platform` to narrow (see below).
 
 All images are materialized as OCI image-layout tars (`oci-layout` + `index.json` +
 `blobs/sha256/...`), regardless of source, keeping `images/` format-uniform and loadable
 via `podman load` or `docker load`.
+
+### Platform filtering
+
+By default, `--platform` is omitted and all platforms in a multi-arch image index are
+pulled and saved.
+
+Use `--platform` to narrow image saves to specific platform(s):
+
+```bash
+# Pull only linux/amd64 and linux/arm64 images
+margot package --platform linux/amd64 --platform linux/arm64
+```
+
+Platform names follow the OCI standard: `os/arch` or `os/arch/variant` (e.g. `linux/arm/v7`).
+
+If a requested platform is not present in an image's index, `package` fails with a clear
+error naming both the requested platform(s) and the platform(s) actually available in the
+image.
+
+Single-platform (non-index) images cannot be filtered with `--platform`; if `--platform`
+is used and an image is single-platform, `package` fails with a clear error.
+
+`--platform` cannot be combined with `--no-images` (nothing to filter); `package` fails
+with a clear error if both are set.
 
 ## Archive format
 
@@ -183,7 +209,7 @@ OCI image layout archives.
 ## Exit codes
 
 | Code | Meaning |
-|---|---|
+| --- | --- |
 | 0 | Bundle created successfully. |
 | 1 | `margo.yaml` missing, build output missing, requested type not defined, collision detected, or invalid tag. |
 
@@ -227,7 +253,7 @@ com-example-nginx-1.0.0.tgz
         └── nginx-1.0.0.tgz
 ```
 
-Bundle without image retrieval (fully offline/no-network):
+Bundle only without image retrieval (fully offline/no-network):
 
 ```bash
 margot build
@@ -238,6 +264,13 @@ Bundle only a specific component type:
 
 ```bash
 margot package -t compose
+```
+
+Bundle with platform filtering (e.g. only linux/amd64 and linux/arm64):
+
+```bash
+margot build
+margot package --platform linux/amd64 --platform linux/arm64
 ```
 
 Override the output path:

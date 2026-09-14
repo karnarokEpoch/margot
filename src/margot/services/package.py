@@ -274,6 +274,174 @@ def _lookup_image_with_runtime(
     return None
 
 
+def _validate_platform(platform_str: str) -> None:
+    """Validate that a platform string is in valid os/arch or os/arch/variant format.
+
+    Args:
+        platform_str: Platform string (e.g. 'linux/amd64' or 'linux/arm/v7').
+
+    Raises:
+        ValueError: If the platform string is malformed.
+    """
+    parts = platform_str.split("/")
+    if len(parts) < 2 or len(parts) > 3:  # noqa: PLR2004
+        raise ValueError(f"Invalid platform '{platform_str}': must be in os/arch or os/arch/variant format")
+    # Check all parts are non-empty
+    if not all(part for part in parts):
+        raise ValueError(f"Invalid platform '{platform_str}': must be in os/arch or os/arch/variant format")
+
+
+def _normalize_platform(platform_str: str) -> str:
+    """Normalize a platform string to canonical form.
+
+    Currently just validates and returns as-is (case-sensitive, as per OCI spec).
+
+    Args:
+        platform_str: Platform string.
+
+    Returns:
+        Normalized platform string.
+
+    Raises:
+        ValueError: If the platform string is invalid.
+    """
+    _validate_platform(platform_str)
+    return platform_str
+
+
+def _platform_matches_manifest(platform_str: str, manifest_platform: dict[str, Any]) -> bool:
+    """Check if a requested platform matches a manifest's platform descriptor.
+
+    Args:
+        platform_str: Requested platform (e.g. 'linux/amd64' or 'linux/arm/v7').
+        manifest_platform: The platform object from an OCI manifest descriptor.
+                          E.g. {"os": "linux", "architecture": "amd64", "variant": "v7"}
+
+    Returns:
+        True if the platform matches, False otherwise.
+    """
+    parts = platform_str.split("/")
+    os_part = parts[0]
+    arch_part = parts[1]
+    variant_part = parts[2] if len(parts) > 2 else None  # noqa: PLR2004
+
+    # Check OS
+    if manifest_platform.get("os") != os_part:
+        return False
+
+    # Check architecture
+    if manifest_platform.get("architecture") != arch_part:
+        return False
+
+    # Check variant (if requested)
+    return not (variant_part is not None and manifest_platform.get("variant") != variant_part)
+
+
+def _filter_manifests_by_platforms(  # noqa: C901
+    manifest: dict[str, Any],
+    platforms: list[str],
+) -> dict[str, Any]:
+    """Filter image manifests/index to only requested platforms.
+
+    Handles both single-arch manifests and multi-arch indexes. Returns the manifest
+    unmodified if platforms is empty. For indexes, filters to matching platforms.
+    For single-arch manifests, either passes through (if no platform filter) or
+    raises a clear error if platforms don't match.
+
+    Args:
+        manifest: The OCI image manifest or index dict.
+        platforms: List of requested platforms (e.g. ['linux/amd64', 'linux/arm64']).
+                  Empty list means "all platforms".
+
+    Returns:
+        The (possibly filtered) manifest dict.
+
+    Raises:
+        ValueError: If a requested platform is not found in the index, or if a
+                   single-arch manifest doesn't match the platform filter.
+    """
+    # Validate all requested platforms first
+    for platform in platforms:
+        _validate_platform(platform)
+
+    # If no platform filter, return as-is
+    if not platforms:
+        return manifest
+
+    media_type = manifest.get("mediaType", "")
+    is_index = "index" in media_type
+
+    if not is_index:
+        # Single-arch manifest
+        # Per spec, platform info may not be present in the manifest itself
+        # We can't match a single-arch manifest against platform requests
+        # per Item 5 spec: "A single-platform (non-index) image with a
+        # non-matching --platform filter = clear error, not silent no-op."
+        raise ValueError(
+            f"Single-platform image does not support --platform filtering. Requested platforms: {', '.join(platforms)}"
+        )
+
+    # Multi-arch index: filter manifests list
+    manifests = manifest.get("manifests", [])
+    filtered = []
+
+    for manifest_descriptor in manifests:
+        manifest_platform = manifest_descriptor.get("platform", {})
+        for requested_platform in platforms:
+            if _platform_matches_manifest(requested_platform, manifest_platform):
+                filtered.append(manifest_descriptor)
+                break  # Don't add this manifest twice
+
+    # Verify all requested platforms were found
+    if len(filtered) < len(platforms):
+        # Build a list of all available platforms for the error message
+        available = []
+        for desc in manifests:
+            plat = desc.get("platform", {})
+            if plat:
+                os_name = plat.get("os", "unknown")
+                arch = plat.get("architecture", "unknown")
+                variant = plat.get("variant")
+                if variant:
+                    available.append(f"{os_name}/{arch}/{variant}")
+                else:
+                    available.append(f"{os_name}/{arch}")
+
+        raise ValueError(
+            f"Requested platform(s) {{{', '.join(platforms)}}} not found in image index. "
+            f"Available platforms: {', '.join(available)}"
+        )
+
+    # Return filtered index
+    result = manifest.copy()
+    result["manifests"] = filtered
+    return result
+
+
+def _validate_platform_no_images_exclusion(
+    platforms: list[str] | None,
+    no_images: bool,
+) -> None:
+    """Validate that --platform and --no-images are not both set.
+
+    Per Item 5 spec: `--platform` + `--no-images` = mutually pointless:
+    fail clearly (nothing to filter), do not silently ignore --platform.
+
+    Args:
+        platforms: List of requested platforms (or None/empty).
+        no_images: Whether --no-images flag is set.
+
+    Raises:
+        ValueError: If both are set.
+    """
+    if platforms and no_images:
+        raise ValueError(
+            "--platform and --no-images are mutually exclusive. "
+            "--platform filters which platforms to pull, but --no-images skips image "
+            "pulling entirely. Use one or the other, not both."
+        )
+
+
 def _resolve_component_versions(
     component: ComponentConfig | None,
     component_type: PackageType,
@@ -455,24 +623,31 @@ def _create_oci_image_layout_tar(
     manifest: dict[str, Any],
     oras_client: OrasClient,
     output_tar_path: str,
+    platforms: list[str] | None = None,
 ) -> None:
     """Create an OCI image-layout tar from a pulled image manifest and blobs.
 
     Creates a valid OCI image layout (oci-layout, index.json, blobs/sha256/*)
     by pulling all referenced blobs via the OrasClient and assembling them.
-    Handles both single-platform manifests and multi-arch indexes, pulling
-    all platforms by default.
+    Handles both single-platform manifests and multi-arch indexes.
 
     Args:
         image_ref: The image reference (e.g. 'nginx:latest'), used for logging.
         manifest: The OCI manifest dict (can be a single manifest or an index).
         oras_client: OrasClient instance to download blobs.
         output_tar_path: Path to write the output OCI layout tar.
+        platforms: List of platforms to include (e.g. ['linux/amd64', 'linux/arm64']).
+                  Empty or None means all platforms.
 
     Raises:
-        ValueError: If the manifest structure is invalid.
+        ValueError: If the manifest structure is invalid or requested platform not found.
         OciRegistryError: If blob download or verification fails.
     """
+    if platforms is None:
+        platforms = []
+
+    # Apply platform filtering if requested
+    manifest = _filter_manifests_by_platforms(manifest, platforms)
     temp_dir = Path(mkdtemp())
     try:
         blobs_dir = temp_dir / "blobs" / "sha256"
@@ -647,6 +822,7 @@ def package(  # noqa: PLR0913
     output: str | None = None,
     include_images: bool = True,
     runtime: str = "auto",
+    platforms: list[str] | None = None,
 ) -> str:
     """
     Create an offline bundle from built artifacts.
@@ -669,6 +845,8 @@ def package(  # noqa: PLR0913
         runtime: Container daemon lookup strategy: 'auto' (default, probe Podman → Docker),
                 'podman' (Podman only), 'docker' (Docker only), or 'none' (registry-only).
                 Only meaningful when include_images=True.
+        platforms: List of platforms to include (e.g. ['linux/amd64', 'linux/arm64']).
+                  Empty or None means all platforms. Only applies to image inclusion.
 
     Returns:
         Path to the created bundle .tgz file.
@@ -681,6 +859,9 @@ def package(  # noqa: PLR0913
     if not include_images and runtime != "auto":
         msg = "--runtime and --no-images are mutually exclusive"
         raise ValueError(msg)
+    # Validate platform + no_images exclusion
+    _validate_platform_no_images_exclusion(platforms, not include_images)
+
     # Load margo.yaml for metadata
     margo_yaml_path = str(Path(project_dir) / "margo.yaml")
     meta = load_margo_yaml(margo_yaml_path)
@@ -718,6 +899,7 @@ def package(  # noqa: PLR0913
         output,
         include_images=include_images,
         runtime=runtime,
+        platforms=platforms or [],
     )
 
     console.info(f"Bundle created: {bundle_path}")
@@ -926,6 +1108,7 @@ def _create_bundle(  # noqa: PLR0913
     output_override: str | None,
     include_images: bool = True,
     runtime: str = "auto",
+    platforms: list[str] | None = None,
 ) -> str:
     """Create the bundle tarball.
 
@@ -948,6 +1131,8 @@ def _create_bundle(  # noqa: PLR0913
         component_versions: Map of component type to list of versions.
         output_override: Override output path (or None for default).
         include_images: Whether to discover and include container images (default True).
+        platforms: List of platforms to include (e.g. ['linux/amd64', 'linux/arm64']).
+                  Empty or None means all platforms.
 
     Returns:
         Path to created bundle .tgz file.
@@ -956,6 +1141,8 @@ def _create_bundle(  # noqa: PLR0913
         CredentialsExpiredError: If a registry credential has expired.
         OciRegistryError: If pulling an image fails.
     """
+    if platforms is None:
+        platforms = []
     margo_build_path = Path(build_dir) / margo_version
     root_dir_name = f"{meta.id}-{margo_version}"
 
@@ -1015,6 +1202,7 @@ def _create_bundle(  # noqa: PLR0913
                     meta,
                     component_versions,
                     runtime,
+                    platforms,
                 )
             except (CredentialsExpiredError, OciRegistryError):
                 # Image pull failed; clean up staging and re-raise
@@ -1063,6 +1251,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
     meta: MargoYaml,
     component_versions: dict[PackageType, list[str]],
     runtime: str,
+    platforms: list[str] | None = None,
 ) -> None:
     """Discover container images from compose/quadlet and include them in the bundle.
 
@@ -1080,11 +1269,15 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
         build_dir: Build output directory.
         meta: Loaded margo.yaml.
         component_versions: Map of component type to list of versions.
+        platforms: List of platforms to include (e.g. ['linux/amd64', 'linux/arm64']).
+                  Empty or None means all platforms.
 
     Raises:
         CredentialsExpiredError: If a registry credential has expired.
         OciRegistryError: If pulling an image fails.
     """
+    if platforms is None:
+        platforms = []
     # Early exit if no image configuration exists anywhere
     if not _has_image_configuration(meta, types_to_include):
         console.debug("No image configuration found; skipping image discovery")
@@ -1100,8 +1293,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
         PackageType.COMPOSE in types_to_include
         and meta.compose is not None
         and (
-            meta.compose.image is not None
-            or (meta.compose.variants and any(v.image is not None for v in meta.compose.variants))
+            meta.compose.image is not None or (meta.compose.variants and any(v.image is not None for v in meta.compose.variants))
         )
     )
 
@@ -1122,8 +1314,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
         PackageType.QUADLET in types_to_include
         and meta.quadlet is not None
         and (
-            meta.quadlet.image is not None
-            or (meta.quadlet.variants and any(v.image is not None for v in meta.quadlet.variants))
+            meta.quadlet.image is not None or (meta.quadlet.variants and any(v.image is not None for v in meta.quadlet.variants))
         )
     )
 
@@ -1215,7 +1406,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
             manifest = oras_client.get_manifest(ref)
 
             # Create OCI image layout tar with all blobs
-            _create_oci_image_layout_tar(ref, manifest, oras_client, str(image_tar_path))
+            _create_oci_image_layout_tar(ref, manifest, oras_client, str(image_tar_path), platforms)
 
             console.info(f"Pulled and materialized: {ref} → {safe_filename}")
             pulled_images[ref] = str(image_tar_path)

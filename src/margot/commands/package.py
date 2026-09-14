@@ -51,6 +51,15 @@ def package_cmd(  # noqa: PLR0913
             "Forced values ('podman'/'docker') fail clearly if the daemon is unreachable.",
         ),
     ] = "auto",
+    platform: Annotated[
+        list[str] | None,
+        Option(
+            "--platform",
+            help="Filter bundled images to specific platform(s) (e.g. linux/amd64). "
+            "Repeatable. Default pulls all platforms in a multi-arch index. "
+            "Invalid with --no-images.",
+        ),
+    ] = None,
 ) -> None:
     """Create offline bundle from built artifacts."""
     try:
@@ -68,9 +77,7 @@ def package_cmd(  # noqa: PLR0913
             valid_types = ("margo", "compose", "quadlet", "bundle")
             for type_str in t:
                 if type_str not in valid_types:
-                    console.fatal(
-                        f"invalid --type '{type_str}'. Must be one of: margo, compose, quadlet, bundle"
-                    )
+                    console.fatal(f"invalid --type '{type_str}'. Must be one of: margo, compose, quadlet, bundle")
 
             if len(t) == 1 and t[0] == "bundle":
                 package_type = PackageType.BUNDLE
@@ -91,6 +98,7 @@ def package_cmd(  # noqa: PLR0913
             output=output,
             include_images=not no_images,
             runtime=runtime,
+            platforms=platform,
         )
 
         console.success(f"Packaged: {bundle_path}")
