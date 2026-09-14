@@ -838,7 +838,8 @@ def package(  # noqa: PLR0913
                      If BUNDLE, all found types are included.
         project_dir: Directory containing margo.yaml (default ".").
         build_dir: Directory containing built artifacts (default ".dist").
-        output: Override output bundle path (default: .dist/<version>/<name>-<version>.tgz).
+        output: Override output DIRECTORY for the bundle (default: .dist/<version>/).
+               The bundle filename is always <id>-<version>.tgz and is not overridable.
         include_images: Whether to discover and bundle referenced container images
                        (default True). Set to False to restore Item 2's pure-local
                        no-network behavior.
@@ -1129,8 +1130,12 @@ def _create_bundle(  # noqa: PLR0913
         build_dir: Build output directory.
         margo_version: Margo's version string (used for bundle root directory).
         component_versions: Map of component type to list of versions.
-        output_override: Override output path (or None for default).
+        output_override: Override output DIRECTORY (or None for default .dist/<version>/).
+                        The bundle filename is always <id>-<version>.tgz and is not overridable.
         include_images: Whether to discover and include container images (default True).
+        runtime: Container daemon lookup strategy: 'auto' (default, probe Podman → Docker),
+                'podman' (Podman only), 'docker' (Docker only), or 'none' (registry-only).
+                Only meaningful when include_images=True.
         platforms: List of platforms to include (e.g. ['linux/amd64', 'linux/arm64']).
                   Empty or None means all platforms.
 
@@ -1146,8 +1151,9 @@ def _create_bundle(  # noqa: PLR0913
     margo_build_path = Path(build_dir) / margo_version
     root_dir_name = f"{meta.id}-{margo_version}"
 
-    # Determine output path
-    bundle_path = Path(output_override) if output_override else margo_build_path / f"{meta.id}-{margo_version}.tgz"
+    # Determine output directory and enforce bundle filename
+    output_dir = Path(output_override) if output_override else margo_build_path
+    bundle_path = output_dir / f"{meta.id}-{margo_version}.tgz"
 
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1193,22 +1199,25 @@ def _create_bundle(  # noqa: PLR0913
             )
 
         # 3. Discover and include container images if requested and configured
-        if include_images and _has_image_configuration(meta, types_to_include):
-            try:
-                _discover_and_include_images(
-                    staging_root,
-                    types_to_include,
-                    build_dir,
-                    meta,
-                    component_versions,
-                    runtime,
-                    platforms,
-                )
-            except (CredentialsExpiredError, OciRegistryError):
-                # Image pull failed; clean up staging and re-raise
-                console.debug("Image discovery/pull failed, cleaning up staging directory")
-                rmtree(tmp_parent, ignore_errors=True)
-                raise
+        if include_images:
+            if _has_image_configuration(meta, types_to_include):
+                try:
+                    _discover_and_include_images(
+                        staging_root,
+                        types_to_include,
+                        build_dir,
+                        meta,
+                        component_versions,
+                        runtime,
+                        platforms=platforms,
+                    )
+                except (CredentialsExpiredError, OciRegistryError):
+                    # Image pull failed; clean up staging and re-raise
+                    console.debug("Image discovery/pull failed, cleaning up staging directory")
+                    rmtree(tmp_parent, ignore_errors=True)
+                    raise
+            else:
+                console.info("No image configuration found in components; skipping image inclusion.")
 
         # 4. Create the final tarball
         _write_bundle_tarball(staging_root, bundle_path, root_dir_name)

@@ -29,7 +29,11 @@ def package_cmd(  # noqa: PLR0913
     ] = ".dist",
     output: Annotated[
         str | None,
-        Option("--output", help="Output bundle path (default: .dist/<version>/<name>-<version>.tgz)"),
+        Option(
+            "--output",
+            help="Output directory for the bundle (default: .dist/<version>/). "
+            "The bundle filename <id>-<version>.tgz is always enforced.",
+        ),
     ] = None,
     no_images: Annotated[
         bool,

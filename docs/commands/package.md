@@ -79,7 +79,7 @@ internal root directory use `id`, not `name`.
 
 ## Container image inclusion and local daemon lookup
 
-For each eligible image reference (when `--no-images` is not passed):
+For each eligible image reference (when `--no-images` is not passed)
 
 1. **Local daemon lookup (if `--runtime` is not `none`):**
    - `--runtime auto` (default): Silently try Podman socket, then Docker socket.
@@ -186,13 +186,17 @@ the same version into the same repository produces identically named files on di
 ## `--output` override
 
 By default the bundle is written to `.dist/<version>/<id>-<version>.tgz`. Pass
-`--output` to write it anywhere:
+`--output` to specify a different output DIRECTORY; the bundle filename is always
+`<id>-<version>.tgz` and is enforced by margot:
 
 ```bash
-margot package --output /tmp/release/com-example-nginx-1.0.0.tgz
+margot package --output /tmp/release
 ```
 
-Parent directories are created automatically.
+This writes the bundle to `/tmp/release/<id>-<version>.tgz`. Parent directories are
+created automatically. The `<id>` and `<version>` placeholders are never templated in
+the `--output` value — `--output` accepts a literal directory path only, and margot
+appends the filename.
 
 ## Never pushed
 
@@ -273,8 +277,10 @@ margot build
 margot package --platform linux/amd64 --platform linux/arm64
 ```
 
-Override the output path:
+Override the output path
 
 ```bash
-margot package --output ./releases/com-example-nginx-1.0.0.tgz
+margot package --output ./releases
 ```
+
+This writes to `./releases/com-example-nginx-1.0.0.tgz`.
