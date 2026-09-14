@@ -739,12 +739,12 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "docker", specifier = "==7.2.0" },
+    { name = "docker", specifier = ">=7.2.0" },
     { name = "dynaconf", specifier = ">=3.2.10" },
     { name = "jinja2", specifier = ">=3.1" },
-    { name = "linkml", specifier = "==1.11.1" },
+    { name = "linkml", specifier = ">=1.11.1" },
     { name = "oras", specifier = ">=0.2.28" },
-    { name = "podman", specifier = "==5.8.0" },
+    { name = "podman", specifier = ">=5.8.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich", specifier = ">=14.0.0" },
     { name = "semver", specifier = ">=3.0.4" },
