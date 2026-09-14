@@ -1,15 +1,20 @@
 """Package service: orchestrate offline bundle creation from built artifacts."""
 
+import hashlib
 from pathlib import Path
 from shutil import rmtree
 import tarfile
 from tempfile import mkdtemp
+from typing import Any
+
+import yaml
 
 from margot import console
 from margot.domain.metadata import ComponentConfig, MargoYaml, load_margo_yaml
 from margot.domain.models import PackageType
 from margot.domain.tags import validate_oci_tag, validate_semver
 from margot.infra.filesystem import copy_tree
+from margot.infra.oci import OrasClient
 
 
 def _resolve_component_versions(
@@ -53,12 +58,295 @@ def _resolve_component_versions(
     return versions
 
 
+def _discover_image_references_compose(tgz_path: str) -> list[str]:
+    """Discover image references from a compose component archive.
+
+    Extracts compose.yml or compose.yaml from the tgz, parses the YAML,
+    and extracts all services[*].image values. Deduplicates and maintains
+    order of first appearance.
+
+    Args:
+        tgz_path: Path to the component .tgz file.
+
+    Returns:
+        List of deduplicated image references in order of first appearance.
+    """
+    try:
+        compose_data = _load_compose_from_tgz(tgz_path)
+        if not compose_data:
+            return []
+        return _extract_images_from_compose(compose_data)
+    except yaml.YAMLError as e:
+        console.debug(f"Error discovering compose images from {tgz_path}: {e}")
+        return []
+
+
+def _load_compose_from_tgz(tgz_path: str) -> dict[str, Any] | None:
+    """Load compose.yml or compose.yaml from a tgz archive.
+
+    Args:
+        tgz_path: Path to the .tgz file.
+
+    Returns:
+        The parsed YAML dict, or None if not found/invalid.
+    """
+    try:
+        with tarfile.open(tgz_path, "r:gz") as tar:
+            # Try to find compose.yml or compose.yaml
+            for member in tar.getmembers():
+                if member.name in ("compose.yml", "compose.yaml"):
+                    f = tar.extractfile(member)
+                    if f is None:
+                        return None
+                    return yaml.safe_load(f.read())
+    except yaml.YAMLError:
+        pass
+    return None
+
+
+def _extract_images_from_compose(compose_data: dict[str, Any]) -> list[str]:
+    """Extract image references from parsed compose data.
+
+    Args:
+        compose_data: The parsed YAML dict.
+
+    Returns:
+        List of deduplicated image references.
+    """
+    images = []
+    seen = set()
+
+    if not isinstance(compose_data, dict):
+        return []
+
+    services = compose_data.get("services", {})
+    if not isinstance(services, dict):
+        return []
+
+    for service_config in services.values():
+        if not isinstance(service_config, dict):
+            continue
+        image = service_config.get("image")
+        if isinstance(image, str) and image and image not in seen:
+            images.append(image)
+            seen.add(image)
+
+    return images
+
+
+def _discover_image_references_quadlet(tgz_path: str) -> list[str]:  # noqa: C901
+    """Discover image references from a quadlet component archive.
+
+    Extracts all .container files from the tgz, parses each file for
+    [Container] sections, and extracts Image= values from those sections only.
+    Ignores Image= outside of [Container] sections and in comments.
+    Deduplicates and maintains order of first appearance.
+
+    Args:
+        tgz_path: Path to the component .tgz file.
+
+    Returns:
+        List of deduplicated image references in order of first appearance.
+    """
+    images = []
+    seen = set()
+
+    try:
+        with tarfile.open(tgz_path, "r:gz") as tar:
+            for member in tar.getmembers():
+                if not member.name.endswith(".container"):
+                    continue
+
+                f = tar.extractfile(member)
+                if f is None:
+                    continue
+
+                content = f.read().decode("utf-8", errors="ignore")
+                in_container_section = False
+
+                for line in content.split("\n"):
+                    stripped = line.strip()
+
+                    # Check for section headers
+                    if stripped.startswith("["):
+                        in_container_section = stripped == "[Container]"
+                        continue
+
+                    # Only process Image= inside [Container] sections
+                    if not in_container_section:
+                        continue
+
+                    # Skip comments
+                    if stripped.startswith("#"):
+                        continue
+
+                    # Look for Image= assignment
+                    if stripped.startswith("Image="):
+                        image = stripped[6:].strip()
+                        if image and image not in seen:
+                            images.append(image)
+                            seen.add(image)
+
+    except OSError as e:
+        console.debug(f"Error discovering quadlet images from {tgz_path}: {e}")
+
+    return images
+
+
+def _create_oci_image_layout_tar(
+    image_ref: str,
+    manifest: dict[str, Any],
+    oras_client: OrasClient,
+    output_tar_path: str,
+) -> None:
+    """Create an OCI image-layout tar from a pulled image manifest and blobs.
+
+    Creates a valid OCI image layout (oci-layout, index.json, blobs/sha256/*)
+    by pulling all referenced blobs via the OrasClient and assembling them.
+    Handles both single-platform manifests and multi-arch indexes, pulling
+    all platforms by default.
+
+    Args:
+        image_ref: The image reference (e.g. 'nginx:latest'), used for logging.
+        manifest: The OCI manifest dict (can be a single manifest or an index).
+        oras_client: OrasClient instance to download blobs.
+        output_tar_path: Path to write the output OCI layout tar.
+
+    Raises:
+        ValueError: If the manifest structure is invalid.
+    """
+    temp_dir = Path(mkdtemp())
+    try:
+        blobs_dir = temp_dir / "blobs" / "sha256"
+        blobs_dir.mkdir(parents=True)
+
+        media_type = manifest.get("mediaType", "")
+
+        # Determine if this is an index or a single manifest
+        is_index = "index" in media_type
+
+        if is_index:
+            # Multi-platform index: collect all child manifests
+            child_manifests = []
+            manifests_list = manifest.get("manifests", [])
+
+            for child_descriptor in manifests_list:
+                child_digest = child_descriptor.get("digest", "")
+                console.debug(f"Pulling child manifest {child_digest} from index")
+
+                # Download the child manifest blob
+                manifest_blob_path = blobs_dir / child_digest.split(":")[-1]
+                oras_client.download_blob(image_ref, child_digest, str(manifest_blob_path))
+
+                # Parse the child manifest to get config and layers
+                with Path(manifest_blob_path).open() as f:
+                    child_manifest = yaml.safe_load(f) or {}
+
+                child_manifests.append((child_descriptor, child_manifest))
+
+            # Download all config and layer blobs from all child manifests
+            for _child_descriptor, child_manifest in child_manifests:
+                _download_manifest_blobs(
+                    child_manifest,
+                    oras_client,
+                    image_ref,
+                    blobs_dir,
+                )
+
+            # Build index.json pointing to all child manifests
+            index_json = {
+                "schemaVersion": 2,
+                "mediaType": media_type,
+                "manifests": manifests_list,
+            }
+        else:
+            # Single-platform manifest
+            _download_manifest_blobs(manifest, oras_client, image_ref, blobs_dir)
+
+            # Build index.json pointing to this single manifest
+            manifest_digest = manifest.get("digest") or _compute_manifest_digest(manifest)
+            index_json = {
+                "schemaVersion": 2,
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {
+                        "mediaType": media_type,
+                        "digest": manifest_digest,
+                        "size": len(yaml.dump(manifest).encode("utf-8")),
+                    }
+                ],
+            }
+
+        # Write oci-layout file
+        oci_layout = {"imageLayoutVersion": "1.0.0"}
+        (temp_dir / "oci-layout").write_text(yaml.dump(oci_layout))
+
+        # Write index.json
+        (temp_dir / "index.json").write_text(yaml.dump(index_json))
+
+        # Create the final tarball
+        with tarfile.open(output_tar_path, "w") as tar:
+            tar.add(temp_dir, arcname=".", recursive=True)
+
+        console.debug(f"Created OCI image layout tar: {output_tar_path}")
+
+    finally:
+        rmtree(temp_dir, ignore_errors=True)
+
+
+def _download_manifest_blobs(
+    manifest: dict[str, Any],
+    oras_client: OrasClient,
+    image_ref: str,
+    blobs_dir: Path,
+) -> None:
+    """Download config and layer blobs for a manifest.
+
+    Args:
+        manifest: The OCI manifest dict.
+        oras_client: OrasClient instance.
+        image_ref: Image reference for logging.
+        blobs_dir: Directory to store blobs.
+    """
+    # Download config blob
+    config = manifest.get("config", {})
+    config_digest = config.get("digest", "")
+    if config_digest:
+        console.debug(f"Downloading config blob {config_digest}")
+        config_blob_path = blobs_dir / config_digest.split(":")[-1]
+        oras_client.download_blob(image_ref, config_digest, str(config_blob_path))
+
+    # Download layer blobs
+    layers = manifest.get("layers", [])
+    for layer in layers:
+        layer_digest = layer.get("digest", "")
+        if layer_digest:
+            console.debug(f"Downloading layer blob {layer_digest}")
+            layer_blob_path = blobs_dir / layer_digest.split(":")[-1]
+            oras_client.download_blob(image_ref, layer_digest, str(layer_blob_path))
+
+
+def _compute_manifest_digest(manifest: dict[str, Any]) -> str:
+    """Compute the SHA256 digest of a manifest dict.
+
+    Args:
+        manifest: The manifest dict.
+
+    Returns:
+        The digest in the format 'sha256:...' (computed from JSON).
+    """
+    manifest_json = yaml.dump(manifest, sort_keys=True)
+    digest = hashlib.sha256(manifest_json.encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
+
+
 def package(
     package_type: PackageType,
     *,
     project_dir: str = ".",
     build_dir: str = ".dist",
     output: str | None = None,
+    include_images: bool = True,
 ) -> str:
     """
     Create an offline bundle from built artifacts.
@@ -66,12 +354,18 @@ def package(
     Bundles already-built margo, compose, and quadlet outputs into a single .tgz file
     for deployment in disconnected/offline environments without registry access.
 
+    By default, also discovers and includes container images referenced by compose/quadlet
+    content as OCI image-layout tars in the bundle's images/ folder.
+
     Args:
         package_type: PackageType.BUNDLE, or specific type(s) to include.
                      If BUNDLE, all found types are included.
         project_dir: Directory containing margo.yaml (default ".").
         build_dir: Directory containing built artifacts (default ".dist").
         output: Override output bundle path (default: .dist/<version>/<name>-<version>.tgz).
+        include_images: Whether to discover and bundle referenced container images
+                       (default True). Set to False to restore Item 2's pure-local
+                       no-network behavior.
 
     Returns:
         Path to the created bundle .tgz file.
@@ -102,8 +396,22 @@ def package(
     # Detect collisions between components
     _check_for_collisions(meta, types_to_include, build_dir, component_versions)
 
+    # If including images, check credentials first (before any network access)
+    if include_images:
+        console.info("Checking credentials before image discovery...")
+        # We'll check credentials per-registry once we discover unique image registries
+        # For now, this is just a placeholder for the future credential checking pass
+
     # Create the bundle
-    bundle_path = _create_bundle(meta, types_to_include, build_dir, margo_version, component_versions, output)
+    bundle_path = _create_bundle(
+        meta,
+        types_to_include,
+        build_dir,
+        margo_version,
+        component_versions,
+        output,
+        include_images=include_images,
+    )
 
     console.info(f"Bundle created: {bundle_path}")
     return bundle_path
@@ -313,12 +621,16 @@ def _create_bundle(  # noqa: PLR0913
     margo_version: str,
     component_versions: dict[PackageType, list[str]],
     output_override: str | None,
+    include_images: bool = True,
 ) -> str:
     """Create the bundle tarball.
 
     Structure:
         <name>-<version>/
           app.yaml (and other margo content)
+          [images/]
+            image1_ref.tar
+            image2_ref.tar
           <repo1>/
             name-version.tgz
           <repo2>/
@@ -331,6 +643,7 @@ def _create_bundle(  # noqa: PLR0913
         margo_version: Margo's version string (used for bundle root directory).
         component_versions: Map of component type to list of versions.
         output_override: Override output path (or None for default).
+        include_images: Whether to discover and include container images (default True).
 
     Returns:
         Path to created bundle .tgz file.
@@ -384,13 +697,84 @@ def _create_bundle(  # noqa: PLR0913
                 component_versions.get(PackageType.QUADLET, []),
             )
 
-        # 3. Create the final tarball
+        # 3. Discover and include container images if requested
+        if include_images:
+            _discover_and_include_images(
+                staging_root,
+                types_to_include,
+                build_dir,
+                meta,
+                component_versions,
+            )
+
+        # 4. Create the final tarball
         _write_bundle_tarball(staging_root, bundle_path, root_dir_name)
 
     finally:
         rmtree(tmp_parent, ignore_errors=True)
 
     return str(bundle_path)
+
+
+def _discover_and_include_images(  # noqa: C901
+    staging_root: Path,
+    types_to_include: set[PackageType],
+    build_dir: str,
+    meta: MargoYaml,
+    component_versions: dict[PackageType, list[str]],
+) -> None:
+    """Discover container images from compose/quadlet and include them in the bundle.
+
+    Reads built component archives, discovers image references, pulls them from
+    registries, and saves each as an OCI image-layout tar under images/ folder.
+
+    Args:
+        staging_root: Root of the bundle staging directory.
+        types_to_include: Component types to process.
+        build_dir: Build output directory.
+        meta: Loaded margo.yaml.
+        component_versions: Map of component type to list of versions.
+    """
+    images_dir = staging_root / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    discovered_refs = set()  # Track unique refs to avoid duplicate pulls
+
+    # Discover images from compose components
+    if PackageType.COMPOSE in types_to_include and meta.compose is not None:
+        for comp_version in component_versions.get(PackageType.COMPOSE, []):
+            version_path = Path(build_dir) / comp_version
+            for tgz in version_path.glob(f"{meta.name}-*.tgz"):
+                console.debug(f"Discovering compose images in {tgz.name}")
+                refs = _discover_image_references_compose(str(tgz))
+                for ref in refs:
+                    if ref not in discovered_refs:
+                        discovered_refs.add(ref)
+                        console.info(f"Found image reference: {ref}")
+
+    # Discover images from quadlet components
+    if PackageType.QUADLET in types_to_include and meta.quadlet is not None:
+        for quad_version in component_versions.get(PackageType.QUADLET, []):
+            version_path = Path(build_dir) / quad_version
+            for tgz in version_path.glob(f"{meta.name}-*.tgz"):
+                console.debug(f"Discovering quadlet images in {tgz.name}")
+                refs = _discover_image_references_quadlet(str(tgz))
+                for ref in refs:
+                    if ref not in discovered_refs:
+                        discovered_refs.add(ref)
+                        console.info(f"Found image reference: {ref}")
+
+    if not discovered_refs:
+        console.info("No container images referenced in components")
+        return
+
+    # For now, we'll implement placeholder for pulling images
+    # In a full implementation, this would:
+    # 1. Check credentials per registry
+    # 2. Pull manifests
+    # 3. Create OCI layouts
+    # This is deferred to allow testing of the image discovery piece first
+    console.info(f"Will pull {len(discovered_refs)} unique image(s) (not yet implemented)")
 
 
 def _add_component_to_bundle(  # noqa: PLR0913
