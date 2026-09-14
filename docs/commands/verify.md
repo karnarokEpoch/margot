@@ -4,9 +4,15 @@ Validate the Margo application description (`app.yaml` or `app.yaml.jinja`) agai
 upstream Margo spec schema, and optionally against margot's curated recommended schema.
 
 ```
-margot verify [--project-dir PATH] [--manifest PATH]
+margot verify [URI] [--project-dir PATH] [--manifest PATH]
               [--schema PATH] [--recommended-schema PATH]
               [--recommend | --only-recommend] [--strict]
+```
+
+Pass a tagged OCI URI to validate a published artifact directly, without a local project:
+
+```bash
+margot verify public.ecr.aws/g2n4p2m7/margo:1.0.0
 ```
 
 !!! note
@@ -17,8 +23,9 @@ margot verify [--project-dir PATH] [--manifest PATH]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--project-dir` | `.` | Directory holding `margo.yaml`. |
-| `--manifest` | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. |
+| `URI` | — | Optional tagged OCI reference. Selects remote mode. |
+| `--project-dir` | `.` | Directory holding `margo.yaml`. Local mode only. |
+| `--manifest` | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. Local mode only. |
 | `--schema` | vendored Schema A | Override the upstream Margo spec schema. |
 | `--recommended-schema` | vendored Schema B | Override the curated recommended schema. |
 | `--recommend` | off | Run Schema B as a second pass, after Schema A. |
@@ -31,7 +38,35 @@ any validation runs (exit 1).
 `--strict` has no effect without `--recommend` or `--only-recommend` — it emits a warning
 and proceeds.
 
-## Manifest resolution
+## Local mode vs remote mode
+
+**No URI (local mode):** reads the descriptor from the local project — `--manifest` if given, otherwise resolved
+from `margo.yaml` in `--project-dir`. This is the default and existing behavior, unchanged.
+
+**URI supplied (remote mode):** pulls the published Margo artifact into a temporary directory, validates the
+pulled descriptor with the same schema passes and flags, then discards the temporary files. The URI is a full
+tagged OCI reference, for example `public.ecr.aws/g2n4p2m7/margo:1.0.0`. An `oci://`-prefixed URI is also accepted.
+
+**Mutual exclusion:** a URI cannot be combined with an explicitly supplied `--project-dir` or `--manifest`.
+Passing both is rejected before any I/O:
+
+> URI and --project-dir/--manifest are mutually exclusive — describe or verify either a remote artifact or a local project, not both.
+
+All `--schema`, `--recommended-schema`, `--recommend`, `--only-recommend`, and `--strict` flags retain exactly
+their local semantics and mutual-exclusion checks in remote mode.
+
+## Remote mode behavior
+
+1. Validates the URI syntax and checks registry credentials.
+2. Fetches the OCI manifest and requires the artifact to be a Margo application artifact
+   (`application/vnd.margo.app.v1+json`). Compose, quadlet, and unknown artifact types are rejected.
+3. Accepts any existing OCI tag — no SemVer requirement for read-only inspection.
+4. Pulls the artifact into a temporary directory (`recursive=False`). The pull is non-persistent.
+5. Validates the pulled `app.yaml` through the existing schema pipeline: Schema A/B, findings, strictness, and
+   exit rules all behave identically to local mode.
+6. Removes the temporary directory after validation, including on error.
+
+## Manifest resolution (local mode)
 
 `verify` never reads `<build_dir>` and never requires a prior `build`.
 
@@ -107,6 +142,12 @@ For visual inspection of a descriptor's structure, use [`margot describe`](descr
 ```bash
 # Validate against the Margo spec (default)
 margot verify
+
+# Validate a published artifact from a registry
+margot verify public.ecr.aws/g2n4p2m7/margo:1.0.0
+
+# Remote validation with the recommended schema as an advisory second pass
+margot verify public.ecr.aws/g2n4p2m7/margo:1.0.0 --recommend
 
 # Validate with the recommended schema as an advisory second pass
 margot verify --recommend
