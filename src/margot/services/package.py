@@ -2,6 +2,7 @@
 
 import contextlib
 from enum import StrEnum
+from errno import ENOSPC
 from hashlib import sha256
 from json import dumps as json_dumps
 from json import load as json_load
@@ -10,7 +11,7 @@ from pathlib import Path
 import platform as platform_module
 from shutil import rmtree
 from tarfile import open as tar_open
-from tempfile import mkdtemp
+from tempfile import gettempdir, mkdtemp
 from typing import Any
 
 from yaml import YAMLError, safe_load
@@ -1910,8 +1911,29 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
     pulled_images: dict[str, str] = {}  # Track ref -> tar_path for deduplication
     failed_pulls: list[tuple[str, Exception]] = []
 
-    # Create a temporary directory for daemon exports
-    daemon_export_dir = Path(mkdtemp(prefix="margot-daemon-"))
+    # Compute effective temp directory: explicit TMPDIR if set, else system default.
+    # CRITICAL FIX: Pass explicit dir= to mkdtemp() to bypass tempfile module's global cache.
+    # This prevents the cache from being poisoned if any other code (oras-py, podman,
+    # or prior mkdtemp call) calls tempfile.gettempdir() before our code runs.
+    effective_tmpdir = environ.get("TMPDIR") or gettempdir()
+
+    # If TMPDIR is set to a non-existent path, create it before using it for mkdtemp
+    if environ.get("TMPDIR"):
+        tmpdir_path = Path(effective_tmpdir)
+        if not tmpdir_path.is_dir():
+            try:
+                tmpdir_path.mkdir(parents=True, exist_ok=True)
+                console.debug(f"Created TMPDIR directory: {effective_tmpdir}")
+            except Exception as e:
+                msg = (
+                    f"Failed to create TMPDIR directory '{effective_tmpdir}': {e}. "
+                    f"Please ensure the path is valid and writable."
+                )
+                raise OciRegistryError(msg) from e
+
+    # Create a temporary directory for daemon exports, using explicit dir= to ensure
+    # the effective_tmpdir is used regardless of tempfile module cache state
+    daemon_export_dir = Path(mkdtemp(prefix="margot-daemon-", dir=effective_tmpdir))
 
     for ref in discovered_refs:
         if ref in pulled_images:
@@ -2111,6 +2133,20 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
         except (OciRegistryError, CredentialsExpiredError) as e:
             console.warning(f"Failed to pull image {ref}: {e}")
             failed_pulls.append((ref, e))
+        except OSError as e:
+            if e.errno == ENOSPC:
+                # Disk ran out of space during image export/pull (in temp directory)
+                console.warning(
+                    f"Disk ran out of space while pulling image {ref}. "
+                    f"The system temporary directory (typically /tmp) does not have enough free space. "
+                    f"Set the TMPDIR environment variable to a directory with more free space and re-run margot, "
+                    f"e.g. TMPDIR=/path/with/more/space margot package ..."
+                )
+                failed_pulls.append((ref, e))
+            else:
+                # Other OS errors (permissions, file not found, etc.)
+                console.warning(f"Unexpected error pulling image {ref}: {e}")
+                failed_pulls.append((ref, e))
         except Exception as e:  # noqa: BLE001
             console.warning(f"Unexpected error pulling image {ref}: {e}")
             failed_pulls.append((ref, e))
