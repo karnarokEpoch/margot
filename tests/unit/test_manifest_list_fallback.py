@@ -15,6 +15,11 @@ from unittest.mock import MagicMock, Mock, patch
 
 from pytest import mark, raises, skip
 
+try:
+    from podman import PodmanClient
+except ImportError:
+    PodmanClient = None  # type: ignore[assignment]
+
 from margot import console
 from margot.services import package as package_service
 
@@ -193,11 +198,8 @@ class TestLookupImagePodmanManifestListFallback:
         # Setup mock client
         mock_client = MagicMock()
 
-        # First call fails (direct image lookup)
-        mock_client.images.get.side_effect = [
-            RuntimeError("Not found"),  # First call: direct lookup
-            Mock(),  # Second call: digest lookup, returns concrete image
-        ]
+        # Direct image lookup fails
+        mock_client.images.get.side_effect = RuntimeError("Not found")
 
         # Manifest list exists and has one matching entry
         mock_manifest = Mock()
@@ -212,13 +214,19 @@ class TestLookupImagePodmanManifestListFallback:
         mock_client.manifests.exists.return_value = True
         mock_client.manifests.get.return_value = mock_manifest
 
+        # images.list() returns the concrete image for the digest
+        mock_concrete_image = Mock()
+        mock_client.images.list.return_value = [mock_concrete_image]
+
         mock_podman_client_cls.return_value.__enter__.return_value = mock_client
 
         result = package_service._lookup_image_podman("nginx:latest", "/tmp")
 
         assert result == "/tmp/image.tar"
-        # Should have called images.get twice: once for direct, once for digest
-        assert mock_client.images.get.call_count == 2
+        # Should have called images.get once (direct lookup)
+        mock_client.images.get.assert_called_once_with("nginx:latest")
+        # Should have called images.list with the digest
+        mock_client.images.list.assert_called_once_with(filters={"digest": "sha256:abc123"})
         mock_client.manifests.exists.assert_called_once()
         mock_client.manifests.get.assert_called_once()
 
@@ -234,10 +242,7 @@ class TestLookupImagePodmanManifestListFallback:
 
         # Setup mock client
         mock_client = MagicMock()
-        mock_client.images.get.side_effect = [
-            RuntimeError("Not found"),  # Direct lookup
-            Mock(),  # Digest lookup for correct platform
-        ]
+        mock_client.images.get.side_effect = RuntimeError("Not found")
 
         # Manifest list with multiple entries
         mock_manifest = Mock()
@@ -256,15 +261,18 @@ class TestLookupImagePodmanManifestListFallback:
         mock_client.manifests.exists.return_value = True
         mock_client.manifests.get.return_value = mock_manifest
 
+        # images.list() returns the correct platform's image
+        mock_concrete_image = Mock()
+        mock_client.images.list.return_value = [mock_concrete_image]
+
         mock_podman_client_cls.return_value.__enter__.return_value = mock_client
 
         with patch("margot.services.package._export_image_to_oci_archive", return_value="/tmp/image.tar"):
             result = package_service._lookup_image_podman("nginx:latest", "/tmp")
 
         assert result == "/tmp/image.tar"
-        # Second call to images.get should be with the arm64 digest
-        calls = mock_client.images.get.call_args_list
-        assert calls[1][0][0] == "sha256:arm64_digest"
+        # Should have called images.list with the arm64 digest (the matching platform)
+        mock_client.images.list.assert_called_once_with(filters={"digest": "sha256:arm64_digest"})
 
     @patch("margot.services.package._get_host_platform")
     @patch("margot.services.package._resolve_podman_socket_uri")
@@ -313,10 +321,7 @@ class TestLookupImagePodmanManifestListFallback:
         mock_get_platform.return_value = "linux/amd64"
 
         mock_client = MagicMock()
-        mock_client.images.get.side_effect = [
-            RuntimeError("Not found"),  # Direct lookup
-            RuntimeError("Digest lookup failed"),  # Digest lookup also fails
-        ]
+        mock_client.images.get.side_effect = RuntimeError("Not found")
 
         mock_manifest = Mock()
         mock_manifest.attrs = {
@@ -329,6 +334,9 @@ class TestLookupImagePodmanManifestListFallback:
         }
         mock_client.manifests.exists.return_value = True
         mock_client.manifests.get.return_value = mock_manifest
+
+        # images.list() also fails (no images match the digest)
+        mock_client.images.list.return_value = []
 
         mock_podman_client_cls.return_value.__enter__.return_value = mock_client
 
@@ -438,6 +446,162 @@ class TestPlatformMatchesManifestReused:
 
         # If _platform_matches_manifest is correctly used, should match
         assert result == "/tmp/image.tar"
+
+
+class TestResolveAllPlatformsRealSocket:
+    """Real socket tests for _resolve_all_platforms_from_manifest_list.
+
+    These tests exercise the actual Podman SDK call paths against a real socket
+    if available, ensuring that the images.list(filters={"digest": ...}) call
+    works as expected and that manifest-list child digests are correctly resolved.
+    """
+
+    @staticmethod
+    def _is_podman_available() -> bool:
+        """Check if podman binary and socket are available."""
+        from shutil import which  # noqa: PLC0415
+        return which("podman") is not None
+
+    @staticmethod
+    def _get_real_image_digest(image_ref: str) -> str | None:
+        """Get the digest of a real local image via 'podman images --format'.
+
+        Returns the full digest (sha256:...) or None if image not found.
+        """
+        result = subprocess.run(  # noqa: S603
+            [  # noqa: S607
+                "podman", "images",
+                "--filter", f"reference={image_ref}",
+                "--format", "{{.Digest}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode == 0:
+            digest = result.stdout.strip()
+            if digest and digest.startswith("sha256:"):
+                return digest
+        return None
+
+    def test_resolve_manifest_list_children_via_images_list_real_socket(self):
+        """Real test: resolve manifest-list child digests using images.list().
+
+        This test:
+        1. Creates a real local manifest list with podman manifest create/add
+        2. Calls _resolve_all_platforms_from_manifest_list against real socket
+        3. Verifies all platforms are successfully resolved (not None)
+
+        Requires podman and two real local images with distinct digests.
+        """
+        if not self._is_podman_available():
+            skip("podman not available")
+
+        if PodmanClient is None:
+            skip("PodmanClient SDK not available")
+
+        # Find two real local images to add to the manifest list
+        result = subprocess.run(
+            ["podman", "images", "--format", "{{.Repository}}:{{.Tag}}"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+        if result.returncode != 0 or not result.stdout.strip():
+            skip("No local images available to create test manifest list")
+
+        images = [line.strip() for line in result.stdout.split("\n") if line.strip()]
+        if len(images) < 2:
+            skip("Need at least 2 local images to test manifest-list resolution")
+
+        # Use first two available images
+        image1 = images[0]
+        image2 = images[1]
+        test_manifest_name = "test-multiplatform-resolve"
+
+        try:
+            # Create a fresh manifest list
+            subprocess.run(  # noqa: S603
+                ["podman", "manifest", "rm", test_manifest_name],  # noqa: S607
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )  # Clean up if it exists
+
+            subprocess.run(  # noqa: S603
+                ["podman", "manifest", "create", test_manifest_name],  # noqa: S607
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            )
+            console.info(f"Created manifest list: {test_manifest_name}")
+
+            # Add two images to the manifest list with synthetic platform annotations
+            subprocess.run(  # noqa: S603
+                [  # noqa: S607
+                    "podman", "manifest", "add",
+                    test_manifest_name, image1,
+                    "--os", "linux",
+                    "--arch", "amd64",
+                ],
+                capture_output=True,
+                timeout=10,
+                check=True,
+            )
+            console.info(f"Added {image1} to manifest as linux/amd64")
+
+            subprocess.run(  # noqa: S603
+                [  # noqa: S607
+                    "podman", "manifest", "add",
+                    test_manifest_name, image2,
+                    "--os", "linux",
+                    "--arch", "arm64",
+                ],
+                capture_output=True,
+                timeout=10,
+                check=True,
+            )
+            console.info(f"Added {image2} to manifest as linux/arm64")
+
+            # Now call the real function against the real socket
+            with TemporaryDirectory() as tmpdir:
+                result = package_service._resolve_all_platforms_from_manifest_list(
+                    test_manifest_name,
+                    tmpdir,
+                )
+
+                console.info(f"Resolution result: {result}")
+
+                # Verify both platforms resolved successfully (not None)
+                assert "linux/amd64" in result, f"linux/amd64 not in result: {result}"
+                assert "linux/arm64" in result, f"linux/arm64 not in result: {result}"
+
+                amd64_path = result.get("linux/amd64")
+                arm64_path = result.get("linux/arm64")
+
+                assert amd64_path is not None, "linux/amd64 resolved to None (digest lookup failed)"
+                assert arm64_path is not None, "linux/arm64 resolved to None (digest lookup failed)"
+
+                assert Path(amd64_path).exists(), f"Exported amd64 tar not found: {amd64_path}"
+                assert Path(arm64_path).exists(), f"Exported arm64 tar not found: {arm64_path}"
+
+                console.success("✓ Both platforms resolved successfully")
+                console.info(f"  linux/amd64: {amd64_path}")
+                console.info(f"  linux/arm64: {arm64_path}")
+
+        finally:
+            # Clean up the test manifest list
+            with contextlib.suppress(Exception):
+                subprocess.run(  # noqa: S603
+                    ["podman", "manifest", "rm", test_manifest_name],  # noqa: S607
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
+                )
 
 
 class TestCreateOciImageLayoutTarAnnotations:

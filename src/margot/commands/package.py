@@ -49,10 +49,12 @@ def package_cmd(  # noqa: PLR0913
         str,
         Option(
             "--runtime",
-            help="Container daemon lookup strategy: 'podman' (Podman only), 'docker' (Docker only), "
-            "'none' (registry-only, skip daemon lookup), or 'auto' (default: probe Podman → Docker → registry). "
-            "When omitted, silently probes local container daemons before falling back to registry. "
-            "Forced values ('podman'/'docker') fail clearly if the daemon is unreachable.",
+            help="Container daemon lookup strategy for image inclusion (default: auto). "
+            "'auto': probe local Podman → Docker, use registry as authoritative source for platform set. "
+            "'none': registry-only, skip daemon lookup entirely. "
+            "'podman': Podman daemon only (no registry contact for that image). "
+            "'docker': Docker daemon only (no registry contact for that image). "
+            "Forced values (podman/docker) fail clearly if the daemon is unreachable.",
         ),
     ] = "auto",
     platform: Annotated[
@@ -60,8 +62,9 @@ def package_cmd(  # noqa: PLR0913
         Option(
             "--platform",
             help="Filter bundled images to specific platform(s) (e.g. linux/amd64). "
-            "Repeatable. Default pulls all platforms in a multi-arch index. "
-            "Invalid with --no-images.",
+            "Repeatable. Format: os/arch or os/arch/variant (e.g. linux/arm/v7). "
+            "Default pulls all platforms in a multi-arch index. "
+            "Invalid with --no-images. Validates before any network I/O.",
         ),
     ] = None,
 ) -> None:

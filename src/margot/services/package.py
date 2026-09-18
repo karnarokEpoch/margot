@@ -119,6 +119,7 @@ def _export_image_to_oci_archive(
     image: Any,  # noqa: ANN401
     image_ref: str,
     output_dir: str,
+    platform_str: str | None = None,
 ) -> str | None:
     """Export a Podman image object to OCI-archive format.
 
@@ -126,11 +127,23 @@ def _export_image_to_oci_archive(
         image: A Podman Image object.
         image_ref: Image reference (for logging and filename generation).
         output_dir: Directory to write exported tar.
+        platform_str: Optional platform string (e.g. 'linux/amd64') to include in filename
+                     for disambiguating multiple exports of the same ref from a manifest list.
 
     Returns:
         Path to the exported OCI-archive tar, or None if export fails.
     """
-    export_path = Path(output_dir) / f"{image_ref.replace('/', '_').replace(':', '_')}.tar"
+    # Include platform in filename if provided, to avoid collisions when exporting
+    # multiple platforms of the same image_ref from a manifest list.
+    # e.g. "nginx:latest" with "linux/amd64" → "nginx_latest_linux_amd64.tar"
+    safe_ref = image_ref.replace("/", "_").replace(":", "_")
+    if platform_str:
+        safe_platform = platform_str.replace("/", "_")
+        filename = f"{safe_ref}_{safe_platform}.tar"
+    else:
+        filename = f"{safe_ref}.tar"
+
+    export_path = Path(output_dir) / filename
     console.debug(f"Exporting {image_ref} from Podman to {export_path}")
 
     try:
@@ -152,6 +165,92 @@ def _export_image_to_oci_archive(
     except Exception as e:  # noqa: BLE001
         console.debug(f"Error exporting image from Podman: {e}")
         return None
+
+
+def _resolve_all_platforms_from_manifest_list(
+    image_ref: str,
+    output_dir: str,
+) -> dict[str, str | None]:
+    """Resolve all platforms from a local Podman manifest list.
+
+    Attempts to find a local Podman manifest list for the image reference,
+    and for EVERY child entry in that manifest list, resolves its digest
+    to a concrete local image and exports it. This is Podman-specific —
+    Docker Engine does not have an equivalent local manifest list concept.
+
+    Args:
+        image_ref: Image reference (e.g. 'nginx:latest').
+        output_dir: Directory to write exported tars.
+
+    Returns:
+        Dict mapping platform string (e.g. 'linux/amd64') to path of exported tar,
+        or None if that platform's digest could not be resolved locally.
+        Empty dict if no manifest list found or reference is invalid.
+    """
+    if PodmanClient is None:
+        return {}
+
+    result: dict[str, str | None] = {}
+
+    try:
+        uri = _resolve_podman_socket_uri()
+        with PodmanClient(base_url=uri) as client:
+            # Check if reference resolves to a manifest list
+            if not client.manifests.exists(image_ref):
+                console.debug(f"No local manifest list for {image_ref}")
+                return result
+
+            console.debug(f"Found local manifest list for {image_ref}, resolving all platforms")
+            manifest_list = client.manifests.get(image_ref)
+            manifest_entries = manifest_list.attrs.get("manifests", [])
+
+            if not manifest_entries:
+                console.debug(f"Manifest list for {image_ref} has no entries")
+                return result
+
+            # For EVERY child entry, attempt to resolve and export
+            for entry in manifest_entries:
+                child_digest = entry.get("digest")
+                platform_dict = entry.get("platform", {})
+
+                if not child_digest:
+                    console.debug("Manifest entry has no digest, skipping")
+                    continue
+
+                platform_str = _platform_descriptor_to_string(platform_dict)
+                console.debug(f"Attempting to resolve manifest entry digest {child_digest} for platform {platform_str}")
+
+                try:
+                    # Resolve the digest to a concrete local image via images.list().
+                    # Note: client.images.get(<digest>) does not work for manifest-list child digests;
+                    # it 404s against the real SDK. Use images.list(filters={"digest": ...}) instead.
+                    matches = client.images.list(filters={"digest": child_digest})
+                    if not matches:
+                        console.debug(f"No local image found for manifest entry digest {child_digest}")
+                        result[platform_str] = None
+                        continue
+
+                    concrete_image = matches[0]
+                    export_path = _export_image_to_oci_archive(concrete_image, image_ref, output_dir, platform_str)
+
+                    if export_path:
+                        console.debug(
+                            f"Successfully resolved {image_ref} child digest {child_digest} "
+                            f"({platform_str}) from local image, exported to {export_path}"
+                        )
+                        result[platform_str] = export_path
+                    else:
+                        console.debug(f"Failed to export concrete image for digest {child_digest}")
+                        result[platform_str] = None
+                except Exception as e:  # noqa: BLE001
+                    console.debug(f"Failed to resolve child digest {child_digest} to local image: {e}")
+                    result[platform_str] = None
+
+            return result
+
+    except Exception as e:  # noqa: BLE001
+        console.debug(f"Manifest list lookup failed for {image_ref}: {e}")
+        return {}
 
 
 def _lookup_image_podman(  # noqa: C901, PLR0911, PLR0912, PLR0915
@@ -246,7 +345,15 @@ def _lookup_image_podman(  # noqa: C901, PLR0911, PLR0912, PLR0915
 
                 # Try to get the concrete image by digest
                 try:
-                    concrete_image = client.images.get(matching_digest)
+                    # Resolve the digest to a concrete local image via images.list().
+                    # Note: client.images.get(<digest>) does not work for manifest-list child digests;
+                    # it 404s against the real SDK. Use images.list(filters={"digest": ...}) instead.
+                    matches = client.images.list(filters={"digest": matching_digest})
+                    if not matches:
+                        console.debug(f"No local image found for manifest entry digest {matching_digest}")
+                        return None
+
+                    concrete_image = matches[0]
                     export_path = _export_image_to_oci_archive(concrete_image, image_ref, output_dir)
                     if export_path:
                         os_name = matching_platform.get("os", "unknown")
@@ -925,12 +1032,13 @@ def _discover_image_references_quadlet(tgz_path: str) -> list[str]:  # noqa: C90
     return images
 
 
-def _create_oci_image_layout_tar(
+def _create_oci_image_layout_tar(  # noqa: PLR0913, PLR0915
     image_ref: str,
     manifest: dict[str, Any],
     oras_client: OrasClient,
     output_tar_path: str,
     platforms: list[str] | None = None,
+    pre_downloaded_blobs: dict[str, str] | None = None,
 ) -> None:
     """Create an OCI image-layout tar from a pulled image manifest and blobs.
 
@@ -945,6 +1053,9 @@ def _create_oci_image_layout_tar(
         output_tar_path: Path to write the output OCI layout tar.
         platforms: List of platforms to include (e.g. ['linux/amd64', 'linux/arm64']).
                   Empty or None means all platforms.
+        pre_downloaded_blobs: Optional dict mapping blob digest → file path for blobs
+                             already downloaded (e.g., from local daemon export).
+                             These blobs are copied instead of downloaded from registry.
 
     Raises:
         ValueError: If the manifest structure is invalid or requested platform not found.
@@ -952,6 +1063,9 @@ def _create_oci_image_layout_tar(
     """
     if platforms is None:
         platforms = []
+
+    if pre_downloaded_blobs is None:
+        pre_downloaded_blobs = {}
 
     # Apply platform filtering if requested
     manifest = _filter_manifests_by_platforms(manifest, platforms)
@@ -977,7 +1091,13 @@ def _create_oci_image_layout_tar(
                 # Download the child manifest blob
                 manifest_blob_filename = child_digest.split(":")[-1]
                 manifest_blob_path = blobs_dir / manifest_blob_filename
-                oras_client.download_blob(image_ref, child_digest, str(manifest_blob_path))
+
+                if child_digest in pre_downloaded_blobs:
+                    # Use pre-downloaded manifest
+                    console.debug(f"Using pre-downloaded child manifest {child_digest}")
+                    manifest_blob_path.write_bytes(Path(pre_downloaded_blobs[child_digest]).read_bytes())
+                else:
+                    oras_client.download_blob(image_ref, child_digest, str(manifest_blob_path))
 
                 # Verify blob digest
                 _verify_blob_digest(manifest_blob_path, child_digest)
@@ -995,6 +1115,7 @@ def _create_oci_image_layout_tar(
                     oras_client,
                     image_ref,
                     blobs_dir,
+                    pre_downloaded_blobs,
                 )
 
             # Build index.json pointing to all child manifests with ref-name annotations
@@ -1015,7 +1136,7 @@ def _create_oci_image_layout_tar(
             }
         else:
             # Single-platform manifest
-            _download_manifest_blobs(manifest, oras_client, image_ref, blobs_dir)
+            _download_manifest_blobs(manifest, oras_client, image_ref, blobs_dir, pre_downloaded_blobs)
 
             # Build index.json pointing to this single manifest
             manifest_digest = manifest.get("digest") or _compute_manifest_digest(manifest)
@@ -1094,6 +1215,7 @@ def _download_manifest_blobs(
     oras_client: OrasClient,
     image_ref: str,
     blobs_dir: Path,
+    pre_downloaded_blobs: dict[str, str] | None = None,
 ) -> None:
     """Download config and layer blobs for a manifest.
 
@@ -1102,15 +1224,29 @@ def _download_manifest_blobs(
         oras_client: OrasClient instance.
         image_ref: Image reference for logging.
         blobs_dir: Directory to store blobs.
+        pre_downloaded_blobs: Optional dict mapping digest → file path for blobs
+                             already downloaded (e.g., from local daemon export).
+                             These blobs are copied instead of downloaded.
     """
+    if pre_downloaded_blobs is None:
+        pre_downloaded_blobs = {}
+
     # Download config blob
     config = manifest.get("config", {})
     config_digest = config.get("digest", "")
     if config_digest:
-        console.debug(f"Downloading config blob {config_digest}")
         config_blob_filename = config_digest.split(":")[-1]
         config_blob_path = blobs_dir / config_blob_filename
-        oras_client.download_blob(image_ref, config_digest, str(config_blob_path))
+
+        if config_digest in pre_downloaded_blobs:
+            # Copy from pre-downloaded
+            console.debug(f"Using pre-downloaded config blob {config_digest}")
+            config_blob_path.write_bytes(Path(pre_downloaded_blobs[config_digest]).read_bytes())
+        else:
+            # Download from registry
+            console.debug(f"Downloading config blob {config_digest}")
+            oras_client.download_blob(image_ref, config_digest, str(config_blob_path))
+
         _verify_blob_digest(config_blob_path, config_digest)
 
     # Download layer blobs
@@ -1118,11 +1254,150 @@ def _download_manifest_blobs(
     for layer in layers:
         layer_digest = layer.get("digest", "")
         if layer_digest:
-            console.debug(f"Downloading layer blob {layer_digest}")
             layer_blob_filename = layer_digest.split(":")[-1]
             layer_blob_path = blobs_dir / layer_blob_filename
-            oras_client.download_blob(image_ref, layer_digest, str(layer_blob_path))
-            _verify_blob_digest(layer_blob_path, layer_digest)
+
+            if layer_digest in pre_downloaded_blobs:
+                # Copy from pre-downloaded
+                console.debug(f"Using pre-downloaded layer blob {layer_digest}")
+                layer_blob_path.write_bytes(Path(pre_downloaded_blobs[layer_digest]).read_bytes())
+            else:
+                # Download from registry
+                console.debug(f"Downloading layer blob {layer_digest}")
+                oras_client.download_blob(image_ref, layer_digest, str(layer_blob_path))
+
+
+def _is_manifest_list_fully_resolved(
+    manifest_list_exports: dict[str, str | None],
+    requested_platforms: list[str] | None = None,
+) -> bool:
+    """Check if manifest list fully resolves all requested platforms.
+
+    Args:
+        manifest_list_exports: Dict from _resolve_all_platforms_from_manifest_list
+                              mapping platform → export_tar (or None if unresolved).
+        requested_platforms: List of requested platforms (or None/empty for all).
+
+    Returns:
+        True if all necessary platforms are fully resolved (non-None), False otherwise.
+    """
+    if not manifest_list_exports:
+        return False
+
+    # If no platform filter, all entries must be resolved
+    if not requested_platforms:
+        return all(export is not None for export in manifest_list_exports.values())
+
+    # If filter is specified, all requested platforms must be resolved
+    for platform in requested_platforms:
+        if platform not in manifest_list_exports or manifest_list_exports[platform] is None:
+            return False
+
+    return True
+
+
+def _assemble_multiplatform_from_manifest_list_exports(  # noqa: C901
+    image_ref: str,
+    manifest_list_exports: dict[str, str | None],
+    output_tar_path: str,
+    daemon_export_dir: str,
+) -> None:
+    """Assemble a multi-platform OCI layout from locally-exported daemon tars.
+
+    Takes a dict of platform → export_tar mappings (where export_tar is a path to
+    an OCI-archive tar from _resolve_all_platforms_from_manifest_list or daemon export),
+    extracts all blobs from those tars, and assembles them into a single OCI image layout
+    tar at output_tar_path.
+
+    This is used when a manifest list fully resolves locally, so we can assemble
+    the output without any registry contact.
+
+    Args:
+        image_ref: Image reference (for logging).
+        manifest_list_exports: Dict mapping platform → export_tar path (or None).
+        output_tar_path: Path to write the final assembled OCI layout tar.
+        daemon_export_dir: Temporary directory for intermediate blob storage.
+
+    Raises:
+        OciRegistryError: If assembly fails.
+    """
+    pre_downloaded_blobs: dict[str, str] = {}
+    persistent_blob_dir = Path(daemon_export_dir) / "blobs_cache"
+
+    # Extract blobs from all exported tars
+    for platform_str, export_tar in manifest_list_exports.items():
+        if export_tar is None:
+            continue  # Skip unresolved platforms
+        console.debug(f"Extracting blobs from {platform_str} export: {export_tar}")
+        _extract_blobs_from_daemon_tar(export_tar, platform_str, pre_downloaded_blobs, persistent_blob_dir)
+
+    # Build a synthetic index.json that will be used by _create_oci_image_layout_tar
+    # Since we're assembling from local daemon exports, we need to construct the manifest/index
+    # that ties them together
+    synth_index = {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [],
+    }
+
+    # For each successfully resolved platform, add a manifest entry
+    # (we'll construct minimal entries; the full manifest blobs are in pre_downloaded_blobs)
+    for platform_str, export_tar in manifest_list_exports.items():
+        if export_tar is None:
+            continue
+
+        # Extract the platform descriptor from the platform string
+        # e.g. "linux/amd64" → {"os": "linux", "architecture": "amd64"}
+        parts = platform_str.split("/")
+        if len(parts) >= 2:  # noqa: PLR2004
+            platform_dict = {
+                "os": parts[0],
+                "architecture": parts[1],
+            }
+            if len(parts) > 2:  # noqa: PLR2004
+                platform_dict["variant"] = parts[2]
+
+            # Extract the manifest digest from the daemon export tar (it's in index.json)
+            temp_dir = Path(mkdtemp())
+            try:
+                with tar_open(export_tar, "r") as tar:
+                    tar.extractall(temp_dir, filter="data")
+
+                # Read index.json from the daemon export
+                index_path = temp_dir / "index.json"
+                if index_path.exists():
+                    with index_path.open() as f:
+                        daemon_index = json_load(f)
+
+                    # Get the manifest descriptor from the daemon export
+                    manifests = daemon_index.get("manifests", [])
+                    if manifests:
+                        manifest_desc = manifests[0].copy()
+                        manifest_desc["platform"] = platform_dict
+                        # Ensure ref-name annotation
+                        if "annotations" not in manifest_desc:
+                            manifest_desc["annotations"] = {}
+                        manifest_desc["annotations"]["org.opencontainers.image.ref.name"] = image_ref
+                        synth_index["manifests"].append(manifest_desc)
+            finally:
+                rmtree(temp_dir, ignore_errors=True)
+
+    # Now assemble using _create_oci_image_layout_tar with the synthetic index
+    # Create a minimal OrasClient mock for this call (only used for blob downloads, which we skip)
+    class _NoOpOrasClient:
+        def download_blob(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+            """No-op: blobs already present in pre_downloaded_blobs."""
+
+    _create_oci_image_layout_tar(
+        image_ref,
+        synth_index,
+        _NoOpOrasClient(),  # type: ignore[arg-type]
+        output_tar_path,
+        [],
+        pre_downloaded_blobs,
+    )
+
+    console.debug(f"Assembled multi-platform OCI layout from manifest-list exports: {output_tar_path}")
 
 
 def _compute_manifest_digest(manifest: dict[str, Any]) -> str:
@@ -1585,6 +1860,16 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
     if platforms is None:
         platforms = []
 
+    # VALIDATION: Validate all --platform values up front, before any I/O
+    # This ensures invalid values (e.g. "all") fail fast regardless of runtime mode
+    for platform in platforms:
+        try:
+            _validate_platform(platform)
+        except ValueError as e:
+            msg = f"Invalid --platform value: {e}"
+            console.fatal(msg)
+            raise OciRegistryError(msg) from e
+
     images_dir = staging_root / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1656,7 +1941,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 msg = f"Cannot extract hostname from image reference {ref}: {e}"
                 raise OciRegistryError(msg) from e
 
-            # Initialize OrasClient for this registry if not already done
+            # Initialize OrasClient for this registry if not already done (for registry pulls)
             # Credentials are best-effort: attempt anonymous pull if no credential stored
             if hostname not in registry_clients:
                 console.debug(f"Initializing OrasClient for {hostname}")
@@ -1673,39 +1958,155 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
                 registry_clients[hostname] = OrasClient(hostname=hostname)
 
-            # Try daemon lookup first (if runtime != 'none')
-            if runtime != RuntimeLookup.NONE.value:
+            # Branch behavior based on runtime mode
+            if runtime in (RuntimeLookup.PODMAN.value, RuntimeLookup.DOCKER.value):
+                # FORCED DAEMON MODE: daemon is the sole authority, NO registry contact
                 daemon_tar = _lookup_image_with_runtime(
                     ref,
                     str(daemon_export_dir),
                     runtime,
                     registry_clients.get(hostname) or OrasClient(),
                 )
-                if daemon_tar:
-                    # Copy the daemon export to the final location
-                    image_tar_path.write_bytes(Path(daemon_tar).read_bytes())
-                    console.info(f"Used local daemon image: {ref} → {safe_filename}")
+                if daemon_tar is None:
+                    # Daemon lookup already raises RuntimeError if required=True and daemon unreachable
+                    msg = f"Image {ref} not found in {runtime} daemon"
+                    raise_msg = OciRegistryError(msg)
+                    raise raise_msg from None  # noqa: TRY301
+
+                # Daemon was the source; check platform filter against daemon's reported platform
+                # For now, assume the daemon export is valid and use it as-is
+                # TODO(kiro): If --platform is specified and doesn't match daemon's platform,
+                # should fail with clear error. Currently we accept daemon's platform as-is.
+                image_tar_path.write_bytes(Path(daemon_tar).read_bytes())
+                console.info(f"Used local {runtime} daemon image: {ref} → {safe_filename}")
+                pulled_images[ref] = str(image_tar_path)
+
+            elif runtime == RuntimeLookup.NONE.value:
+                # REGISTRY-ONLY MODE: skip daemon lookup entirely
+                oras_client = registry_clients[hostname]
+
+                # Get the manifest (handles both single-arch and multi-arch)
+                try:
+                    manifest = oras_client.get_manifest(ref)
+                except Exception as e:
+                    msg = (
+                        f"Registry did not return a valid manifest for {ref} — the image "
+                        f"may not exist at this reference, or the registry may be unreachable: {e}"
+                    )
+                    raise OciRegistryError(msg) from e
+
+                # Create OCI image layout tar with all blobs (respecting --platform filter)
+                _create_oci_image_layout_tar(ref, manifest, oras_client, str(image_tar_path), platforms)
+
+                console.info(f"Pulled and materialized: {ref} → {safe_filename}")
+                pulled_images[ref] = str(image_tar_path)
+
+            else:
+                # AUTO MODE: registry is authoritative for platform set, daemon used opportunistically
+                # Manifest-list resolution is checked FIRST before registry contact.
+
+                oras_client = registry_clients[hostname]
+                daemon_export_temp = Path(daemon_export_dir)
+                daemon_export_temp.mkdir(parents=True, exist_ok=True)
+
+                # PRIORITY 1: Check local Podman manifest list FIRST (skip registry entirely if fully resolved)
+                console.debug(f"Checking for local Podman manifest list for {ref}")
+                manifest_list_exports = _resolve_all_platforms_from_manifest_list(ref, str(daemon_export_temp))
+
+                # Check if manifest list fully resolves all requested platforms (or all platforms if no filter)
+                if manifest_list_exports and _is_manifest_list_fully_resolved(
+                    manifest_list_exports, platforms
+                ):
+                    # Manifest list fully resolves all needed platforms — skip registry contact entirely
+                    console.info(
+                        f"Local manifest list fully resolves {ref}, skipping registry contact"
+                    )
+                    _assemble_multiplatform_from_manifest_list_exports(
+                        ref,
+                        manifest_list_exports,
+                        str(image_tar_path),
+                        str(daemon_export_dir),
+                    )
+                    console.info(f"Pulled and materialized: {ref} → {safe_filename}")
                     pulled_images[ref] = str(image_tar_path)
-                    continue
+                    continue  # Skip to next ref; no registry contact needed
 
-            # Fall back to registry pull
-            oras_client = registry_clients[hostname]
+                # PRIORITY 2: Registry is the source of truth for platform set
+                try:
+                    registry_manifest = oras_client.get_manifest(ref)
+                except Exception as e:
+                    # Registry unreachable; try degraded fallback: manifest-list-aware resolution
+                    console.debug(f"Registry unreachable for {ref}: {e}, trying degraded fallback...")
 
-            # Get the manifest (handles both single-arch and multi-arch)
-            try:
-                manifest = oras_client.get_manifest(ref)
-            except Exception as e:
-                msg = (
-                    f"Registry did not return a valid manifest for {ref} — the image "
-                    f"may not exist at this reference, or the registry may be unreachable: {e}"
+                    # Re-check manifest list if not already done above
+                    if not manifest_list_exports:
+                        manifest_list_exports = _resolve_all_platforms_from_manifest_list(
+                            ref, str(daemon_export_temp)
+                        )
+
+                    if manifest_list_exports:
+                        # Manifest list exists and resolved some (or all) platforms
+                        resolved_platforms = [p for p, export in manifest_list_exports.items() if export is not None]
+                        if resolved_platforms:
+                            # We have at least some platforms from the manifest list
+                            console.warning(
+                                f"Registry unreachable for {ref}; using {len(resolved_platforms)} platform(s) "
+                                f"from local manifest list: {', '.join(resolved_platforms)}. "
+                                f"For full multi-platform support, ensure registry access. → {safe_filename}"
+                            )
+                            _assemble_multiplatform_from_manifest_list_exports(
+                                ref,
+                                manifest_list_exports,
+                                str(image_tar_path),
+                                str(daemon_export_dir),
+                            )
+                            pulled_images[ref] = str(image_tar_path)
+                            continue  # Skip to next ref; don't fail
+
+                    # Fallback: try single platform from daemon (old behavior)
+                    console.debug("Manifest list unavailable or unresolved, trying single daemon image...")
+                    daemon_tar = _lookup_image_with_runtime(
+                        ref,
+                        str(daemon_export_dir),
+                        "auto",
+                        oras_client,
+                    )
+                    if daemon_tar:
+                        # Degraded mode: single platform from daemon with explicit warning
+                        image_tar_path.write_bytes(Path(daemon_tar).read_bytes())
+                        console.warning(
+                            f"Registry unreachable and manifest list not available for {ref}; "
+                            f"using local daemon copy (single platform only). "
+                            f"For full multi-platform support, ensure registry access. → {safe_filename}"
+                        )
+                        pulled_images[ref] = str(image_tar_path)
+                        continue  # Skip to next ref; don't fail
+
+                    # Neither registry nor daemon available
+                    msg = (
+                        f"Registry unreachable for {ref} and no local daemon copy available. "
+                        f"Cannot proceed: {e}"
+                    )
+                    raise OciRegistryError(msg) from e
+
+                # Step 2: Determine target platform set (full registry index, or --platform-filtered)
+                # This validates --platform values too (via _filter_manifests_by_platforms)
+                target_manifest = registry_manifest
+                if platforms:
+                    target_manifest = _filter_manifests_by_platforms(registry_manifest, platforms)
+
+                # Step 3: For each target platform, check local daemons (Podman → Docker)
+                # then download from registry as needed
+                _pull_image_with_local_daemon_optimization(
+                    ref,
+                    target_manifest,
+                    oras_client,
+                    str(image_tar_path),
+                    str(daemon_export_dir),
                 )
-                raise OciRegistryError(msg) from e
 
-            # Create OCI image layout tar with all blobs
-            _create_oci_image_layout_tar(ref, manifest, oras_client, str(image_tar_path), platforms)
-
-            console.info(f"Pulled and materialized: {ref} → {safe_filename}")
-            pulled_images[ref] = str(image_tar_path)
+                console.info(f"Pulled and materialized: {ref} → {safe_filename}")
+                pulled_images[ref] = str(image_tar_path)
 
         except (OciRegistryError, CredentialsExpiredError) as e:
             console.warning(f"Failed to pull image {ref}: {e}")
@@ -1726,6 +2127,260 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
         raise OciRegistryError(msg + refs_str)
 
     console.info(f"Successfully pulled and materialized {len(pulled_images)} unique image(s)")
+
+
+def _pull_image_with_local_daemon_optimization(
+    image_ref: str,
+    target_manifest: dict[str, Any],
+    oras_client: OrasClient,
+    output_tar_path: str,
+    daemon_export_dir: str,
+) -> None:
+    """Pull an image in auto mode, using local daemon for matching platforms when available.
+
+    In auto mode, the registry manifest/index is authoritative for the platform set.
+    Local sources are checked in priority order:
+    1. Local Podman manifest list (if present) — ALL resolvable child platforms exported locally
+    2. Per-platform daemon lookup (Podman → Docker) for platforms not resolved via manifest list
+    3. Registry fallback for any remaining platforms
+
+    This optimizes bandwidth/time for local hits while ensuring all requested platforms
+    are included from the registry as a fallback.
+
+    Args:
+        image_ref: Image reference (e.g. 'nginx:latest').
+        target_manifest: The OCI manifest/index to pull (already registry-fetched and possibly filtered).
+        oras_client: OrasClient instance for registry pulls.
+        output_tar_path: Path to write the final OCI layout tar.
+        daemon_export_dir: Temporary directory for daemon exports.
+
+    Raises:
+        OciRegistryError: If pulling or assembly fails.
+    """
+    # Determine the list of platform slots to fill from the manifest
+    media_type = target_manifest.get("mediaType", "")
+    is_index = "index" in media_type
+
+    platform_slots: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+
+    if is_index:
+        # Multi-platform index: each entry in manifests is a platform slot
+        manifests_list = target_manifest.get("manifests", [])
+        for manifest_entry in manifests_list:
+            platform_desc = manifest_entry.get("platform")
+            platform_slots.append((manifest_entry, platform_desc))
+    else:
+        # Single-platform manifest: one implicit slot
+        platform_slots.append((target_manifest, None))
+
+    # For each platform slot, try local sources first, then fall back to registry
+    pre_downloaded_blobs: dict[str, str] = {}
+    daemon_export_temp = Path(daemon_export_dir)
+    daemon_export_temp.mkdir(parents=True, exist_ok=True)
+
+    # STEP 1: Check for local Podman manifest list — highest priority (all platforms at once)
+    console.debug(f"Checking for local Podman manifest list for {image_ref}")
+    manifest_list_exports = _resolve_all_platforms_from_manifest_list(image_ref, str(daemon_export_temp))
+
+    # Track which platforms were resolved via manifest list
+    manifest_list_platforms = set()
+
+    for platform_str, export_tar in manifest_list_exports.items():
+        if export_tar is not None:
+            console.debug(f"Using manifest-list resolution for {platform_str}: {export_tar}")
+            persistent_blobs_dir = Path(daemon_export_dir) / "blobs_cache"
+            _extract_blobs_from_daemon_tar(export_tar, platform_str, pre_downloaded_blobs, persistent_blobs_dir)
+            manifest_list_platforms.add(platform_str)
+        else:
+            console.debug(f"Manifest list entry exists for {platform_str} but digest did not resolve locally")
+
+    # STEP 2: For remaining platforms (not resolved via manifest list), try per-platform daemon lookup
+    for _slot_manifest_descriptor, platform_desc in platform_slots:
+        platform_str = _platform_descriptor_to_string(platform_desc)
+
+        # Skip if already resolved via manifest list
+        if platform_str in manifest_list_platforms:
+            console.debug(f"Platform {platform_str} already resolved via manifest list, skipping daemon lookup")
+            continue
+
+        console.debug(f"Processing platform slot: {platform_str} (no manifest-list match)")
+
+        # Try to find a matching local daemon image
+        daemon_tar = _try_daemon_match_for_platform(
+            image_ref, platform_str, platform_desc, daemon_export_temp
+        )
+
+        if daemon_tar:
+            # Extract blobs from daemon tar and collect digests for later assembly
+            console.debug(f"Using daemon export for {platform_str}: {daemon_tar}")
+            persistent_blobs_dir = Path(daemon_export_dir) / "blobs_cache"
+            _extract_blobs_from_daemon_tar(daemon_tar, platform_str, pre_downloaded_blobs, persistent_blobs_dir)
+        else:
+            console.debug(f"No local daemon match for {platform_str}, will pull from registry")
+
+    # STEP 3: Assemble the final OCI layout, using pre-downloaded blobs where available
+    # Registry pull will happen for any platforms not covered by manifest list or daemon
+    _create_oci_image_layout_tar(
+        image_ref, target_manifest, oras_client, output_tar_path, [], pre_downloaded_blobs
+    )
+
+
+
+def _platform_descriptor_to_string(platform_desc: dict[str, Any] | None) -> str:
+    """Convert an OCI platform descriptor to a platform string.
+
+    Args:
+        platform_desc: Platform descriptor dict with 'os', 'architecture', optionally 'variant'.
+                      None means unknown/single-platform.
+
+    Returns:
+        Platform string (e.g. 'linux/amd64') or 'unknown' if None.
+    """
+    if not platform_desc:
+        return "unknown"
+
+    os_part = platform_desc.get("os", "unknown")
+    arch_part = platform_desc.get("architecture", "unknown")
+    variant_part = platform_desc.get("variant")
+
+    if variant_part:
+        return f"{os_part}/{arch_part}/{variant_part}"
+    return f"{os_part}/{arch_part}"
+
+
+def _try_daemon_match_for_platform(
+    image_ref: str,
+    platform_str: str,
+    platform_desc: dict[str, Any] | None,
+    export_dir: Path,
+) -> str | None:
+    """Try to find and export a matching local daemon image for a platform.
+
+    Tries Podman then Docker (auto-probe order). Returns path to exported tar if found.
+
+    Args:
+        image_ref: Image reference.
+        platform_str: Platform string (e.g. 'linux/amd64').
+        platform_desc: OCI platform descriptor dict (for matching).
+        export_dir: Directory to write exported tar.
+
+    Returns:
+        Path to exported OCI-archive tar, or None if no match found.
+    """
+    # Try Podman first
+    podman_export = _lookup_image_podman(image_ref, str(export_dir), required=False)
+    if podman_export and _verify_daemon_export_platform_match(podman_export, platform_str, platform_desc):
+        return podman_export
+
+    # Try Docker as fallback
+    docker_export = _lookup_image_docker(image_ref, str(export_dir), required=False)
+    if docker_export and _verify_daemon_export_platform_match(docker_export, platform_str, platform_desc):
+        return docker_export
+
+    return None
+
+
+def _verify_daemon_export_platform_match(
+    export_tar: str,
+    platform_str: str,
+    platform_desc: dict[str, Any] | None,
+) -> bool:
+    """Verify that a daemon-exported tar's platform matches the requested one.
+
+    Args:
+        export_tar: Path to daemon export tar.
+        platform_str: Requested platform string.
+        platform_desc: OCI platform descriptor to match against.
+
+    Returns:
+        True if platform matches, False otherwise.
+    """
+    if not platform_desc:
+        # Single-platform manifest: accept the match
+        return True
+
+    # Extract the manifest from the OCI-archive and check its platform
+    temp_dir = Path(mkdtemp())
+    try:
+        with tar_open(export_tar, "r") as tar:
+            tar.extractall(temp_dir, filter="data")
+
+        # OCI-archive stores the manifest in index.json or as a single manifest
+        index_json_path = temp_dir / "index.json"
+        if index_json_path.exists():
+            with index_json_path.open() as f:
+                index_data = json_load(f)
+
+            # Check if this is an index or single manifest
+            media_type = index_data.get("mediaType", "")
+            if "index" in media_type:
+                # It's an index; we might need the first entry
+                manifests = index_data.get("manifests", [])
+                if manifests:
+                    exported_platform = manifests[0].get("platform")
+                else:
+                    return False
+            else:
+                # Single manifest in index.json entry
+                # The platform info is stored in the manifest entry's annotations/platform
+                manifests = index_data.get("manifests", [])
+                if manifests:
+                    exported_platform = manifests[0].get("platform")
+                else:
+                    return False
+        else:
+            # Fallback: no index.json, can't verify platform
+            return False
+
+        # Use _platform_matches_manifest to verify
+        return _platform_matches_manifest(platform_str, exported_platform)
+
+    except Exception as e:  # noqa: BLE001
+        console.debug(f"Failed to verify daemon export platform: {e}")
+        return False
+    finally:
+        rmtree(temp_dir, ignore_errors=True)
+
+
+def _extract_blobs_from_daemon_tar(
+    daemon_tar: str,
+    platform_str: str,
+    pre_downloaded_blobs: dict[str, str],
+    persistent_blob_dir: Path,
+) -> None:
+    """Extract blobs from a daemon export tar and record them for later assembly.
+
+    Copies blobs to persistent_blob_dir so they survive temp cleanup.
+
+    Args:
+        daemon_tar: Path to daemon export tar (OCI-archive format).
+        platform_str: Platform string (for logging).
+        pre_downloaded_blobs: Dict to update with digest → blob_path mappings.
+        persistent_blob_dir: Directory to persistently store copied blobs.
+    """
+    temp_dir = Path(mkdtemp())
+    try:
+        with tar_open(daemon_tar, "r") as tar:
+            tar.extractall(temp_dir, filter="data")
+
+        # Copy all blobs from the daemon export to the persistent directory
+        blobs_source_dir = temp_dir / "blobs" / "sha256"
+        if blobs_source_dir.exists():
+            persistent_blob_dir.mkdir(parents=True, exist_ok=True)
+            for blob_file in blobs_source_dir.iterdir():
+                if blob_file.is_file():
+                    # Copy blob to persistent location
+                    digest = f"sha256:{blob_file.name}"
+                    persistent_blob_path = persistent_blob_dir / blob_file.name
+                    persistent_blob_path.write_bytes(blob_file.read_bytes())
+                    # Record the persistent path in pre_downloaded_blobs
+                    pre_downloaded_blobs[digest] = str(persistent_blob_path)
+                    console.debug(f"Recorded blob {digest} from daemon export ({platform_str})")
+
+    except Exception as e:  # noqa: BLE001
+        console.debug(f"Failed to extract blobs from daemon tar: {e}")
+    finally:
+        rmtree(temp_dir, ignore_errors=True)
 
 
 def _add_component_to_bundle(  # noqa: PLR0913
