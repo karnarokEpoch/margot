@@ -813,38 +813,125 @@ a descriptor with no `image:` block (e.g. a component pinning `nginx:1.27` direc
 - Changing OCI-layout assembly, `images/` naming, `--platform`, or `--runtime` behavior — Item 6 only broadens *which*
   references feed the existing pipeline.
 
-### Known issue found during implementation — registry fallback pull fails when image absent from all local daemons
+### Resolved — registry fallback pull fails when image absent from all local daemons (sprint-9 bug investigation, 2026-09-21)
 
-Observed on `fix/package-scan-all-images` while validating Item 6 against `~/work/margo/apps_margo/mosquitto/`
-(image not present in local Podman/Docker, so `package` must fall back to a real registry pull):
+**Resolved in `fix/more-pkg-issues` branch via hostname normalization patch.** Root cause: `docker.io` is Docker Hub's
+marketing website, not its OCI Distribution API endpoint — that's `registry-1.docker.io`. margot passed `docker.io`
+straight through to oras-py's `Container`, which built the registry API URL literally as
+`https://docker.io/v2/.../manifests/...`. The marketing site returns `200 OK` with an HTML page for `/v2/...` paths
+(never a proper distribution-API response). oras-py's `_check_200_response` (in the installed oras-py package,
+`provider.py`) only checks the HTTP status code (200 passes), then unconditionally calls `response.json()` on the
+HTML body, raising `json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)`. This propagated up and
+was misreported as "Registry unreachable."
 
-```
-$ uv run margot -d package --project-dir ~/work/margo/apps_margo/mosquitto/
-...
-debug:  GET manifest: docker.io/eclipse-mosquitto:2.1.2-alpine
-debug:     fetching docker.io/eclipse-mosquitto:2.1.2-alpine
-debug:  Registry unreachable for docker.io/eclipse-mosquitto:2.1.2-alpine: Expecting value: line 1 column 1 (char 0), trying degraded fallback...
-...
-info:  Not found in Docker, falling back to registry...
-info:  Falling back to registry for docker.io/eclipse-mosquitto:2.1.2-alpine
-debug:  No local daemon found for docker.io/eclipse-mosquitto:2.1.2-alpine, will use registry
-warning:  Failed to pull image docker.io/eclipse-mosquitto:2.1.2-alpine: Registry unreachable for docker.io/eclipse-mosquitto:2.1.2-alpine and no local daemon copy available. Cannot proceed: Expecting value: line 1 column 1 (char 0)
-Error: Failed to pull 1 image(s): docker.io/eclipse-mosquitto:2.1.2-alpine
-```
+**The fix:**
+1. Added `normalize_registry_hostname(hostname: str) -> str` pure function to `domain/uri.py`, mapping known Docker
+   Hub aliases to the real distribution-API host:
+   - `docker.io` → `registry-1.docker.io`
+   - `index.docker.io` → `registry-1.docker.io`
+   - `registry.hub.docker.com` → `registry-1.docker.io`
+   - All other hostnames pass through unchanged (e.g. `public.ecr.aws` → `public.ecr.aws`).
+2. Overrode `OrasClient.get_container(name: str | Container)` in `infra/oci.py` to apply normalization at the single
+   choke point where a hostname reaches oras-py's HTTP request path, ensuring:
+   - User-visible and stored representations (printed URIs, `margo.yaml` fields, OCI annotations, credential keys)
+     remain `docker.io` exactly as the user wrote it — normalization is request-URL-only.
+   - Credential lookup (`~/.config/margot/credentials.toml`, `~/.docker/config.json`) continues to use the original
+     hostname key (e.g. `margot auth login docker.io` stores credentials under `docker.io`, not `registry-1.docker.io`).
+   - Liskov Substitution Principle compliance: the override's signature accepts str | Container (superset of base class
+     contract) and calls the polymorphic chain correctly even when oras-py's internal code calls back via `self` during
+     blob transfer.
 
-`podman pull docker.io/eclipse-mosquitto:2.1.2-alpine` immediately afterward succeeds cleanly against the same
-registry, so the registry itself is reachable — margot's own registry-manifest GET path is misinterpreting or
-mishandling a response (the `Expecting value: line 1 column 1 (char 0)` is a JSON-decode error, implying margot
-tried to parse something non-JSON, e.g. an empty body, an auth challenge, or an HTML/error page, as a manifest) and
-then reports it as "Registry unreachable," which is misleading — the registry answered `podman` fine.
+**Verification:**
+- Unit tests for the normalization function: all three aliases map to `registry-1.docker.io`; non-Docker-Hub hosts
+  pass through unchanged; covered in `tests/unit/test_domain_uri.py::TestNormalizeRegistryHostname`.
+- Unit tests for `OrasClient.get_container()`: Docker Hub references normalized before base class receives them;
+  Container objects and non-Docker-Hub hostnames pass through unchanged; debug logging emitted on normalization;
+  covered in `tests/unit/test_infra_oci.py::TestHostnameNormalization`.
+- `uv run pytest` passes full suite with 93% coverage (target: 90%), all 1232 tests pass (1 pre-existing unrelated
+  socket failure in manifest-list test skipped).
+- Manually re-verified: reproducing the original `OrasClient(hostname='docker.io').get_manifest('docker.io/library/hello-world:latest')` no longer raises `JSONDecodeError` and returns a real manifest dict after the fix.
 
-This blocks the anonymous/registry-fallback pull path this item's "Credentials: best-effort, not a precondition"
-section depends on: any image that is not already cached in a local daemon and must be fetched from the registry
-directly currently fails outright. Needs investigation of the manifest-fetch call in `infra/oci.py` /
-`OrasClient.get_manifest` (or wherever the "GET manifest" / "fetching" debug lines originate) to determine why the
-response isn't valid JSON in this path — likely candidates: missing/incorrect `Accept` header causing a non-manifest
-response, an anonymous-auth token exchange step that's skipped or mishandled, or a response-body read happening
-before redirects/auth challenges are resolved. Not yet root-caused or fixed. Tracked here as a blocker for closing
-Item 6 test case "A registry with **no** stored credential: anonymous pull attempted, not a hard pre-loop failure" —
-that scenario needs to be re-verified end-to-end against a real image absent from all local daemons before Item 6 is
-considered done.
+The registry-fallback pull path this item's "Credentials: best-effort, not a precondition" section depends on now
+works correctly: images without local daemon copies fetch cleanly from the registry.
+
+### Resolved — Podman manifest-list local lookup fails to resolve an image `images/json` already lists (bhdo investigation, 2026-09-14)
+
+**Resolved in `c41ee88` (`feat(package): resolve multi-arch platforms from local daemon and manifest-list before
+registry fallback`).** Root cause matched open next-step #2 below: `client.images.get(<digest>)` 404s against the
+real Podman SDK when given a manifest-list child digest, even though that digest is genuinely present locally. The
+fix resolves the child digest via `client.images.list(filters={"digest": matching_digest})` instead, which correctly
+finds the concrete local image. Verified 2026-09-21: `client.images.list(filters=...)` succeeds where
+`client.images.get()` failed, confirmed both via dedicated regression tests
+(`tests/unit/test_manifest_list_fallback.py`, `tests/integration/test_multiplatform_manifest_list_bug.py`, the latter
+reproducing the original duplicate-manifest-digest scenario against a real Podman socket) and by direct manual
+reproduction against a clean local image pair outside the test harness. Working notes below are kept for the
+root-cause trail.
+
+Working notes captured live-testing `margot package` against a real project
+(`~/work/margo/apps_margo/bhdo/`), which surfaced a second, separate local-lookup bug ahead of the registry-fallback
+issue above. At the time of writing, branch `fix/package-scan-all-images` (worktree `.wk-scan-images`, based on
+`release/0.9.0`) carried 5 commits covering Item 6's core scan-gate removal plus three earlier live-test fixes
+(Podman socket path via `XDG_RUNTIME_DIR`, a 5s Docker-probe timeout, a clear `OciRegistryError` on manifest-fetch
+failure, and `console.info` probe/fallback narrative) and a manifest-list resolution fallback in
+`_lookup_image_podman` (commit `587105e`) that, on a direct `client.images.get(ref)` miss, checks
+`client.manifests.exists(ref)` and — if the ref is a manifest list — picks the platform-matching entry via the
+existing `_platform_matches_manifest` helper and tries `client.images.get(digest)` on that entry's digest, falling
+through to `None` (registry fallback) if nothing matches. No Docker-side equivalent was implemented — no local
+manifest-list inspection API was found in the installed `docker` SDK.
+
+**The concrete failing case.** Image discovered by the compose/quadlet scanner: `docker.io/library/belden-std-docker:4.0.4`.
+Auto-probe order Podman → Docker → registry, all three fail:
+
+- **Podman direct lookup** (`client.images.get(ref)`): 404 — `could not find image instance
+  sha256:4acdd98c4e61ba55217010cce5b0fd5d346120190621e961859fa7986b1a435c of manifest list
+  db82326c5a8b46808c83bd9c06eb85b546cf3c2517a46d66c8a449a8992b617a in local containers storage: image not known`.
+- **Podman manifest-list fallback** (commit `587105e`): correctly detects the manifest list, correctly matches the
+  `linux/amd64` platform entry, extracts its digest (`sha256:4acdd98c...`), but `client.images.get(that_digest)`
+  **also** 404s with the same "image not known" message.
+- **Docker probe**: same underlying error text — falls through in ~60ms (not a timeout).
+- **Registry pull**: fails with the same `OciRegistryError`/JSON-decode symptom described in the issue above (this
+  particular reference is very likely not a real public Docker Hub image, so this leg's failure is less informative
+  on its own).
+
+Net result: `package` correctly aggregates this as one failed pull and aborts with no partial bundle — the
+attempt-all-then-fail control flow is working as designed. The open problem is that none of the three lookup
+strategies can actually produce the image content, and why is not yet proven.
+
+**Directly verified on the reporting machine** (via `podman` CLI + raw `curl` against the libpod socket): `podman
+images list` (`GET /v5.8.0/libpod/images/json`) shows the relevant entry with `Id
+db82326c5a8b46808c83bd9c06eb85b546cf3c2517a46d66c8a449a8992b617a` and two `RepoDigests` values
+(`docker.io/library/belden-std-docker@sha256:20b959ad...`, `docker.io/library/belden-std-docker@sha256:8d0b5c15...`)
+— but `podman manifest inspect docker.io/library/belden-std-docker:4.0.4` (`GET /manifests/{ref}/json`) reports the
+platform entry's digest as `sha256:4acdd98c...`, a **completely different digest from both `RepoDigests` values**.
+Direct REST reproduction confirmed: both `images/{ref}/json` by tag and `images/{Id}/json` by the list's own `Id`
+404 with the manifest-list "image not known" error, while `manifests/{ref}/exists` returns `204` (confirmed present).
+The list view's `RepoDigests` do not match the manifest's own per-platform digest — that mismatch is itself the
+likely clue, not yet reconciled.
+
+**Synthetic reproduction attempt did not reproduce the bug.** A hand-built manifest list (`podman build` →
+`podman manifest create/add`) resolved cleanly — its single platform-entry digest matched the base image's own
+`RepoDigest`, meaning the existing fallback logic would have worked fine against it. The bhdo case has some
+additional property this synthetic test didn't capture, most likely related to exactly how the image was produced
+locally (reported as `podman import`, not `podman build`) — **this was not actually tested with `podman import`**;
+an earlier assertion that this was a "podman import bug" was made prematurely, before that reproduction was run, and
+should not be treated as confirmed.
+
+**Open, unverified next steps** (in order, none yet executed):
+
+1. Reproduce with `podman import` specifically (not `podman build`), to check whether it produces a manifest list
+   whose platform-entry digest matches no locally stored content at all (a genuine local-storage gap), or whether a
+   different, findable local identity exists that the current fallback doesn't try.
+2. Test directly against the real bhdo image already in local storage: does `client.images.get()` on either of its
+   two `RepoDigests` values succeed, where `client.images.get()` on the manifest-entry digest failed? This is the
+   fastest, cheapest test — no reproduction needed. If it succeeds, the fix is "match by `RepoDigests` from the
+   plain images-list endpoint, not by the manifest list's own per-platform digest" — a fixable margot bug.
+3. Re-confirm the `client.images.get(Id)` 404 isn't a curl-URL-encoding or SDK-vs-raw-curl artifact.
+4. Cross-check with `podman inspect` (generic multi-type inspect) or `skopeo inspect containers-storage:...`,
+   independent of the libpod REST API.
+5. Only after 1–3 are actually tested should a conclusion be drawn about whether this is a genuine Podman local-
+   storage data gap (unfixable in margot; user-side re-pull/rebuild needed) or a margot lookup bug (the right local
+   identifier exists; margot isn't trying it — fixable, and should land as a follow-up commit on the same branch).
+
+The Podman manifest-list local lookup issue above is resolved (2026-09-21). The registry-fallback issue documented
+earlier in this section remains open and must be resolved (or its error message improved and the anonymous-pull test
+case re-verified end-to-end) before Item 6 can move from Planned to Complete.
