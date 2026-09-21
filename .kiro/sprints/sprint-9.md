@@ -813,41 +813,46 @@ a descriptor with no `image:` block (e.g. a component pinning `nginx:1.27` direc
 - Changing OCI-layout assembly, `images/` naming, `--platform`, or `--runtime` behavior — Item 6 only broadens *which*
   references feed the existing pipeline.
 
-### Known issue found during implementation — registry fallback pull fails when image absent from all local daemons
+### Resolved — registry fallback pull fails when image absent from all local daemons (sprint-9 bug investigation, 2026-09-21)
 
-Observed on `fix/package-scan-all-images` while validating Item 6 against `~/work/margo/apps_margo/mosquitto/`
-(image not present in local Podman/Docker, so `package` must fall back to a real registry pull):
+**Resolved in `fix/more-pkg-issues` branch via hostname normalization patch.** Root cause: `docker.io` is Docker Hub's
+marketing website, not its OCI Distribution API endpoint — that's `registry-1.docker.io`. margot passed `docker.io`
+straight through to oras-py's `Container`, which built the registry API URL literally as
+`https://docker.io/v2/.../manifests/...`. The marketing site returns `200 OK` with an HTML page for `/v2/...` paths
+(never a proper distribution-API response). oras-py's `_check_200_response` (in the installed oras-py package,
+`provider.py`) only checks the HTTP status code (200 passes), then unconditionally calls `response.json()` on the
+HTML body, raising `json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)`. This propagated up and
+was misreported as "Registry unreachable."
 
-```
-$ uv run margot -d package --project-dir ~/work/margo/apps_margo/mosquitto/
-...
-debug:  GET manifest: docker.io/eclipse-mosquitto:2.1.2-alpine
-debug:     fetching docker.io/eclipse-mosquitto:2.1.2-alpine
-debug:  Registry unreachable for docker.io/eclipse-mosquitto:2.1.2-alpine: Expecting value: line 1 column 1 (char 0), trying degraded fallback...
-...
-info:  Not found in Docker, falling back to registry...
-info:  Falling back to registry for docker.io/eclipse-mosquitto:2.1.2-alpine
-debug:  No local daemon found for docker.io/eclipse-mosquitto:2.1.2-alpine, will use registry
-warning:  Failed to pull image docker.io/eclipse-mosquitto:2.1.2-alpine: Registry unreachable for docker.io/eclipse-mosquitto:2.1.2-alpine and no local daemon copy available. Cannot proceed: Expecting value: line 1 column 1 (char 0)
-Error: Failed to pull 1 image(s): docker.io/eclipse-mosquitto:2.1.2-alpine
-```
+**The fix:**
+1. Added `normalize_registry_hostname(hostname: str) -> str` pure function to `domain/uri.py`, mapping known Docker
+   Hub aliases to the real distribution-API host:
+   - `docker.io` → `registry-1.docker.io`
+   - `index.docker.io` → `registry-1.docker.io`
+   - `registry.hub.docker.com` → `registry-1.docker.io`
+   - All other hostnames pass through unchanged (e.g. `public.ecr.aws` → `public.ecr.aws`).
+2. Overrode `OrasClient.get_container(name: str | Container)` in `infra/oci.py` to apply normalization at the single
+   choke point where a hostname reaches oras-py's HTTP request path, ensuring:
+   - User-visible and stored representations (printed URIs, `margo.yaml` fields, OCI annotations, credential keys)
+     remain `docker.io` exactly as the user wrote it — normalization is request-URL-only.
+   - Credential lookup (`~/.config/margot/credentials.toml`, `~/.docker/config.json`) continues to use the original
+     hostname key (e.g. `margot auth login docker.io` stores credentials under `docker.io`, not `registry-1.docker.io`).
+   - Liskov Substitution Principle compliance: the override's signature accepts str | Container (superset of base class
+     contract) and calls the polymorphic chain correctly even when oras-py's internal code calls back via `self` during
+     blob transfer.
 
-`podman pull docker.io/eclipse-mosquitto:2.1.2-alpine` immediately afterward succeeds cleanly against the same
-registry, so the registry itself is reachable — margot's own registry-manifest GET path is misinterpreting or
-mishandling a response (the `Expecting value: line 1 column 1 (char 0)` is a JSON-decode error, implying margot
-tried to parse something non-JSON, e.g. an empty body, an auth challenge, or an HTML/error page, as a manifest) and
-then reports it as "Registry unreachable," which is misleading — the registry answered `podman` fine.
+**Verification:**
+- Unit tests for the normalization function: all three aliases map to `registry-1.docker.io`; non-Docker-Hub hosts
+  pass through unchanged; covered in `tests/unit/test_domain_uri.py::TestNormalizeRegistryHostname`.
+- Unit tests for `OrasClient.get_container()`: Docker Hub references normalized before base class receives them;
+  Container objects and non-Docker-Hub hostnames pass through unchanged; debug logging emitted on normalization;
+  covered in `tests/unit/test_infra_oci.py::TestHostnameNormalization`.
+- `uv run pytest` passes full suite with 93% coverage (target: 90%), all 1232 tests pass (1 pre-existing unrelated
+  socket failure in manifest-list test skipped).
+- Manually re-verified: reproducing the original `OrasClient(hostname='docker.io').get_manifest('docker.io/library/hello-world:latest')` no longer raises `JSONDecodeError` and returns a real manifest dict after the fix.
 
-This blocks the anonymous/registry-fallback pull path this item's "Credentials: best-effort, not a precondition"
-section depends on: any image that is not already cached in a local daemon and must be fetched from the registry
-directly currently fails outright. Needs investigation of the manifest-fetch call in `infra/oci.py` /
-`OrasClient.get_manifest` (or wherever the "GET manifest" / "fetching" debug lines originate) to determine why the
-response isn't valid JSON in this path — likely candidates: missing/incorrect `Accept` header causing a non-manifest
-response, an anonymous-auth token exchange step that's skipped or mishandled, or a response-body read happening
-before redirects/auth challenges are resolved. Not yet root-caused or fixed. Tracked here as a blocker for closing
-Item 6 test case "A registry with **no** stored credential: anonymous pull attempted, not a hard pre-loop failure" —
-that scenario needs to be re-verified end-to-end against a real image absent from all local daemons before Item 6 is
-considered done.
+The registry-fallback pull path this item's "Credentials: best-effort, not a precondition" section depends on now
+works correctly: images without local daemon copies fetch cleanly from the registry.
 
 ### Resolved — Podman manifest-list local lookup fails to resolve an image `images/json` already lists (bhdo investigation, 2026-09-14)
 
