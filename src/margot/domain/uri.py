@@ -2,6 +2,13 @@
 
 from semver import Version
 
+# Docker Hub registry aliases that map to the real OCI Distribution API endpoint
+_DOCKER_HUB_ALIASES = {
+    "docker.io": "registry-1.docker.io",
+    "index.docker.io": "registry-1.docker.io",
+    "registry.hub.docker.com": "registry-1.docker.io",
+}
+
 
 def strip_scheme(uri: str) -> str:
     """
@@ -98,3 +105,29 @@ def validate_semver_tag(tag: str) -> bool:
         True if valid SemVer, False otherwise.
     """
     return Version.is_valid(tag)
+
+
+def normalize_registry_hostname(hostname: str) -> str:
+    """
+    Normalize a registry hostname to its canonical OCI Distribution API endpoint.
+
+    Maps known Docker Hub aliases to the real OCI Distribution API host.
+    All other hostnames pass through unchanged.
+
+    Args:
+        hostname: Registry hostname (e.g. 'docker.io', 'registry-1.docker.io', 'public.ecr.aws').
+
+    Returns:
+        The canonical hostname for OCI Distribution API requests.
+        - 'docker.io' → 'registry-1.docker.io'
+        - 'index.docker.io' → 'registry-1.docker.io'
+        - 'registry.hub.docker.com' → 'registry-1.docker.io'
+        - Any other hostname passes through unchanged (e.g. 'public.ecr.aws' → 'public.ecr.aws').
+
+    Examples:
+        normalize_registry_hostname("docker.io") → "registry-1.docker.io"
+        normalize_registry_hostname("index.docker.io") → "registry-1.docker.io"
+        normalize_registry_hostname("public.ecr.aws") → "public.ecr.aws"
+        normalize_registry_hostname("registry-1.docker.io") → "registry-1.docker.io"
+    """
+    return _DOCKER_HUB_ALIASES.get(hostname, hostname)

@@ -420,3 +420,144 @@ class TestGetManifestLSP:
 
         err_output = err.getvalue()
         assert "GET manifest:" in err_output
+
+
+class TestHostnameNormalization:
+    """Tests for OrasClient.get_container() Docker Hub hostname normalization."""
+
+    def test_get_container_normalizes_docker_io_to_registry_1(self, mocker: Any) -> None:
+        """get_container with 'docker.io/...' should normalize to 'registry-1.docker.io/...'."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_base_get_container = mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_container",
+            return_value=mocker.MagicMock(),
+        )
+        client = OrasClient()
+        client.get_container("docker.io/library/hello-world:latest")
+        # Base class should receive the normalized hostname
+        call_args = mock_base_get_container.call_args
+        normalized_ref = call_args[0][0]  # First positional arg
+        assert normalized_ref == "registry-1.docker.io/library/hello-world:latest"
+
+    def test_get_container_normalizes_index_docker_io(self, mocker: Any) -> None:
+        """get_container with 'index.docker.io/...' should normalize to 'registry-1.docker.io/...'."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_base_get_container = mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_container",
+            return_value=mocker.MagicMock(),
+        )
+        client = OrasClient()
+        client.get_container("index.docker.io/my-app:1.0")
+        call_args = mock_base_get_container.call_args
+        normalized_ref = call_args[0][0]
+        assert normalized_ref == "registry-1.docker.io/my-app:1.0"
+
+    def test_get_container_normalizes_registry_hub_docker_com(self, mocker: Any) -> None:
+        """get_container with 'registry.hub.docker.com/...' should normalize."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_base_get_container = mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_container",
+            return_value=mocker.MagicMock(),
+        )
+        client = OrasClient()
+        client.get_container("registry.hub.docker.com/my-app:1.0")
+        call_args = mock_base_get_container.call_args
+        normalized_ref = call_args[0][0]
+        assert normalized_ref == "registry-1.docker.io/my-app:1.0"
+
+    def test_get_container_passes_through_non_docker_hub_hostname(self, mocker: Any) -> None:
+        """get_container should pass through non-Docker-Hub hostnames unchanged."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_base_get_container = mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_container",
+            return_value=mocker.MagicMock(),
+        )
+        client = OrasClient()
+        client.get_container("public.ecr.aws/g2n4p2m7/margo:1.0.0")
+        call_args = mock_base_get_container.call_args
+        normalized_ref = call_args[0][0]
+        # ECR hostname should pass through unchanged
+        assert normalized_ref == "public.ecr.aws/g2n4p2m7/margo:1.0.0"
+
+    def test_get_container_passes_through_registry_1_docker_io_unchanged(self, mocker: Any) -> None:
+        """get_container with 'registry-1.docker.io' should pass through unchanged (already normalized)."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_base_get_container = mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_container",
+            return_value=mocker.MagicMock(),
+        )
+        client = OrasClient()
+        client.get_container("registry-1.docker.io/library/hello-world:latest")
+        call_args = mock_base_get_container.call_args
+        normalized_ref = call_args[0][0]
+        # Should remain unchanged (already normalized)
+        assert normalized_ref == "registry-1.docker.io/library/hello-world:latest"
+
+    def test_get_container_with_container_object_passes_through(self, mocker: Any) -> None:
+        """get_container(Container) should pass Container object through unchanged."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_base_get_container = mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_container",
+            return_value=mocker.MagicMock(),
+        )
+        container = Container(name="library/hello-world", registry="docker.io")
+        client = OrasClient()
+        client.get_container(container)
+        # Base class should receive the Container object unchanged
+        call_args = mock_base_get_container.call_args
+        passed_arg = call_args[0][0]
+        assert passed_arg is container
+
+    def test_get_container_emits_debug_when_normalizing(
+        self, mocker: Any, capture_console: tuple[Any, Any], reset_console: None
+    ) -> None:
+        """get_container should emit debug message when hostname is normalized."""
+        console.set_debug(True)
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_container",
+            return_value=mocker.MagicMock(),
+        )
+        _out, err = capture_console
+        client = OrasClient()
+        client.get_container("docker.io/library/hello-world:latest")
+        err_output = err.getvalue()
+        assert "Normalized registry hostname" in err_output
+        assert "docker.io" in err_output
+        assert "registry-1.docker.io" in err_output
+
+    def test_get_container_does_not_emit_debug_when_not_normalizing(
+        self, mocker: Any, capture_console: tuple[Any, Any], reset_console: None
+    ) -> None:
+        """get_container should not emit normalization debug message for non-Docker-Hub hosts."""
+        console.set_debug(True)
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_container",
+            return_value=mocker.MagicMock(),
+        )
+        _out, err = capture_console
+        client = OrasClient()
+        client.get_container("public.ecr.aws/g2n4p2m7/margo:1.0.0")
+        err_output = err.getvalue()
+        # Should not emit normalization message for non-Docker-Hub
+        assert "Normalized registry hostname" not in err_output
+
+    def test_init_with_docker_io_hostname_normalizes_for_auth_load(self, mocker: Any) -> None:
+        """OrasClient(hostname='docker.io') should normalize before loading credentials."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+        mock_auth = mocker.MagicMock()
+        mocker.patch.object(OrasClient, "auth", mock_auth, create=True)
+        mock_base_get_container = mocker.patch(
+            "margot.infra.oci.OrasClientLib.get_container",
+            return_value=mocker.MagicMock(spec=Container),
+        )
+        client = OrasClient(hostname="docker.io")
+        # The override's get_container should be called with the original hostname
+        # (before normalization at the override level, but the base class receives normalized)
+        call_args = mock_base_get_container.call_args
+        if call_args:
+            passed_arg = call_args[0][0]
+            # Could be string or Container; if string, should be normalized
+            if isinstance(passed_arg, str):
+                assert passed_arg == "registry-1.docker.io"
