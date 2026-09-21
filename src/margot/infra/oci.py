@@ -12,6 +12,7 @@ from oras.defaults import annotation_title
 from oras.oci import ManifestConfig, NewLayer, NewManifest
 
 from margot import console
+from margot.domain.uri import extract_hostname, normalize_registry_hostname
 from margot.infra import credentials
 
 # HTTP status code constants
@@ -131,6 +132,53 @@ class OrasClient(OrasClientLib):
         if hostname is not None:
             self.auth.load_configs(self.get_container(hostname))
         _configure_oras_logger()
+
+    def get_container(self, name: str | Container) -> Container:
+        """Resolve a container reference to a Container object, with Docker Hub hostname normalization.
+
+        Liskov Substitution Principle: This override must accept the same or wider types as the base class.
+        The base class accepts Union[str, Container]; this override preserves that contract by accepting both.
+
+        When a string reference is passed, normalizes known Docker Hub aliases (docker.io, index.docker.io,
+        registry.hub.docker.com) to registry-1.docker.io before passing it to the base class. This ensures
+        oras-py builds the correct OCI Distribution API URL for registry requests, since docker.io is Docker Hub's
+        marketing website (which returns HTML at /v2/ paths), not the API endpoint.
+
+        Container objects are passed through unchanged to the base class, since they already carry a
+        resolved hostname.
+
+        Args:
+            name: Either a full OCI reference string (e.g. "docker.io/library/hello-world:latest"),
+                a bare hostname (e.g. "docker.io"), or an already-resolved Container instance.
+
+        Returns:
+            A Container instance with the registry hostname normalized if applicable.
+        """
+        # If it's already a Container, pass through unchanged
+        if isinstance(name, Container):
+            return super().get_container(name)
+
+        # It's a string: could be a full URI or just a hostname
+        # Try to extract hostname; if it fails (no slash), treat the whole string as a hostname
+        try:
+            original_hostname = extract_hostname(name)
+        except ValueError:
+            # No '/' found: it might be a bare hostname like "docker.io"
+            # or an invalid URI that the base class will handle
+            original_hostname = name
+
+        # Normalize the hostname for the request URL
+        normalized_hostname = normalize_registry_hostname(original_hostname)
+
+        # If normalization changed the hostname, rebuild the reference for the base class
+        if normalized_hostname != original_hostname:
+            # Replace the original hostname with the normalized one at the start of the reference
+            normalized_reference = name.replace(original_hostname, normalized_hostname, 1)
+            console.debug(f"Normalized registry hostname: {original_hostname} → {normalized_hostname}")
+            return super().get_container(normalized_reference)
+
+        # No normalization needed, pass through
+        return super().get_container(name)
 
     def get_manifest(
         self,
