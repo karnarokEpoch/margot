@@ -552,7 +552,7 @@ class TestHostnameNormalization:
             "margot.infra.oci.OrasClientLib.get_container",
             return_value=mocker.MagicMock(spec=Container),
         )
-        client = OrasClient(hostname="docker.io")
+        _client = OrasClient(hostname="docker.io")
         # The override's get_container should be called with the original hostname
         # (before normalization at the override level, but the base class receives normalized)
         call_args = mock_base_get_container.call_args
