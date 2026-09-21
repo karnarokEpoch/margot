@@ -50,6 +50,27 @@ def _configure_oras_logger() -> None:
     oras_logger.setLevel(level)
 
 
+
+def _normalize_docker_hub_hostname(ref: str) -> str:
+    """Normalize Docker Hub image references to use the correct registry API hostname.
+
+    Docker Hub's web frontend is at docker.io, but the OCI registry API is at
+    registry-1.docker.io. This function rewrites references to ensure oras-py
+    contacts the correct endpoint.
+
+    Args:
+        ref: Image reference (e.g. 'docker.io/library/nginx:latest')
+
+    Returns:
+        Normalized reference (e.g. 'registry-1.docker.io/library/nginx:latest')
+    """
+    # Docker Hub aliases that need rewriting
+    docker_hub_aliases = ("docker.io/", "index.docker.io/")
+    for alias in docker_hub_aliases:
+        if ref.startswith(alias):
+            return ref.replace(alias, "registry-1.docker.io/", 1)
+    return ref
+
 class OrasClient(OrasClientLib):
     """OCI client extending oras.client.OrasClient for anonymous OCI operations.
 
@@ -124,6 +145,8 @@ class OrasClient(OrasClientLib):
         """
         # Normalize input to string URI for cache key
         if isinstance(container, str):
+            # Normalize Docker Hub references to use the correct registry API endpoint
+            container = _normalize_docker_hub_hostname(container)
             uri_key = container
             console.debug(f"GET manifest: {uri_key}")
         else:
@@ -201,6 +224,9 @@ class OrasClient(OrasClientLib):
             Exception: If download fails.
         """
         console.debug(f"Download blob: {digest} → {outfile}")
+        # Normalize Docker Hub references before constructing Container
+        if isinstance(container, str):
+            container = _normalize_docker_hub_hostname(container)
         # Convert string URI to Container if needed; pass Container objects unchanged
         resolved_container = self.get_container(container) if isinstance(container, str) else container
         super().download_blob(resolved_container, digest, outfile)
