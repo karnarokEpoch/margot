@@ -2,7 +2,14 @@
 
 from pytest import raises
 
-from margot.domain.uri import extract_hostname, extract_tag, normalize_registry_hostname, strip_scheme, validate_semver_tag, validate_uri
+from margot.domain.uri import (
+    extract_hostname,
+    extract_tag,
+    normalize_registry_hostname,
+    strip_scheme,
+    validate_semver_tag,
+    validate_uri,
+)
 
 
 class TestValidateUri:
