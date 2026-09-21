@@ -51,6 +51,55 @@ def _configure_oras_logger() -> None:
     oras_logger.setLevel(level)
 
 
+
+def _normalize_docker_hub_ref(ref: str) -> str:
+    """Normalize a Docker Hub image reference for the OCI registry API.
+
+    Two transformations are applied in sequence:
+
+    1. Hostname: docker.io and index.docker.io are web-frontend aliases.
+       The OCI registry API is at registry-1.docker.io. Any reference that
+       reaches oras-py with docker.io/ or index.docker.io/ must be rewritten
+       to registry-1.docker.io/ or the request hits the HTML marketing page
+       and produces a JSONDecodeError.
+
+    2. Official-image namespace: Docker Hub official images have no owner
+       component in their path (e.g. eclipse-mosquitto, nginx). The registry
+       API serves them under the implicit library/ namespace. When a reference
+       contains no '/' between the hostname and the tag/digest (i.e. the path
+       is bare 'image:tag'), prefix the path with 'library/' so oras-py
+       constructs the correct /v2/library/<image>/manifests/ URL and the token
+       request uses the correct repository scope.
+
+       User/org images already contain a slash (e.g. someuser/someimage:tag)
+       and must not be modified.
+
+    Args:
+        ref: Image reference (e.g. 'docker.io/eclipse-mosquitto:2.1.2-alpine')
+
+    Returns:
+        Normalized reference (e.g. 'registry-1.docker.io/library/eclipse-mosquitto:2.1.2-alpine')
+    """
+    # Step 1: rewrite Docker Hub web-frontend aliases to the registry API hostname
+    docker_hub_aliases = ("docker.io/", "index.docker.io/")
+    for alias in docker_hub_aliases:
+        if ref.startswith(alias):
+            ref = "registry-1.docker.io/" + ref[len(alias):]
+            break
+
+    # Step 2: for registry-1.docker.io references, add library/ prefix for
+    # official images (bare image name with no owner namespace)
+    if ref.startswith("registry-1.docker.io/"):
+        # Extract the path after the hostname (everything after registry-1.docker.io/)
+        path = ref[len("registry-1.docker.io/"):]
+        # If the path has no '/' before the tag/digest separator, it's a bare official image
+        # Strip tag or digest to inspect the name component only
+        name_part = path.split(":")[0].split("@")[0]
+        if "/" not in name_part:
+            ref = "registry-1.docker.io/library/" + path
+
+    return ref
+
 class OrasClient(OrasClientLib):
     """OCI client extending oras.client.OrasClient for anonymous OCI operations.
 
@@ -172,6 +221,8 @@ class OrasClient(OrasClientLib):
         """
         # Normalize input to string URI for cache key
         if isinstance(container, str):
+            # Normalize Docker Hub references to use the correct registry API endpoint
+            container = _normalize_docker_hub_ref(container)
             uri_key = container
             console.debug(f"GET manifest: {uri_key}")
         else:
@@ -249,6 +300,9 @@ class OrasClient(OrasClientLib):
             Exception: If download fails.
         """
         console.debug(f"Download blob: {digest} → {outfile}")
+        # Normalize Docker Hub references before constructing Container
+        if isinstance(container, str):
+            container = _normalize_docker_hub_ref(container)
         # Convert string URI to Container if needed; pass Container objects unchanged
         resolved_container = self.get_container(container) if isinstance(container, str) else container
         super().download_blob(resolved_container, digest, outfile)
