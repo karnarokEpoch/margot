@@ -11,17 +11,21 @@ margot package [-t margo|compose|quadlet] [--project-dir PATH]
 
 !!! warning
     By default, `margot package` contacts an image registry to embed container images
-    into the bundle. This requires registry access and valid credentials when your project
-    has compose or quadlet components with an `image: {search, replace}` configuration.
-    Use `--no-images` to skip image retrieval entirely and produce a network-free bundle.
+    into the bundle. This includes scanning all image references found in built compose/quadlet
+    content, regardless of any `image: {search, replace}` configuration. Image inclusion requires 
+    network access. Use `--no-images` to skip image retrieval entirely and produce a 
+    network-free bundle.
 
-!!! note "Optional: Local container daemon lookup"
+!!! note "Optional: Local container daemon and manifest list lookup"
     If you have locally-built images (e.g., built but not yet pushed to a registry),
-    you can use `--runtime podman` or `--runtime docker` to pull them directly from your
-    local container daemon before falling back to the registry. By default, `margot package`
-    silently probes Podman, then Docker, then falls back to the registry — no configuration
-    needed. This requires the `podman` or `docker` Python SDK (installed as an optional
-    dependency by default).
+    or a local Podman manifest list, you can use `--runtime podman` or `--runtime docker` to 
+    pull them directly from your local container daemon before falling back to the registry. 
+    **Podman users:** If you've created a local manifest list via `podman manifest create` and 
+    `podman manifest add`, margot will check it first and export ALL resolvable platforms from 
+    that list without any registry contact. By default, `margot package` silently checks the 
+    local Podman manifest list, then per-platform daemon lookups (Podman → Docker), then falls 
+    back to the registry — no configuration needed. This requires the `podman` or `docker` Python 
+    SDK (installed as an optional dependency by default).
 
 ## Prerequisites
 
@@ -53,12 +57,11 @@ lookup.
 
 By default, `package` also discovers container image references from the built compose and
 quadlet component archives and pulls them into the bundle as OCI image-layout tar archives
-under `images/`. This makes the bundle fully self-contained for offline loading — no
-registry access is required at deploy time. This step requires network access and registry
-credentials for any eligible images.
-
-When `--runtime` is not `none`, `package` checks local container daemons first before
-pulling from the registry:
+under `images/`. This scans all image references found in built component content, including
+base/third-party images and images with no `image: {search, replace}` block — making the 
+bundle fully self-contained for offline loading. No registry access is required at deploy time.
+When image references are discovered and `--runtime` is not `none`, `package` checks local 
+container daemons first before pulling from the registry:
 
 - **`--runtime auto` (default):** Silently probe Podman → Docker → registry. If a local
   daemon has the image, it's used; if not, falls back to registry without warning.
@@ -81,22 +84,35 @@ internal root directory use `id`, not `name`.
 
 For each eligible image reference (when `--no-images` is not passed)
 
-1. **Local daemon lookup (if `--runtime` is not `none`):**
+1. **Local manifest list lookup (Podman only, `--runtime` not `none`):**
+   - **Highest priority source:** If a local Podman manifest list exists for the image reference,
+     ALL resolvable child platforms from that manifest list are exported directly from local
+     images — zero registry contact. This is **Podman-specific** (Docker Engine has no equivalent
+     local manifest list concept). margot only **reads** existing local manifest lists; it never
+     creates them. Manifests lists are created separately via `podman manifest create` and
+     `podman manifest add`.
+   - If any child platform in the manifest list does not resolve to a local image, it falls through
+     to per-platform daemon lookup (step 2 below) for that platform only.
+
+2. **Per-platform local daemon lookup (if `--runtime` is not `none`):**
    - `--runtime auto` (default): Silently try Podman socket, then Docker socket.
    - `--runtime podman`: Try Podman only; fail with clear error if unreachable.
    - `--runtime docker`: Try Docker only; fail with clear error if unreachable.
    - `--runtime none`: Skip daemon lookup entirely.
 
-2. **If found locally:** Export from daemon (Podman: OCI-archive natively; Docker: Docker SDK
+3. **If found locally:** Export from daemon (Podman: OCI-archive natively; Docker: Docker SDK
    export → normalized to OCI-layout) and save to `images/` folder.
 
-3. **If not found locally or daemon lookup skipped:** Pull from registry via OCI client. Registry
-   credentials are checked before any pull.
+4. **If not found locally or daemon lookup skipped:** Pull from registry via OCI client. 
+   - A registry with no stored credential attempts anonymous pull (not an error).
+   - Only an **expired** stored credential is an error, reported via the aggregate failure mechanism.
 
-4. **Deduplication:** Same image reference across multiple components is pulled once.
+5. **Deduplication:** Same image reference across multiple components is pulled once.
 
-5. **Multi-platform:** All platforms in an image index are saved by default; use
+6. **Multi-platform:** All platforms in an image index are saved by default; use
    `--platform` to narrow (see below).
+
+7. **All-or-nothing:** All discovered images are attempted before any failure is reported. If any pulls fail, `package` hard-fails naming the complete set of failed references, and no images/-bearing bundle is written.
 
 All images are materialized as OCI image-layout tars (`oci-layout` + `index.json` +
 `blobs/sha256/...`), regardless of source, keeping `images/` format-uniform and loadable

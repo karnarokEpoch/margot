@@ -230,6 +230,7 @@ class TestPackageDifferentVersions:
             PackageType.BUNDLE,
             project_dir=str(project),
             build_dir=str(project / ".dist"),
+            include_images=False,
         )
 
         assert Path(bundle_path).exists()
@@ -269,6 +270,7 @@ class TestPackageDifferentVersions:
             PackageType.BUNDLE,
             project_dir=str(project),
             build_dir=str(project / ".dist"),
+            include_images=False,
         )
 
         assert Path(bundle_path).exists()
@@ -314,6 +316,7 @@ class TestPackageMargo:
             PackageType.BUNDLE,
             project_dir=str(project),
             build_dir=str(project / ".dist"),
+            include_images=False,
         )
 
         assert Path(bundle_path).exists()

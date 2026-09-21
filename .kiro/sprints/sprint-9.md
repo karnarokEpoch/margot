@@ -812,3 +812,39 @@ a descriptor with no `image:` block (e.g. a component pinning `nginx:1.27` direc
 - New parsing formats beyond the existing compose `services[*].image` and quadlet `[Container] Image=` scanners.
 - Changing OCI-layout assembly, `images/` naming, `--platform`, or `--runtime` behavior — Item 6 only broadens *which*
   references feed the existing pipeline.
+
+### Known issue found during implementation — registry fallback pull fails when image absent from all local daemons
+
+Observed on `fix/package-scan-all-images` while validating Item 6 against `~/work/margo/apps_margo/mosquitto/`
+(image not present in local Podman/Docker, so `package` must fall back to a real registry pull):
+
+```
+$ uv run margot -d package --project-dir ~/work/margo/apps_margo/mosquitto/
+...
+debug:  GET manifest: docker.io/eclipse-mosquitto:2.1.2-alpine
+debug:     fetching docker.io/eclipse-mosquitto:2.1.2-alpine
+debug:  Registry unreachable for docker.io/eclipse-mosquitto:2.1.2-alpine: Expecting value: line 1 column 1 (char 0), trying degraded fallback...
+...
+info:  Not found in Docker, falling back to registry...
+info:  Falling back to registry for docker.io/eclipse-mosquitto:2.1.2-alpine
+debug:  No local daemon found for docker.io/eclipse-mosquitto:2.1.2-alpine, will use registry
+warning:  Failed to pull image docker.io/eclipse-mosquitto:2.1.2-alpine: Registry unreachable for docker.io/eclipse-mosquitto:2.1.2-alpine and no local daemon copy available. Cannot proceed: Expecting value: line 1 column 1 (char 0)
+Error: Failed to pull 1 image(s): docker.io/eclipse-mosquitto:2.1.2-alpine
+```
+
+`podman pull docker.io/eclipse-mosquitto:2.1.2-alpine` immediately afterward succeeds cleanly against the same
+registry, so the registry itself is reachable — margot's own registry-manifest GET path is misinterpreting or
+mishandling a response (the `Expecting value: line 1 column 1 (char 0)` is a JSON-decode error, implying margot
+tried to parse something non-JSON, e.g. an empty body, an auth challenge, or an HTML/error page, as a manifest) and
+then reports it as "Registry unreachable," which is misleading — the registry answered `podman` fine.
+
+This blocks the anonymous/registry-fallback pull path this item's "Credentials: best-effort, not a precondition"
+section depends on: any image that is not already cached in a local daemon and must be fetched from the registry
+directly currently fails outright. Needs investigation of the manifest-fetch call in `infra/oci.py` /
+`OrasClient.get_manifest` (or wherever the "GET manifest" / "fetching" debug lines originate) to determine why the
+response isn't valid JSON in this path — likely candidates: missing/incorrect `Accept` header causing a non-manifest
+response, an anonymous-auth token exchange step that's skipped or mishandled, or a response-body read happening
+before redirects/auth challenges are resolved. Not yet root-caused or fixed. Tracked here as a blocker for closing
+Item 6 test case "A registry with **no** stored credential: anonymous pull attempted, not a hard pre-loop failure" —
+that scenario needs to be re-verified end-to-end against a real image absent from all local daemons before Item 6 is
+considered done.
