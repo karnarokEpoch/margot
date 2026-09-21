@@ -1,4 +1,4 @@
-# Sprint 9 — `--json` output and stable error codes
+# Sprint 10 — `--json` output and stable error codes
 
 **Goal:** Make margot's output and failure modes machine-consumable, without changing
 any human-facing rich rendering by default. An agent (or script) driving margot today
@@ -6,10 +6,7 @@ has exactly one structured surface (`fetch`'s raw manifest JSON) and one failure
 (`Exit(1)` + an English sentence on stderr) — everywhere else it must screen-scrape rich
 panels/trees or string-match error text. This sprint closes both gaps.
 
-**Prerequisite:** none — orthogonal to Sprint 8 (`describe` traversal/orphan work).
-Can run in parallel or before/after; touches `console.py` and every `commands/*.py`
-file, not `domain/describe.py`'s data model itself (Sprint 8's new dataclasses should
-serialize for free once this lands, if Sprint 8 ships first — see Item 1 ordering note).
+**Prerequisite:** none — independently sequenced after Sprint 9's remote OCI work.
 
 ---
 
@@ -83,7 +80,7 @@ no mixed stdout.
 - Unit tests: JSON output asserted against the same fixtures already used for the rich
   rendering tests (sensor-dashboard descriptor, existing verify fixtures) — same input,
   assert the JSON shape instead of screen text.
-- `FEATURES.md` — document the flag and shape per command.
+- `docs/` — document the flag and shape per command.
 
 ### Item 2 — Stable error codes
 
@@ -112,12 +109,12 @@ code means inspecting what exception types `services/*.py` actually raises today
   change for callers not touched this sprint).
 - Update call sites incrementally, command by command, each as its own commit — 22 call
   sites across 7 files is enough surface area to regress silently if done as one sweep.
-- `FEATURES.md` gets a new "Exit codes" reference table — this is the authoritative
+- `docs/` gets a new "Exit codes" reference table — this is the authoritative
   contract callers (including agents) rely on; once published, codes should be treated
   as stable API, same weight as the OCI media type table.
 
 **Files:** `src/margot/console.py`, all 7 command files with `fatal()` calls,
-`FEATURES.md`.
+`docs/commands/`.
 
 ### Item 3 — `--json` error envelope (depends on Item 2)
 

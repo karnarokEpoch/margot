@@ -2,7 +2,7 @@
 
 from os import fdopen
 from pathlib import Path
-import re
+from re import findall
 from shutil import copytree, ignore_patterns, rmtree
 from tarfile import open as tar_open
 from tempfile import mkstemp
@@ -73,7 +73,7 @@ def substitute_placeholders(  # noqa: C901
             image_found = True
             modified_content = modified_content.replace(image_search, image_replace)
 
-        for unresolved in re.findall(r"<[a-zA-Z0-9_]+_tag>", modified_content):
+        for unresolved in findall(r"<[a-zA-Z0-9_]+_tag>", modified_content):
             if unresolved not in placeholders:
                 console.warning(f"Unresolved placeholder '{unresolved}' in {file_path}")
 

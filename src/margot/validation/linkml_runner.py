@@ -8,7 +8,8 @@ type.
 
 from collections.abc import Iterator
 from pathlib import Path
-import re
+from re import DOTALL
+from re import compile as re_compile
 from typing import Any
 
 from linkml.validator import Validator
@@ -35,7 +36,7 @@ from margot.validation.max_cardinality import MaximumCardinalityPlugin
 EXTENSION_SLOT = "x-placeholder-extensions"
 
 # Trailing " in /some/path" location suffix that linkml plugins append to messages.
-_LOCATION_SUFFIX = re.compile(r"^(?P<message>.*) in (?P<path>/\S*)$", re.DOTALL)
+_LOCATION_SUFFIX = re_compile(r"^(?P<message>.*) in (?P<path>/\S*)$", DOTALL)
 
 # jsonschema builds its oneOf/anyOf message as f"{instance!r} is not valid under any of the
 # given schemas", i.e. it inlines a repr of the whole failing sub-object — for a polymorphic

@@ -23,12 +23,27 @@ theme:
 
 nav:
   - Home: index.md
+  - Guides:
+      - Getting Started: guides/getting-started.md
+      - Authentication: guides/authentication.md
+      - CI/CD integration: guides/ci-cd.md
   - margo.yaml: margo-yaml.md
+  - Concepts: concepts.md
+  - Configuration: config.md
   - Examples:
-    - Minimal (Helm): examples/minimal.md
-    - Basic (Quadlet): examples/basic-quadlet.md
-    - Image search-and-replace (Compose): examples/image-search-replace.md
-    - Full (Multi-component): examples/full.md
+      - Minimal (Helm): examples/minimal.md
+      - Basic (Quadlet): examples/basic-quadlet.md
+      - Image search-and-replace (Compose): examples/image-search-replace.md
+      - Full (Multi-component): examples/full.md
+  - Commands:
+      - build: commands/build.md
+      - push: commands/push.md
+      - pull: commands/pull.md
+      - fetch: commands/fetch.md
+      - package: commands/package.md
+      - verify: commands/verify.md
+      - describe: commands/describe.md
+      - auth: commands/auth.md
 
 markdown_extensions:
   - admonition

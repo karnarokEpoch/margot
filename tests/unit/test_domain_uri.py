@@ -2,7 +2,14 @@
 
 from pytest import raises
 
-from margot.domain.uri import extract_hostname, extract_tag, strip_scheme, validate_semver_tag, validate_uri
+from margot.domain.uri import (
+    extract_hostname,
+    extract_tag,
+    normalize_registry_hostname,
+    strip_scheme,
+    validate_semver_tag,
+    validate_uri,
+)
 
 
 class TestValidateUri:
@@ -173,3 +180,35 @@ class TestStripScheme:
     def test_only_scheme_returns_empty(self) -> None:
         """Should return empty string when only 'oci://' is provided."""
         assert strip_scheme("oci://") == ""
+
+
+class TestNormalizeRegistryHostname:
+    """Tests for normalize_registry_hostname()."""
+
+    def test_normalizes_docker_io_to_registry_1(self) -> None:
+        """Should normalize 'docker.io' to 'registry-1.docker.io'."""
+        assert normalize_registry_hostname("docker.io") == "registry-1.docker.io"
+
+    def test_normalizes_index_docker_io_to_registry_1(self) -> None:
+        """Should normalize 'index.docker.io' to 'registry-1.docker.io'."""
+        assert normalize_registry_hostname("index.docker.io") == "registry-1.docker.io"
+
+    def test_normalizes_registry_hub_docker_com_to_registry_1(self) -> None:
+        """Should normalize 'registry.hub.docker.com' to 'registry-1.docker.io'."""
+        assert normalize_registry_hostname("registry.hub.docker.com") == "registry-1.docker.io"
+
+    def test_passes_through_registry_1_docker_io(self) -> None:
+        """Should pass through 'registry-1.docker.io' unchanged."""
+        assert normalize_registry_hostname("registry-1.docker.io") == "registry-1.docker.io"
+
+    def test_passes_through_ecr_hostname(self) -> None:
+        """Should pass through non-Docker-Hub hostnames unchanged (e.g. ECR)."""
+        assert normalize_registry_hostname("public.ecr.aws") == "public.ecr.aws"
+
+    def test_passes_through_localhost_with_port(self) -> None:
+        """Should pass through local registry hostnames unchanged."""
+        assert normalize_registry_hostname("localhost:5000") == "localhost:5000"
+
+    def test_passes_through_custom_hostname(self) -> None:
+        """Should pass through arbitrary custom hostnames unchanged."""
+        assert normalize_registry_hostname("my.company.registry") == "my.company.registry"

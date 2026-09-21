@@ -13,7 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
-from typer import Option
+from typer import Argument, Option
 
 from margot import console
 from margot.domain.describe import (
@@ -35,6 +35,7 @@ from margot.domain.describe import (
     component_index,
 )
 from margot.services import describe as describe_service
+from margot.services import remote as remote_service
 
 DASH = "\u2014"  # em dash
 DOT = " \u00b7 "  # middle dot with spaces
@@ -125,15 +126,26 @@ def _constraint_format(schema: Schema) -> Text:
     return Text(DOT.join(parts))
 
 
-def build_identity_catalog_panel(identity: Identity, catalog: Catalog | None, resolved_path: str) -> Panel:
+def build_identity_catalog_panel(  # noqa: PLR0913
+    identity: Identity,
+    catalog: Catalog | None,
+    resolved_path: str,
+    rendered: bool,
+    is_remote: bool = False,
+    remote_uri: str | None = None,
+) -> Panel:
     """Build the identity+catalog panel.
 
-    Title is apiVersion. Subtitle is resolved path, suffixed with (rendered) if templated.
-    Grid shows id/version/name. OCI URI line follows. Description and Catalog follow.
+    Title is apiVersion. Subtitle is resolved path, suffixed with (rendered) if templated,
+    or normalized URI with (remote) if remote mode. Grid shows id/version/name. OCI URI line
+    follows. Description and Catalog follow.
     """
-    # Detect if path looks like a temporary file (ends in .yaml or similar, with temp markers)
-    is_rendered = "/margot-" in resolved_path and resolved_path.endswith(".yaml")
-    subtitle = resolved_path + ("  (rendered)" if is_rendered else "")
+    if is_remote and remote_uri:
+        subtitle = f"{remote_uri}  (remote)"
+        oci_display_uri = remote_uri
+    else:
+        subtitle = resolved_path + ("  (rendered)" if rendered else "")
+        oci_display_uri = identity.oci_uri
 
     # Build body
     body: list = []
@@ -150,7 +162,7 @@ def build_identity_catalog_panel(identity: Identity, catalog: Catalog | None, re
     body.append(Text())
 
     # OCI URI line
-    if identity.oci_uri is None:
+    if oci_display_uri is None:
         oci_line = Text("OCI: ", style="bold")
         oci_line.append("None", style="dim")
         body.append(oci_line)
@@ -158,7 +170,7 @@ def build_identity_catalog_panel(identity: Identity, catalog: Catalog | None, re
         oci_table = Table.grid(padding=(0, 1))
         oci_table.add_column(style="bold")
         oci_table.add_column(overflow="fold")
-        oci_table.add_row("OCI:", _plain(identity.oci_uri))
+        oci_table.add_row("OCI:", _plain(oci_display_uri))
         body.append(oci_table)
 
     # Description
@@ -609,10 +621,13 @@ def _render_section(  # noqa: PLR0913
     config: Configuration,
     descriptor_dict: dict,
     resolved_path: str,
+    rendered: bool,
+    is_remote: bool = False,
+    remote_uri: str | None = None,
 ) -> None:
     """Render a single section panel based on section name."""
     if section_name == "metadata":
-        panel = build_identity_catalog_panel(identity, catalog, resolved_path)
+        panel = build_identity_catalog_panel(identity, catalog, resolved_path, rendered, is_remote, remote_uri)
         console.print_renderable(panel)
     elif section_name == "profiles":
         panel = build_deployment_profiles_panel(profiles, index)
@@ -637,13 +652,24 @@ def _render_section(  # noqa: PLR0913
 
 # CLI command function
 def describe_cmd(
-    project_dir: str = Option(".", "--project-dir", help="Directory containing margo.yaml."),
+    uri: str | None = Argument(
+        None,
+        help="Optional OCI reference to a remote Margo artifact. "
+        "Mutually exclusive with --project-dir and --manifest.",
+    ),
+    project_dir: str | None = Option(
+        None,
+        "--project-dir",
+        help="Directory containing margo.yaml "
+        "(defaults to current directory if no URI).",
+    ),
     manifest: str | None = Option(None, "--manifest", help="Path to app.yaml or app.yaml.jinja."),
     section: Annotated[
         list[str] | None,
         Option(
             "--section",
-            help="Render only this section (metadata|profiles|config-first|component-first|extensions|orphans). Repeatable.",
+            help="Render only this section "
+            "(metadata|profiles|config-first|component-first|extensions|orphans). Repeatable.",
         ),
     ] = None,
 ) -> None:
@@ -651,21 +677,48 @@ def describe_cmd(
 
     Renders the descriptor through panels and trees: identity+catalog, deployment profiles,
     configuration (sections → settings → schema/parameters → targets → components).
+
+    Provide either a remote OCI reference as the first argument, or describe a local project
+    via --project-dir or --manifest. They are mutually exclusive.
     """
+    # Mutual exclusion: URI vs local-mode flags
+    if uri is not None and (project_dir is not None or manifest is not None):
+        console.fatal(
+            "URI and --project-dir/--manifest are mutually exclusive "
+            "— describe or verify either a remote artifact or a local project, not both."
+        )
+
     try:
-        # Resolve and load descriptor through Item 1 load gate
-        descriptor_dict = describe_service.load_descriptor(project_dir or ".", manifest)
+        if uri is not None:
+            # Remote mode: resolve the remote descriptor
+            remote_result = remote_service.resolve_remote_descriptor(uri)
+            try:
+                # Load descriptor from the pulled app.yaml
+                loaded = describe_service.load_descriptor_from_path(remote_result.app_yaml_path, remote_result.normalized_uri)
+                descriptor_dict = loaded.descriptor
+                meta = loaded.meta
+                resolved_path = loaded.source_path
+                rendered = loaded.rendered
+                source_metadata = remote_result.normalized_uri  # Override source for display
+                is_remote = True
+            finally:
+                remote_result.temp_dir.cleanup()
+        else:
+            # Local mode: use provided or default project_dir
+            local_project_dir = project_dir or "."
+            # Load descriptor with metadata and resolution info (temp file cleaned up after parsing)
+            loaded = describe_service.load_descriptor(local_project_dir, manifest)
+            descriptor_dict = loaded.descriptor
+            meta = loaded.meta
+            resolved_path = loaded.source_path
+            rendered = loaded.rendered
+            source_metadata = None  # Local mode uses default behavior
+            is_remote = False
     except (ValueError, TypeError) as e:
         console.fatal(f"{e!s} Run 'margot verify' to debug.")
 
-    # Resolve descriptor to get meta for OCI URI computation
-    try:
-        resolved = describe_service.resolve_descriptor(project_dir or ".", manifest)
-    except ValueError as e:
-        console.fatal(f"{e!s}")
-
     # Build display model from dict, threading meta into build_identity for OCI URI
-    identity = build_identity(descriptor_dict, resolved.meta)
+    identity = build_identity(descriptor_dict, meta)
     catalog = build_catalog(descriptor_dict)
     profiles = build_deployment_profiles(descriptor_dict)
     index = component_index(descriptor_dict)
@@ -683,10 +736,18 @@ def describe_cmd(
     canonical_order = ["metadata", "profiles", "config-first", "component-first", "extensions", "orphans"]
     sections_to_render = [s for s in canonical_order if s in requested_sections]
 
-    # Get resolved path for subtitle
-    resolved_path = resolved.source_path
-
-    # Render panels in order
     # Render sections
     for section_name in sections_to_render:
-        _render_section(section_name, identity, catalog, profiles, index, config, descriptor_dict, resolved_path)
+        _render_section(
+            section_name,
+            identity,
+            catalog,
+            profiles,
+            index,
+            config,
+            descriptor_dict,
+            resolved_path,
+            rendered,
+            is_remote,
+            source_metadata,
+        )

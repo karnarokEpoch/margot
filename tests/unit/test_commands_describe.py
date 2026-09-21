@@ -55,7 +55,7 @@ class TestIdentityCatalogPanel:
             version="1.0.0",
         )
 
-        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml")
+        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml", rendered=False)
         text = _render_to_text(panel)
 
         assert "v1alpha1" in text
@@ -74,7 +74,7 @@ class TestIdentityCatalogPanel:
             description="A test application",
         )
 
-        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml")
+        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml", rendered=False)
         text = _render_to_text(panel)
 
         assert "A test application" in text
@@ -88,14 +88,14 @@ class TestIdentityCatalogPanel:
             version="1.0.0",
         )
 
-        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml")
+        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml", rendered=False)
         text = _render_to_text(panel)
 
         # "None" should be dim'd in output
         assert "Catalog" in text
 
-    def test_identity_panel_rendered_suffix(self) -> None:
-        """Should append '(rendered)' to subtitle when path ends in temp file marker."""
+    def test_identity_panel_rendered_suffix_when_true(self) -> None:
+        """Should append '(rendered)' to subtitle when rendered=True."""
         identity = Identity(
             id="hello",
             api_version="v1alpha1",
@@ -103,11 +103,28 @@ class TestIdentityCatalogPanel:
             version="1.0.0",
         )
 
-        # Simulate a temporary file path
-        panel = build_identity_catalog_panel(identity, None, "/tmp/margot-abc.yaml")
+        # Call with rendered=True
+        panel = build_identity_catalog_panel(identity, None, "/some/path/app.yaml", rendered=True)
         text = _render_to_text(panel)
 
         assert "rendered" in text.lower()
+
+    def test_identity_panel_no_rendered_suffix_when_false(self) -> None:
+        """Should NOT append '(rendered)' when rendered=False, even with margot- path."""
+        identity = Identity(
+            id="hello",
+            api_version="v1alpha1",
+            name="Hello App",
+            version="1.0.0",
+        )
+
+        # Call with rendered=False but a path that WOULD have matched the old buggy heuristic
+        panel = build_identity_catalog_panel(identity, None, "/tmp/margot-abc.yaml", rendered=False)
+        text = _render_to_text(panel)
+
+        # The path should be visible, but "rendered" should NOT appear
+        assert "/tmp/margot-abc.yaml" in text
+        assert "rendered" not in text.lower()
 
     def test_identity_panel_markup_escaped(self) -> None:
         """Should escape markup characters in descriptor values."""
@@ -118,7 +135,7 @@ class TestIdentityCatalogPanel:
             version="1.0.0",
         )
 
-        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml")
+        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml", rendered=False)
         text = _render_to_text(panel)
 
         # The [string] part should appear (escaped as \[string\], which is still visible)
@@ -135,7 +152,7 @@ class TestIdentityCatalogPanel:
             oci_uri="public.ecr.aws/g2n4p2m7/margo:1.0.0",
         )
 
-        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml")
+        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml", rendered=False)
         text = _render_to_text(panel)
 
         assert "OCI:" in text
@@ -151,7 +168,7 @@ class TestIdentityCatalogPanel:
             oci_uri=None,
         )
 
-        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml")
+        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml", rendered=False)
         text = _render_to_text(panel)
 
         assert "OCI:" in text
@@ -169,7 +186,7 @@ class TestIdentityCatalogPanel:
             oci_uri="public.ecr.aws/org/app:1.0.0",
         )
 
-        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml")
+        panel = build_identity_catalog_panel(identity, None, "/path/to/app.yaml", rendered=False)
         text = _render_to_text(panel)
 
         # Get positions of key elements
@@ -661,7 +678,7 @@ class TestLiteralScalarRendering:
             version="1.0.0",
         )
 
-        panel = build_identity_catalog_panel(identity, None, "/path")
+        panel = build_identity_catalog_panel(identity, None, "/path", rendered=False)
         text = _render_to_text(panel)
 
         # The [string] should not disappear

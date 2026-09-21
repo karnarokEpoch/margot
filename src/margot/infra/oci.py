@@ -12,6 +12,7 @@ from oras.defaults import annotation_title
 from oras.oci import ManifestConfig, NewLayer, NewManifest
 
 from margot import console
+from margot.domain.uri import extract_hostname, normalize_registry_hostname
 from margot.infra import credentials
 
 # HTTP status code constants
@@ -50,10 +51,70 @@ def _configure_oras_logger() -> None:
     oras_logger.setLevel(level)
 
 
+
+def _normalize_docker_hub_ref(ref: str) -> str:
+    """Normalize a Docker Hub image reference for the OCI registry API.
+
+    Two transformations are applied in sequence:
+
+    1. Hostname: docker.io and index.docker.io are web-frontend aliases.
+       The OCI registry API is at registry-1.docker.io. Any reference that
+       reaches oras-py with docker.io/ or index.docker.io/ must be rewritten
+       to registry-1.docker.io/ or the request hits the HTML marketing page
+       and produces a JSONDecodeError.
+
+    2. Official-image namespace: Docker Hub official images have no owner
+       component in their path (e.g. eclipse-mosquitto, nginx). The registry
+       API serves them under the implicit library/ namespace. When a reference
+       contains no '/' between the hostname and the tag/digest (i.e. the path
+       is bare 'image:tag'), prefix the path with 'library/' so oras-py
+       constructs the correct /v2/library/<image>/manifests/ URL and the token
+       request uses the correct repository scope.
+
+       User/org images already contain a slash (e.g. someuser/someimage:tag)
+       and must not be modified.
+
+    Args:
+        ref: Image reference (e.g. 'docker.io/eclipse-mosquitto:2.1.2-alpine')
+
+    Returns:
+        Normalized reference (e.g. 'registry-1.docker.io/library/eclipse-mosquitto:2.1.2-alpine')
+    """
+    # Step 1: rewrite Docker Hub web-frontend aliases to the registry API hostname
+    docker_hub_aliases = ("docker.io/", "index.docker.io/")
+    for alias in docker_hub_aliases:
+        if ref.startswith(alias):
+            ref = "registry-1.docker.io/" + ref[len(alias):]
+            break
+
+    # Step 2: for registry-1.docker.io references, add library/ prefix for
+    # official images (bare image name with no owner namespace)
+    if ref.startswith("registry-1.docker.io/"):
+        # Extract the path after the hostname (everything after registry-1.docker.io/)
+        path = ref[len("registry-1.docker.io/"):]
+        # If the path has no '/' before the tag/digest separator, it's a bare official image
+        # Strip tag or digest to inspect the name component only
+        name_part = path.split(":")[0].split("@")[0]
+        if "/" not in name_part:
+            ref = "registry-1.docker.io/library/" + path
+
+    return ref
+
 class OrasClient(OrasClientLib):
     """OCI client extending oras.client.OrasClient for anonymous OCI operations.
 
     Provides pull() for bulk layer download and download_blob() for individual blob retrieval.
+
+    Manifest cache:
+        A per-client, single-reference manifest cache allows oras-py's internal
+        Registry.pull() to reuse a manifest already fetched by _prepare_oci_retrieval,
+        avoiding a redundant third fetch when oras-py calls self.get_manifest(Container)
+        polymorphically during its layer-download loop.
+
+        The cache is keyed by string URI and has no global scope or persistence.
+        oras-py's layer transfer path (client.pull / download_blob) remains the source
+        of truth; this cache is a coherency optimization for a single prepare→pull
+        workflow, not a general-purpose manifest cache.
     """
 
     def __init__(self, hostname: str | None = None) -> None:
@@ -66,9 +127,58 @@ class OrasClient(OrasClientLib):
                 anonymous-only (no credential loading).
         """
         super().__init__()
+        # Per-client manifest cache: keyed by string URI, scoped to this client instance
+        self._manifest_cache: dict[str, dict[str, Any]] = {}
         if hostname is not None:
             self.auth.load_configs(self.get_container(hostname))
         _configure_oras_logger()
+
+    def get_container(self, name: str | Container) -> Container:
+        """Resolve a container reference to a Container object, with Docker Hub hostname normalization.
+
+        Liskov Substitution Principle: This override must accept the same or wider types as the base class.
+        The base class accepts Union[str, Container]; this override preserves that contract by accepting both.
+
+        When a string reference is passed, normalizes known Docker Hub aliases (docker.io, index.docker.io,
+        registry.hub.docker.com) to registry-1.docker.io before passing it to the base class. This ensures
+        oras-py builds the correct OCI Distribution API URL for registry requests, since docker.io is Docker Hub's
+        marketing website (which returns HTML at /v2/ paths), not the API endpoint.
+
+        Container objects are passed through unchanged to the base class, since they already carry a
+        resolved hostname.
+
+        Args:
+            name: Either a full OCI reference string (e.g. "docker.io/library/hello-world:latest"),
+                a bare hostname (e.g. "docker.io"), or an already-resolved Container instance.
+
+        Returns:
+            A Container instance with the registry hostname normalized if applicable.
+        """
+        # If it's already a Container, pass through unchanged
+        if isinstance(name, Container):
+            return super().get_container(name)
+
+        # It's a string: could be a full URI or just a hostname
+        # Try to extract hostname; if it fails (no slash), treat the whole string as a hostname
+        try:
+            original_hostname = extract_hostname(name)
+        except ValueError:
+            # No '/' found: it might be a bare hostname like "docker.io"
+            # or an invalid URI that the base class will handle
+            original_hostname = name
+
+        # Normalize the hostname for the request URL
+        normalized_hostname = normalize_registry_hostname(original_hostname)
+
+        # If normalization changed the hostname, rebuild the reference for the base class
+        if normalized_hostname != original_hostname:
+            # Replace the original hostname with the normalized one at the start of the reference
+            normalized_reference = name.replace(original_hostname, normalized_hostname, 1)
+            console.debug(f"Normalized registry hostname: {original_hostname} → {normalized_hostname}")
+            return super().get_container(normalized_reference)
+
+        # No normalization needed, pass through
+        return super().get_container(name)
 
     def get_manifest(
         self,
@@ -76,7 +186,7 @@ class OrasClient(OrasClientLib):
         allowed_media_type: list | None = None,
         validation_schema: dict | None = None,
     ) -> dict[str, Any]:
-        """Fetch the manifest of an OCI artifact.
+        """Fetch the manifest of an OCI artifact, with per-client single-reference cache.
 
         This method overrides the base class signature to support both legacy usage
         patterns from margot's own call sites (which pass a URI string) and internal
@@ -89,6 +199,12 @@ class OrasClient(OrasClientLib):
         passing a Container object and optional allowed_media_type; this method must
         accept both forms without re-wrapping or dropping arguments.
 
+        Manifest cache:
+            On cache hit, returns the cached manifest without a registry fetch (e.g., when
+            oras-py's Registry.pull() internally calls self.get_manifest(Container) after
+            _prepare_oci_retrieval has already fetched it). On cache miss, fetches from
+            the registry and caches by string URI key.
+
         Args:
             container: Full OCI reference as a string (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0)
                 or an oras.container.Container instance (when called by oras-py internals).
@@ -98,20 +214,41 @@ class OrasClient(OrasClientLib):
                 class unchanged.
 
         Returns:
-            Manifest dict from the registry.
+            Manifest dict from the registry or cache.
 
         Raises:
             Exception: If fetch fails.
         """
-        # If container is a plain string (margot's own external call sites), convert to Container.
-        # If it's already a Container (oras-py's internal polymorphic dispatch), use as-is.
+        # Normalize input to string URI for cache key
         if isinstance(container, str):
-            console.debug(f"GET manifest: {container}")
-            container = self.get_container(container)
+            # Normalize Docker Hub references to use the correct registry API endpoint
+            container = _normalize_docker_hub_ref(container)
+            uri_key = container
+            console.debug(f"GET manifest: {uri_key}")
         else:
-            console.debug(f"GET manifest: {container}")
+            # Container object: use its uri property
+            uri_key = container.uri
+            console.debug(f"GET manifest: {uri_key}")
 
-        return super().get_manifest(container, allowed_media_type, validation_schema)
+        # Check cache
+        if uri_key in self._manifest_cache:
+            console.debug(f"  [cache hit] {uri_key}")
+            return self._manifest_cache[uri_key]
+
+        # Cache miss: fetch from registry
+        console.debug(f"  [cache miss] fetching {uri_key}")
+
+        # Convert string URI to Container if needed
+        if isinstance(container, str):
+            container = self.get_container(container)
+
+        # Fetch via base class
+        manifest = super().get_manifest(container, allowed_media_type, validation_schema)
+
+        # Cache by string URI key
+        self._manifest_cache[uri_key] = manifest
+
+        return manifest
 
     def pull(self, uri: str, outdir: str) -> list[str]:
         """
@@ -163,6 +300,9 @@ class OrasClient(OrasClientLib):
             Exception: If download fails.
         """
         console.debug(f"Download blob: {digest} → {outfile}")
+        # Normalize Docker Hub references before constructing Container
+        if isinstance(container, str):
+            container = _normalize_docker_hub_ref(container)
         # Convert string URI to Container if needed; pass Container objects unchanged
         resolved_container = self.get_container(container) if isinstance(container, str) else container
         super().download_blob(resolved_container, digest, outfile)

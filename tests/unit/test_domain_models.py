@@ -53,6 +53,33 @@ class TestPackageTypeAll:
         assert PackageType.ALL not in _ARTIFACT_TYPE_MAP.values()
 
 
+class TestPackageTypeBundle:
+    """Tests for PackageType.BUNDLE."""
+
+    def test_bundle_exists_and_equals_bundle(self) -> None:
+        """PackageType.BUNDLE should exist and equal 'bundle'."""
+        assert PackageType.BUNDLE == "bundle"
+
+    def test_bundle_not_in_artifact_type_map_values(self) -> None:
+        """PackageType.BUNDLE should NOT appear in _ARTIFACT_TYPE_MAP.values()."""
+        assert PackageType.BUNDLE not in _ARTIFACT_TYPE_MAP.values()
+
+    def test_artifact_type_to_package_type_never_returns_bundle(self) -> None:
+        """artifact_type_to_package_type() should never return PackageType.BUNDLE."""
+        test_inputs = [
+            None,
+            "application/vnd.margo.app.v1+json",
+            "application/vnd.org.margo.component.compose+json",
+            "application/vnd.org.margo.component.quadlet+json",
+            "anything/else",
+            "bundle",
+            "application/bundle",
+        ]
+        for test_input in test_inputs:
+            result = artifact_type_to_package_type(test_input)
+            assert result != PackageType.BUNDLE, f"Should not return BUNDLE for input {test_input!r}, got {result}"
+
+
 class TestBuildTarget:
     """Tests for BuildTarget dataclass."""
 
