@@ -305,6 +305,201 @@ class TestDiscoverAndIncludeImagesAutoMode:
                 # Verify pull optimization was called
                 assert mock_pull_opt.called
 
+class TestSkipAttestationManifests:
+    """Tests for filtering out Docker Hub attestation manifests from multi-platform index."""
+
+    def test_skip_attestation_manifest_with_unknown_platform_and_annotation(self):
+        """Should skip manifest entries with unknown/unknown platform and attestation-manifest annotation."""
+        with TemporaryDirectory() as _tmpdir_str:
+            tmpdir = Path(_tmpdir_str)
+
+            # Create a multi-platform index with 2 real platforms and 2 attestation twins
+            target_manifest = {
+                "schemaVersion": 2,
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {
+                        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                        "digest": "sha256:amd64real",
+                        "platform": {"os": "linux", "architecture": "amd64"},
+                    },
+                    {
+                        # Attestation manifest: unknown/unknown platform + vnd.docker.reference.type annotation
+                        "mediaType": "application/vnd.oras.artifact.manifest.v1+json",
+                        "digest": "sha256:amd64attestation",
+                        "platform": {"os": "unknown", "architecture": "unknown"},
+                        "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
+                    },
+                    {
+                        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                        "digest": "sha256:arm64real",
+                        "platform": {"os": "linux", "architecture": "arm64"},
+                    },
+                    {
+                        # Attestation manifest: unknown/unknown platform + vnd.docker.reference.type annotation
+                        "mediaType": "application/vnd.oras.artifact.manifest.v1+json",
+                        "digest": "sha256:arm64attestation",
+                        "platform": {"os": "unknown", "architecture": "unknown"},
+                        "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
+                    },
+                ],
+            }
+
+            mock_oras_client = Mock()
+            per_platform_lookup_calls = []
+
+            # Track which platforms are processed (should only be 2 real ones)
+            def mock_try_daemon(_ref: str, platform: str, _platform_desc: Any, _export_dir: Any) -> str | None:
+                per_platform_lookup_calls.append(platform)
+                return None
+
+            output_tar = tmpdir / "output.oci.tar"
+
+            with patch(
+                "margot.services.package._try_daemon_match_for_platform",
+                side_effect=mock_try_daemon,
+            ), patch(
+                "margot.services.package._resolve_all_platforms_from_manifest_list",
+                return_value={},
+            ), patch(
+                "margot.services.package._create_oci_image_layout_tar"
+            ):
+                package_service._pull_image_with_local_daemon_optimization(
+                    "test:latest",
+                    target_manifest,
+                    mock_oras_client,
+                    str(output_tar),
+                    str(tmpdir / "daemon_dir"),
+                )
+
+            # VERIFY: Only 2 platforms processed (real ones), not 4 (real + attestations)
+            assert len(per_platform_lookup_calls) == 2, (
+                f"Expected 2 platform lookups (real platforms only), but got {len(per_platform_lookup_calls)}: "
+                f"{per_platform_lookup_calls}"
+            )
+            assert "linux/amd64" in per_platform_lookup_calls, "linux/amd64 should be processed"
+            assert "linux/arm64" in per_platform_lookup_calls, "linux/arm64 should be processed"
+            # Attestation entries (unknown/unknown) should NOT appear
+            assert "unknown/unknown" not in per_platform_lookup_calls, (
+                "Attestation manifests (unknown/unknown) should be skipped"
+            )
+
+    def test_do_not_skip_unknown_platform_without_attestation_annotation(self):
+        """Should NOT skip entries with unknown/unknown platform if they lack the attestation annotation."""
+        with TemporaryDirectory() as _tmpdir_str:
+            tmpdir = Path(_tmpdir_str)
+
+            # Entry with unknown/unknown platform but NO attestation annotation
+            target_manifest = {
+                "schemaVersion": 2,
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {
+                        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                        "digest": "sha256:real",
+                        "platform": {"os": "linux", "architecture": "amd64"},
+                    },
+                    {
+                        # unknown/unknown but NOT an attestation entry (no vnd.docker.reference.type)
+                        "mediaType": "application/vnd.oras.artifact.manifest.v1+json",
+                        "digest": "sha256:unknown_no_annotation",
+                        "platform": {"os": "unknown", "architecture": "unknown"},
+                        # Deliberately no 'annotations' key
+                    },
+                ],
+            }
+
+            mock_oras_client = Mock()
+            per_platform_lookup_calls = []
+
+            def mock_try_daemon(_ref: str, platform: str, _platform_desc: Any, _export_dir: Any) -> str | None:
+                per_platform_lookup_calls.append(platform)
+                return None
+
+            output_tar = tmpdir / "output.oci.tar"
+
+            with patch(
+                "margot.services.package._try_daemon_match_for_platform",
+                side_effect=mock_try_daemon,
+            ), patch(
+                "margot.services.package._resolve_all_platforms_from_manifest_list",
+                return_value={},
+            ), patch(
+                "margot.services.package._create_oci_image_layout_tar"
+            ):
+                package_service._pull_image_with_local_daemon_optimization(
+                    "test:latest",
+                    target_manifest,
+                    mock_oras_client,
+                    str(output_tar),
+                    str(tmpdir / "daemon_dir"),
+                )
+
+            # VERIFY: Both entries should be processed (the unknown/unknown one is NOT an attestation)
+            assert len(per_platform_lookup_calls) == 2, (
+                f"Expected 2 platform lookups (one real + one unknown/unknown non-attestation), "
+                f"but got {len(per_platform_lookup_calls)}: {per_platform_lookup_calls}"
+            )
+
+    def test_handle_missing_platform_descriptor_gracefully(self):
+        """Should not crash if an entry has no 'platform' key (None platform_desc)."""
+        with TemporaryDirectory() as _tmpdir_str:
+            tmpdir = Path(_tmpdir_str)
+
+            target_manifest = {
+                "schemaVersion": 2,
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "manifests": [
+                    {
+                        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                        "digest": "sha256:real",
+                        "platform": {"os": "linux", "architecture": "amd64"},
+                    },
+                    {
+                        # Entry with no 'platform' key at all (platform_desc will be None)
+                        "mediaType": "application/vnd.oras.artifact.manifest.v1+json",
+                        "digest": "sha256:no_platform_key",
+                        "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
+                        # Deliberately omit 'platform' key
+                    },
+                ],
+            }
+
+            mock_oras_client = Mock()
+            per_platform_lookup_calls = []
+
+            def mock_try_daemon(_ref: str, platform: str, _platform_desc: Any, _export_dir: Any) -> str | None:
+                per_platform_lookup_calls.append(platform)
+                return None
+
+            output_tar = tmpdir / "output.oci.tar"
+
+            with patch(
+                "margot.services.package._try_daemon_match_for_platform",
+                side_effect=mock_try_daemon,
+            ), patch(
+                "margot.services.package._resolve_all_platforms_from_manifest_list",
+                return_value={},
+            ), patch(
+                "margot.services.package._create_oci_image_layout_tar"
+            ):
+                # Should NOT raise exception
+                package_service._pull_image_with_local_daemon_optimization(
+                    "test:latest",
+                    target_manifest,
+                    mock_oras_client,
+                    str(output_tar),
+                    str(tmpdir / "daemon_dir"),
+                )
+
+            # VERIFY: Entry with no platform descriptor should NOT crash and should be processed
+            # (it has no architecture/os info, so it doesn't match the attestation filter)
+            assert "linux/amd64" in per_platform_lookup_calls, "Real platform should be processed"
+            assert "unknown" in per_platform_lookup_calls, (
+                "Entry with missing platform descriptor should be processed with 'unknown' platform string"
+            )
+
+
 class TestDiscoverAndIncludeImagesDaemonForced:
     """Tests for _discover_and_include_images with --runtime podman/docker (forced)."""
 

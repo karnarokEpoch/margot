@@ -2204,6 +2204,15 @@ def _pull_image_with_local_daemon_optimization(
         manifests_list = target_manifest.get("manifests", [])
         for manifest_entry in manifests_list:
             platform_desc = manifest_entry.get("platform")
+            # Skip Docker Hub attestation manifests (unknown/unknown platform, vnd.docker.reference.type == attestation-manifest)
+            if (
+                platform_desc is not None
+                and platform_desc.get("architecture") == "unknown"
+                and platform_desc.get("os") == "unknown"
+                and manifest_entry.get("annotations", {}).get("vnd.docker.reference.type") == "attestation-manifest"
+            ):
+                console.debug(f"Skipping attestation manifest entry (digest: {manifest_entry.get('digest', 'unknown')})")
+                continue
             platform_slots.append((manifest_entry, platform_desc))
     else:
         # Single-platform manifest: one implicit slot
