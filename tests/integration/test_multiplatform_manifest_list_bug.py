@@ -8,9 +8,11 @@ manifest digest and blobs. This test reproduces the bug and verifies the fix.
 import contextlib
 import io
 import json
-import subprocess
 from pathlib import Path
-from tarfile import TarInfo, open as tar_open
+import shutil
+import subprocess
+from tarfile import TarInfo
+from tarfile import open as tar_open
 from tempfile import mkdtemp
 
 from pytest import mark, skip
@@ -37,7 +39,7 @@ def _podman_socket_exists() -> bool:
 
 @mark.skipif(PodmanClient is None, reason="Podman SDK not available")
 @mark.skipif(not _podman_socket_exists(), reason="Podman socket not available")
-class TestMultiplatformManifestListBug:  # noqa: PLR0904
+class TestMultiplatformManifestListBug:
     """Real Podman reproduction of the duplicate manifest digest bug."""
 
     def test_multiplatform_manifest_list_distinct_digests(  # noqa: C901, PLR0912, PLR0915
@@ -86,8 +88,8 @@ class TestMultiplatformManifestListBug:  # noqa: PLR0904
 
         try:
             # Import amd64 image
-            result = subprocess.run(  # noqa: S603, S607
-                ["podman", "import", str(amd64_fs_tar), amd64_image_ref],
+            result = subprocess.run(  # noqa: S603
+                ["podman", "import", str(amd64_fs_tar), amd64_image_ref],  # noqa: S607
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -97,8 +99,8 @@ class TestMultiplatformManifestListBug:  # noqa: PLR0904
                 skip(f"Failed to import amd64 image: {result.stderr}")
 
             # Import arm64 image
-            result = subprocess.run(  # noqa: S603, S607
-                ["podman", "import", str(arm64_fs_tar), arm64_image_ref],
+            result = subprocess.run(  # noqa: S603
+                ["podman", "import", str(arm64_fs_tar), arm64_image_ref],  # noqa: S607
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -109,24 +111,24 @@ class TestMultiplatformManifestListBug:  # noqa: PLR0904
 
             # 3. Create a manifest list combining both platforms
             manifest_list_name = f"localhost/test-manifest-list-combo-{id(self)}"
-            subprocess.run(  # noqa: S603, S607
-                ["podman", "manifest", "create", manifest_list_name],
+            subprocess.run(  # noqa: S603
+                ["podman", "manifest", "create", manifest_list_name],  # noqa: S607
                 capture_output=True,
                 timeout=30,
                 check=False,
             )
 
             # Add amd64 image to manifest list
-            subprocess.run(  # noqa: S603, S607
-                ["podman", "manifest", "add", "--arch", "amd64", manifest_list_name, amd64_image_ref],
+            subprocess.run(  # noqa: S603
+                ["podman", "manifest", "add", "--arch", "amd64", manifest_list_name, amd64_image_ref],  # noqa: S607
                 capture_output=True,
                 timeout=30,
                 check=False,
             )
 
             # Add arm64 image to manifest list
-            subprocess.run(  # noqa: S603, S607
-                ["podman", "manifest", "add", "--arch", "arm64", manifest_list_name, arm64_image_ref],
+            subprocess.run(  # noqa: S603
+                ["podman", "manifest", "add", "--arch", "arm64", manifest_list_name, arm64_image_ref],  # noqa: S607
                 capture_output=True,
                 timeout=30,
                 check=False,
@@ -246,29 +248,36 @@ class TestMultiplatformManifestListBug:  # noqa: PLR0904
                     f"Expected distinct layer digests for different platform content."
                 )
 
-                # Success: bug is fixed
+                # Assertions above confirm the bug is fixed
                 print("\n✅ PASS: Both platforms have distinct manifest and layer digests")  # noqa: T201
 
             finally:
-                from shutil import rmtree
-
-                rmtree(daemon_export_dir, ignore_errors=True)
+                shutil.rmtree(daemon_export_dir, ignore_errors=True)
 
         finally:
             # Clean up created images and manifest list
             with contextlib.suppress(Exception):
-                subprocess.run(  # noqa: S603, S607
-                    ["podman", "manifest", "rm", manifest_list_name], capture_output=True, timeout=10, check=False
+                subprocess.run(  # noqa: S603
+                    ["podman", "manifest", "rm", manifest_list_name],  # noqa: S607
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
                 )
 
             with contextlib.suppress(Exception):
-                subprocess.run(  # noqa: S603, S607
-                    ["podman", "rmi", amd64_image_ref], capture_output=True, timeout=10, check=False
+                subprocess.run(  # noqa: S603
+                    ["podman", "rmi", amd64_image_ref],  # noqa: S607
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
                 )
 
             with contextlib.suppress(Exception):
-                subprocess.run(  # noqa: S603, S607
-                    ["podman", "rmi", arm64_image_ref], capture_output=True, timeout=10, check=False
+                subprocess.run(  # noqa: S603
+                    ["podman", "rmi", arm64_image_ref],  # noqa: S607
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
                 )
 
     @staticmethod
