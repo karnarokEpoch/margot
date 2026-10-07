@@ -9,12 +9,12 @@ margot resolves configuration from four sources, highest to lowest priority:
 
 ## Config keys
 
-| Key | Description | Example |
-|---|---|---|
-| `registry` | OCI registry base URL | `public.ecr.aws` |
-| `repository` | OCI repository path | `g2n4p2m7/margo` |
-| `build_dir` | Local build output directory | `.dist` |
-| `run_dir` | Local pull output directory | `.run` |
+| Key          | Description                  | Example          |
+| ------------ | ---------------------------- | ---------------- |
+| `registry`   | OCI registry base URL        | `public.ecr.aws` |
+| `repository` | OCI repository path          | `g2n4p2m7/margo` |
+| `build_dir`  | Local build output directory | `.dist`          |
+| `run_dir`    | Local pull output directory  | `.run`           |
 
 ## margot.toml example
 

@@ -3,7 +3,7 @@
 Render the Margo application description as a structured, visual view — rich panels, trees,
 and tables. Read-only, no schema validation.
 
-```
+```text
 margot describe [URI] [--project-dir PATH] [--manifest PATH]
                 [--section metadata|profiles|config-first|component-first|extensions|orphans]
 ```
@@ -16,12 +16,12 @@ margot describe public.ecr.aws/g2n4p2m7/margo:1.0.0
 
 ## Flags
 
-| Flag | Default | Description |
-|---|---|---|
-| `URI` | — | Optional tagged OCI reference. Selects remote mode. |
-| `--project-dir` | `.` | Directory holding `margo.yaml`. Local mode only. |
-| `--manifest` | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. Local mode only. |
-| `--section` | all default sections | Filter to one or more sections. Multiple `--section` flags are allowed. |
+| Flag            | Default                    | Description                                                             |
+| --------------- | -------------------------- | ----------------------------------------------------------------------- |
+| `URI`           | —                          | Optional tagged OCI reference. Selects remote mode.                     |
+| `--project-dir` | `.`                        | Directory holding `margo.yaml`. Local mode only.                        |
+| `--manifest`    | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. Local mode only.          |
+| `--section`     | all default sections       | Filter to one or more sections. Multiple `--section` flags are allowed. |
 
 ## Local mode vs remote mode
 
@@ -35,19 +35,20 @@ descriptor pipeline, then discards the temporary files. The URI is a full tagged
 **Mutual exclusion:** a URI cannot be combined with an explicitly supplied `--project-dir` or `--manifest`.
 Passing both is rejected before any I/O:
 
-> URI and --project-dir/--manifest are mutually exclusive — describe or verify either a remote artifact or a local project, not both.
+> URI and --project-dir/--manifest are mutually exclusive — describe or verify either a remote artifact or a local
+> project, not both.
 
 ## Remote mode behavior
 
 1. Validates the URI syntax and checks registry credentials.
 2. Fetches the OCI manifest and requires the artifact to be a Margo application artifact
-   (`application/vnd.margo.app.v1+json`). Compose, quadlet, and unknown artifact types are rejected with a clear
-   error directing to `margot fetch <uri>` for raw-manifest inspection.
+    (`application/vnd.margo.app.v1+json`). Compose, quadlet, and unknown artifact types are rejected with a clear
+    error directing to `margot fetch <uri>` for raw-manifest inspection.
 3. Accepts any existing OCI tag — no SemVer requirement for read-only inspection.
 4. Pulls the artifact into a temporary directory (`recursive=False` — component artifacts are not recursively
-   downloaded). The pull is non-persistent; nothing is written to your project directory.
+    downloaded). The pull is non-persistent; nothing is written to your project directory.
 5. Passes the pulled `app.yaml` through the same local descriptor pipeline: YAML parsing, `kind` gate,
-   configuration joins, orphan observations, and rich rendering.
+    configuration joins, orphan observations, and rich rendering.
 6. Removes the temporary directory after rendering, including on error.
 
 The identity panel identifies the remote source:
@@ -82,7 +83,7 @@ One tree per profile: `type` and `id`, `description`, `requiredResources`, then
 
 A single tree walked top-down from configuration sections:
 
-```
+```text
 section → setting (+ immutable) → Schema: <name> <dataType> · <constraints>
                                 → Parameter: <name> → Default: <value>
                                                     → Pointer: <p> (n/total)
@@ -111,7 +112,8 @@ Four categories of dangling or unreferenced descriptor elements:
 - Unreferenced parameters: a `Parameter` not referenced by any `Setting`.
 - Unresolved schema references: a `Setting` whose `schema` name doesn't resolve to a declared schema.
 - Unreferenced schemas: a `Schema` declared but not referenced by any `Setting`.
-- Dangling component references: a `Parameter.targets[].components` entry naming a component absent from all deployment profiles.
+- Dangling component references: a `Parameter.targets[].components` entry naming a component absent from all deployment
+    profiles.
 
 These are observations only — `describe` always exits 0. Use [`margot verify`](verify.md) for validation gates.
 
@@ -131,10 +133,10 @@ upstream spec, and the spec's property set is still in flux.
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| 0 | Always, even when orphans are found. |
-| 1 | Descriptor cannot be loaded: missing, both `app.yaml` and `app.yaml.jinja` present, unresolved Jinja2 variable, unparseable YAML, or `kind` not `ApplicationDescription`. |
+| Code | Meaning                                                                                                                                                                   |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Always, even when orphans are found.                                                                                                                                      |
+| 1    | Descriptor cannot be loaded: missing, both `app.yaml` and `app.yaml.jinja` present, unresolved Jinja2 variable, unparseable YAML, or `kind` not `ApplicationDescription`. |
 
 On exit 1, the error message points at `margot verify`.
 

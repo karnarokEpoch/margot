@@ -30,7 +30,7 @@ exactly like a static `app.yaml`.
 
 The full context available inside `app.yaml.jinja`:
 
-```
+```tree
 manifest
 ├── id
 ├── name
@@ -407,5 +407,7 @@ metadata:
 ## See also
 
 - [margo.yaml reference](margo-yaml.md) — all `margo.yaml` fields and their semantics.
-- [Image search-and-replace](examples/image-search-replace.md) — the `image.replace` field in `compose` and `quadlet` components also uses the same template context.
-- [Full example](examples/full.md) — a complete multi-component project with variants, Helm, compose, and quadlet in a single `app.yaml.jinja`.
+- [Image search-and-replace](examples/image-search-replace.md) — the `image.replace` field in `compose` and `quadlet`
+  components also uses the same template context.
+- [Full example](examples/full.md) — a complete multi-component project with variants, Helm, compose, and quadlet in a
+  single `app.yaml.jinja`.

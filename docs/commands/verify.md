@@ -3,7 +3,7 @@
 Validate the Margo application description (`app.yaml` or `app.yaml.jinja`) against the
 upstream Margo spec schema, and optionally against margot's curated recommended schema.
 
-```
+```text
 margot verify [URI] [--project-dir PATH] [--manifest PATH]
               [--schema PATH] [--recommended-schema PATH]
               [--recommend | --only-recommend] [--strict]
@@ -21,16 +21,16 @@ margot verify public.ecr.aws/g2n4p2m7/margo:1.0.0
 
 ## Flags
 
-| Flag | Default | Description |
-|---|---|---|
-| `URI` | — | Optional tagged OCI reference. Selects remote mode. |
-| `--project-dir` | `.` | Directory holding `margo.yaml`. Local mode only. |
-| `--manifest` | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. Local mode only. |
-| `--schema` | vendored Schema A | Override the upstream Margo spec schema. |
-| `--recommended-schema` | vendored Schema B | Override the curated recommended schema. |
-| `--recommend` | off | Run Schema B as a second pass, after Schema A. |
-| `--only-recommend` | off | Run Schema B instead of Schema A. |
-| `--strict` | off | Turn the Schema B lint pass into a hard contract — any finding fails the run. |
+| Flag                   | Default                    | Description                                                                   |
+| ---------------------- | -------------------------- | ----------------------------------------------------------------------------- |
+| `URI`                  | —                          | Optional tagged OCI reference. Selects remote mode.                           |
+| `--project-dir`        | `.`                        | Directory holding `margo.yaml`. Local mode only.                              |
+| `--manifest`           | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. Local mode only.                |
+| `--schema`             | vendored Schema A          | Override the upstream Margo spec schema.                                      |
+| `--recommended-schema` | vendored Schema B          | Override the curated recommended schema.                                      |
+| `--recommend`          | off                        | Run Schema B as a second pass, after Schema A.                                |
+| `--only-recommend`     | off                        | Run Schema B instead of Schema A.                                             |
+| `--strict`             | off                        | Turn the Schema B lint pass into a hard contract — any finding fails the run. |
 
 `--recommend` and `--only-recommend` are mutually exclusive. Passing both is rejected before
 any validation runs (exit 1).
@@ -50,7 +50,8 @@ tagged OCI reference, for example `public.ecr.aws/g2n4p2m7/margo:1.0.0`. An `oci
 **Mutual exclusion:** a URI cannot be combined with an explicitly supplied `--project-dir` or `--manifest`.
 Passing both is rejected before any I/O:
 
-> URI and --project-dir/--manifest are mutually exclusive — describe or verify either a remote artifact or a local project, not both.
+> URI and --project-dir/--manifest are mutually exclusive — describe or verify either a remote artifact or a local
+> project, not both.
 
 All `--schema`, `--recommended-schema`, `--recommend`, `--only-recommend`, and `--strict` flags retain exactly
 their local semantics and mutual-exclusion checks in remote mode.
@@ -59,11 +60,11 @@ their local semantics and mutual-exclusion checks in remote mode.
 
 1. Validates the URI syntax and checks registry credentials.
 2. Fetches the OCI manifest and requires the artifact to be a Margo application artifact
-   (`application/vnd.margo.app.v1+json`). Compose, quadlet, and unknown artifact types are rejected.
+    (`application/vnd.margo.app.v1+json`). Compose, quadlet, and unknown artifact types are rejected.
 3. Accepts any existing OCI tag — no SemVer requirement for read-only inspection.
 4. Pulls the artifact into a temporary directory (`recursive=False`). The pull is non-persistent.
 5. Validates the pulled `app.yaml` through the existing schema pipeline: Schema A/B, findings, strictness, and
-   exit rules all behave identically to local mode.
+    exit rules all behave identically to local mode.
 6. Removes the temporary directory after validation, including on error.
 
 ## Manifest resolution (local mode)
@@ -72,10 +73,10 @@ their local semantics and mutual-exclusion checks in remote mode.
 
 1. `--manifest` if given — may point at `app.yaml` or `app.yaml.jinja`.
 2. Otherwise, `margo.yaml` is loaded from `--project-dir` and its `directory` field is
-   searched for `app.yaml.jinja` (first), then `app.yaml`. Both present is an error;
-   neither is an error.
+    searched for `app.yaml.jinja` (first), then `app.yaml`. Both present is an error;
+    neither is an error.
 3. A `.jinja` descriptor is rendered to a temporary file with Jinja2 `StrictUndefined`.
-   The rendered file is what gets validated.
+    The rendered file is what gets validated.
 
 Both schema passes validate the same resolved file — the descriptor is never re-rendered.
 
@@ -107,15 +108,15 @@ reports.
 
 ## Behaviour matrix
 
-| Flags | Schema A runs | Schema B runs | Exit code driven by |
-|---|---|---|---|
-| (none) | yes | no | Schema A errors |
-| `--strict` | yes | no | Schema A errors (`--strict` warns it has nothing to act on) |
-| `--recommend` | yes | yes | Schema A errors — Schema B is advisory |
-| `--recommend --strict` | yes | yes | Schema A errors **or** any Schema B finding |
-| `--only-recommend` | no | yes | nothing — always 0 |
-| `--only-recommend --strict` | no | yes | any Schema B finding |
-| `--recommend --only-recommend` | — | — | rejected, exit 1 |
+| Flags                          | Schema A runs | Schema B runs | Exit code driven by                                         |
+| ------------------------------ | ------------- | ------------- | ----------------------------------------------------------- |
+| (none)                         | yes           | no            | Schema A errors                                             |
+| `--strict`                     | yes           | no            | Schema A errors (`--strict` warns it has nothing to act on) |
+| `--recommend`                  | yes           | yes           | Schema A errors — Schema B is advisory                      |
+| `--recommend --strict`         | yes           | yes           | Schema A errors **or** any Schema B finding                 |
+| `--only-recommend`             | no            | yes           | nothing — always 0                                          |
+| `--only-recommend --strict`    | no            | yes           | any Schema B finding                                        |
+| `--recommend --only-recommend` | —             | —             | rejected, exit 1                                            |
 
 ## Output
 
@@ -123,19 +124,19 @@ Plain CI-check-style pass/fail lines, pipeable into CI logs.
 
 - **Default (no `--recommend`):** the draft-spec line and the Schema A verdict.
 - **`--recommend` with findings:** one labeled section per schema, each with its own verdict,
-  then the overall `verify: PASS` / `verify: FAIL` line.
+    then the overall `verify: PASS` / `verify: FAIL` line.
 - **`--recommend` with both schemas clean:** no section headers — the output reads exactly
-  like a clean default run.
+    like a clean default run.
 - **`--only-recommend`:** Schema B findings and verdict only. No draft-spec line.
 
 For visual inspection of a descriptor's structure, use [`margot describe`](describe.md).
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| 0 | Validation passed. |
-| 1 | Schema A error, Schema B finding (with `--strict`), mutually exclusive flags, or descriptor cannot be resolved. |
+| Code | Meaning                                                                                                         |
+| ---- | --------------------------------------------------------------------------------------------------------------- |
+| 0    | Validation passed.                                                                                              |
+| 1    | Schema A error, Schema B finding (with `--strict`), mutually exclusive flags, or descriptor cannot be resolved. |
 
 ## Example
 

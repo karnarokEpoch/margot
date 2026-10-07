@@ -51,7 +51,7 @@ margot push --dry-run
 
 On success each target is reported:
 
-```
+```text
 Dry run OK: public.ecr.aws/g2n4p2m7/margo:1.0.0
 ```
 
@@ -59,7 +59,7 @@ Dry run OK: public.ecr.aws/g2n4p2m7/margo:1.0.0
 
 A four-stage pipeline that catches failures early:
 
-```
+```text
 Stage 1 — verify
   margot verify --recommend --strict
 

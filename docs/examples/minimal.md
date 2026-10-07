@@ -6,7 +6,7 @@ itself.
 
 ## Project tree
 
-```
+```tree
 nginx-helm/
 ├── margo.yaml
 └── margo/

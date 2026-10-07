@@ -6,7 +6,7 @@ no drift between what you run locally and what gets pushed.
 
 ## Project tree
 
-```
+```tree
 myapp-compose/
 ├── margo.yaml
 ├── margo/

@@ -2,18 +2,20 @@
 
 Fetch and display the manifest of an OCI artifact without downloading layers.
 
-```
+```text
 margot fetch <uri>
 ```
 
 !!! note
-    `fetch` is a lightweight debugging/inspection command, modeled after `oras manifest fetch`. It fetches and prints the raw OCI manifest for a given tag — nothing more. No layers are downloaded, nothing is written to disk. Use `margot pull` when you need the artifact layers on disk.
+    `fetch` is a lightweight debugging/inspection command, modeled after `oras manifest fetch`. It fetches and prints
+    the raw OCI manifest for a given tag — nothing more. No layers are downloaded, nothing is written to disk. Use
+    `margot pull` when you need the artifact layers on disk.
 
 ## Arguments
 
-| Argument | Description |
-|---|---|
-| `<uri>` | Full OCI reference: `registry/repository:tag`. Example: `public.ecr.aws/g2n4p2m7/margo:1.0.0` |
+| Argument | Description                                                                                   |
+| -------- | --------------------------------------------------------------------------------------------- |
+| `<uri>`  | Full OCI reference: `registry/repository:tag`. Example: `public.ecr.aws/g2n4p2m7/margo:1.0.0` |
 
 ## What it does
 
@@ -30,10 +32,10 @@ the registry returns is shown as-is.
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| 0 | Manifest fetched and printed. |
-| 1 | Invalid URI, manifest fetch failed, or registry error. |
+| Code | Meaning                                                |
+| ---- | ------------------------------------------------------ |
+| 0    | Manifest fetched and printed.                          |
+| 1    | Invalid URI, manifest fetch failed, or registry error. |
 
 ## Example
 
