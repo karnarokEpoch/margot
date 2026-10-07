@@ -82,7 +82,7 @@ No tag collisions, no manual versioning per variant.
 ## app.yaml.jinja
 
 ```yaml+jinja
-apiVersion: margo.org/v1-alpha1
+apiVersion: v1
 kind: ApplicationDescription
 id: {{ manifest.id }}
 metadata:
