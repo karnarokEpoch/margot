@@ -47,6 +47,10 @@ metadata:
   name: NGINX
   description: {{ manifest.description }}
   version: {{ manifest.version }}
+  catalog:
+    organization:
+      - name: "Margot"
+        site: "https://karnarokepoch.github.io/margot/"
 deploymentProfiles:
   - type: quadlet
     id: {{ manifest.id }}-quadlet
