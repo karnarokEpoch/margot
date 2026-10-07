@@ -54,15 +54,70 @@ application descriptor in `margo/app.yaml` (or `margo/app.yaml.jinja`). See
 
 A minimal `margo.yaml`:
 
-```yaml
-apiVersion: v1
-id: com-example-nginx
-name: nginx
-version: "1.0.0"
-appVersion: "1.27.0"
-description: "NGINX web server"
-repository: public.ecr.aws/g2n4p2m7/margo
-```
+=== "YAML"
+
+    ``` yaml
+    apiVersion: v1
+    id: com-example-app
+    name: app
+    version: "1.0.0"
+    appVersion: "1.27.0"
+    description: "App web server"
+    repository: public.ecr.aws/g2n4p2m7/margo
+    ```
+
+=== "bash"
+
+    ``` bash
+    cat > margo.yaml <<EOF
+    apiVersion: v1
+    id: com-example-app
+    name: app
+    version: "1.0.0"
+    appVersion: "1.27.0"
+    description: "App web server"
+    repository: public.ecr.aws/g2n4p2m7/margo
+    EOF
+    ```
+
+A minimal `app.yaml.jinja`:
+
+=== "Jinja"
+
+    ``` yaml+jinja
+    apiVersion: v1
+    kind: ApplicationDescription
+    id: {{ manifest.id }}
+    metadata:
+        name: NGINX
+        description: {{ manifest.description }}
+        version: {{ manifest.version }}
+        catalog:
+            organization:
+                - name: "Margot"
+                  site: "https://karnarokepoch.github.io/margot/"
+    deploymentProfiles: []
+    ```
+
+=== "bash"
+
+    ``` bash
+    mkdir margo
+    cat > margo/app.yaml.jinja <<EOF
+    apiVersion: v1
+    kind: ApplicationDescription
+    id: {{ manifest.id }}
+    metadata:
+        name: NGINX
+        description: {{ manifest.description }}
+        version: {{ manifest.version }}
+        catalog:
+            organization:
+                - name: "Margot"
+                  site: "https://karnarokepoch.github.io/margot/"
+    deploymentProfiles: []
+    EOF
+    ```
 
 Place this at the root of your project. The `id` is the stable machine identifier for
 the application — it should not change across releases. `version` becomes the OCI tag.
