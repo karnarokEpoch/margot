@@ -5,6 +5,8 @@ repo_name: karnarokEpoch/margot
 
 theme:
   name: material
+  logo: icon.png
+  favicon: icon.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default

@@ -1,5 +1,11 @@
 # margot
 
+<!-- markdownlint-disable MD033 -->
+<p align="center">
+  <img src="icon.png" alt="margot" width="240">
+</p>
+<!-- markdownlint-enable MD033 -->
+
 [![PyPI version](https://img.shields.io/pypi/v/margo-tooling)](https://pypi.org/project/margo-tooling/)
 [![Python versions](https://img.shields.io/pypi/pyversions/margo-tooling)](https://pypi.org/project/margo-tooling/)
 [![License](https://img.shields.io/pypi/l/margo-tooling)](https://github.com/karnarokEpoch/margot/blob/main/LICENSE)
@@ -64,7 +70,7 @@ uv sync
 
 ## Usage
 
-```
+```text
 $ margot --help
 
  Usage: margot [OPTIONS] COMMAND [ARGS]...
@@ -100,7 +106,7 @@ $ margot --help
 
 A Margo project is described by a `margo.yaml` file at the project root:
 
-```
+```tree
 nginx-helm/
 ├── margo.yaml
 └── margo/
@@ -147,7 +153,7 @@ margot push
 artifact via [ORAS](https://oras.land/) to the registry declared in `margo.yaml`,
 tagged with `version`:
 
-```
+```text
 public.ecr.aws/g2n4p2m7/margo:1.0.0
 ```
 
@@ -168,7 +174,7 @@ margot package
 `<id>-<version>.tgz` — for deployment in disconnected environments without registry
 access. The bundle is written to `.dist/<version>/` by default:
 
-```
+```text
 .dist/1.0.0/com-example-nginx-1.0.0.tgz
 ```
 

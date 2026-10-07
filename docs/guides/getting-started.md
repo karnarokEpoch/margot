@@ -88,6 +88,7 @@ application descriptor in `margo/app.yaml` (or `margo/app.yaml.jinja`). See
 
 A minimal `margo.yaml`:
 
+<!-- markdownlint-disable MD046 -->
 === "YAML"
 
     ``` yaml
@@ -152,6 +153,7 @@ A minimal `app.yaml.jinja`:
     deploymentProfiles: []
     EOF
     ```
+<!-- markdownlint-enable MD046 -->
 
 Place this at the root of your project. The `id` is the stable machine identifier for
 the application — it should not change across releases.
@@ -228,7 +230,7 @@ for details.
 
 On success:
 
-```
+```text
 Pushed: public.ecr.aws/g2n4p2m7/margo:1.0.0
 ```
 
