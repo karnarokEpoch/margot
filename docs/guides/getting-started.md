@@ -1,7 +1,13 @@
 # Getting Started
 
-This guide takes you from installation to a complete round trip: install margot, write a
-minimal project, validate and build it, publish it to a registry, and retrieve it back.
+This guide takes you from installation to a complete round trip:
+
+* install margot
+* write a minimal project
+* validate it
+* build it
+* publish it
+* retrieve it
 
 ## Install
 
@@ -35,15 +41,43 @@ podman run --rm -v "$PWD":/workspace ghcr.io/karnarokepoch/margot:latest --help
 Pin to a specific version instead of `latest` for reproducible builds:
 
 ```bash
-podman run --rm -v "$PWD":/workspace ghcr.io/karnarokepoch/margot:1.0.0 --help
+podman run --rm -v "$PWD":/workspace ghcr.io/karnarokepoch/margot:0.9.0 --help
 ```
 
 ### From source
 
+With uv:
+
 ```bash
-git clone https://github.com/karnarokEpoch/margot.git
-cd margot
-uv sync
+uv tool install .
+margot -V
+```
+
+It install it 2 things:
+
+1. The isolated venv (the package itself + deps):
+
+    ```bash
+    $XDG_DATA_HOME/uv/tools/<package-name>/
+    # default on Linux:
+    ~/.local/share/uv/tools/margo-tooling/
+    ```
+
+    Each tool gets its own dedicated virtualenv here — isolated from your projects and from other tools.
+
+1. The executable (what lands on your PATH):
+
+    ```bash
+    $XDG_BIN_HOME  →  else  ~/.local/bin/
+    # so
+    ~/.local/bin/margot
+    ```
+
+Or with pip:
+
+```bash
+uv build
+pip install dist/*/margo-tooling*.whl
 ```
 
 ## Minimal project
@@ -120,7 +154,8 @@ A minimal `app.yaml.jinja`:
     ```
 
 Place this at the root of your project. The `id` is the stable machine identifier for
-the application — it should not change across releases. `version` becomes the OCI tag.
+the application — it should not change across releases.
+`version` becomes the OCI tag for margo artefact.
 
 ## Validate the descriptor
 

@@ -58,8 +58,8 @@ quadlet:
 
 If `margo.yaml` is absent from the current directory, margot fails with:
 
-```
-margo.yaml not found in current directory. Run margot init or create it manually.
+```text
+margo.yaml not found in current directory. Create it manually.
 ```
 
 Use `--project-dir` to point at a different directory.

@@ -104,18 +104,3 @@ in:
 
 See [Authentication](authentication.md) for the full expiry lifecycle and ECR token
 retrieval walkthrough.
-
-The key points for CI:
-
-- Log in at the start of the job with `margot auth login`. For AWS ECR, pipe the token
-  from `aws ecr-public get-login-password` (or `aws ecr get-login-password`) directly
-  into `--password-stdin`.
-- ECR tokens are valid for 12 hours. For pipelines that run longer, schedule a re-login
-  step or split the job.
-- Use `margot auth status` after login to confirm the credential state before moving to
-  build/push stages.
-- Optionally run `margot auth logout` at the end of the job to clean up credentials on
-  shared runners.
-
-Inject registry credentials as CI secrets (environment variables or a secret store) —
-never hard-code them in pipeline configuration files.

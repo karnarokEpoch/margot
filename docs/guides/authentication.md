@@ -48,14 +48,6 @@ aws ecr get-login-password --region us-east-1 \
       --username AWS --password-stdin
 ```
 
-**Why `--username AWS`?** The ECR API requires this exact string as the username
-regardless of the IAM identity behind the token — the token itself carries all the
-authorization claims.
-
-**Why the token is short-lived:** ECR tokens are valid for 12 hours. After that, any
-push attempt will fail with an authentication error. margot tracks this automatically —
-see the next section.
-
 ## Credential expiry lifecycle
 
 ### What gets persisted and where
@@ -110,19 +102,3 @@ margot auth logout public.ecr.aws
 
 This removes the stored credentials from the credential store and deletes the expiry
 entry from `~/.config/margot/credentials.toml`.
-
-**When to log out:**
-
-- **Rotating credentials** — log out, then log in again with a fresh token. Especially
-  relevant for ECR's 12-hour tokens.
-- **CI cleanup** — in a CI environment where you log in at the start of a job, logging
-  out at the end avoids leaving credentials on a shared runner. If credentials are
-  injected as environment variables for the job only, a logout step ensures they are not
-  inadvertently cached.
-
-## Credential handling in CI
-
-See [CI/CD integration — Credential handling](ci-cd.md#credential-handling) for how to
-structure authentication within a pipeline. The short version: log in at the start of
-the job, use `margot auth status` to confirm state, push, and optionally log out at the
-end.
