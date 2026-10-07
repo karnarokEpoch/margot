@@ -2,7 +2,7 @@
 
 <!-- markdownlint-disable MD033 -->
 <p align="center">
-  <img src="icon.png" alt="margot" width="240">
+  <img src="https://media.githubusercontent.com/media/karnarokEpoch/margot/refs/heads/main/docs/icon.png" alt="margot" width="240">
 </p>
 <!-- markdownlint-enable MD033 -->
 
