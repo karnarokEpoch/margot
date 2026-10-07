@@ -2,22 +2,22 @@
 
 Pull OCI artifact layers to a local directory without extraction.
 
-```
+```text
 margot pull <uri> [--output DIR] [--recursive]
 ```
 
 ## Arguments
 
-| Argument | Description |
-|---|---|
-| `<uri>` | Full OCI reference: `registry/repository:tag`. Example: `public.ecr.aws/g2n4p2m7/margo:1.0.0` |
+| Argument | Description                                                                                   |
+| -------- | --------------------------------------------------------------------------------------------- |
+| `<uri>`  | Full OCI reference: `registry/repository:tag`. Example: `public.ecr.aws/g2n4p2m7/margo:1.0.0` |
 
 ## Flags
 
-| Flag | Default | Description |
-|---|---|---|
-| `--output` / `-o` | `.` (current directory) | Directory to write pulled layers into. |
-| `--recursive` / `-r` | off | Pull declared components too (margo artifacts only). |
+| Flag                 | Default                 | Description                                          |
+| -------------------- | ----------------------- | ---------------------------------------------------- |
+| `--output` / `-o`    | `.` (current directory) | Directory to write pulled layers into.               |
+| `--recursive` / `-r` | off                     | Pull declared components too (margo artifacts only). |
 
 ## What it does
 
@@ -32,14 +32,14 @@ No SemVer validation: `pull` retrieves arbitrary existing artifacts. Auth: anony
 1. Validate the URI format.
 2. Fetch the manifest.
 3. Detect artifact type from the `artifactType` manifest field:
-   - `application/vnd.margo.app.v1+json` → margo
-   - `application/vnd.org.margo.component.compose+json` → compose
-   - `application/vnd.org.margo.component.quadlet+json` → quadlet
-   - anything else → unknown
+    - `application/vnd.margo.app.v1+json` → margo
+    - `application/vnd.org.margo.component.compose+json` → compose
+    - `application/vnd.org.margo.component.quadlet+json` → quadlet
+    - anything else → unknown
 4. Pull all layers to `--output`.
 5. For compose/quadlet: rename the payload file using the layer's
-   `org.opencontainers.image.title` annotation, or `<title>-<version>.tgz` from manifest
-   annotations, when available.
+    `org.opencontainers.image.title` annotation, or `<title>-<version>.tgz` from manifest
+    annotations, when available.
 6. Report each written file path.
 
 ## Recursive pull (`--recursive`)
@@ -50,8 +50,8 @@ When `--recursive` is set for a margo artifact:
 
 1. Locate `app.yaml` in the pulled layers.
 2. Parse `deploymentProfiles[].components[]` to extract component OCI references:
-   `properties.repository` (strip `oci://` scheme) + `properties.revision` → OCI ref.
-   Components missing either field are skipped with a warning.
+    `properties.repository` (strip `oci://` scheme) + `properties.revision` → OCI ref.
+    Components missing either field are skipped with a warning.
 3. Deduplicate by `(repository, tag)`, preserving first-seen order.
 4. Pull each component into `--output/<component-name>/`.
 
@@ -60,7 +60,7 @@ the root pull succeeds.
 
 ### Recursive output structure
 
-```
+```tree
 outdir/
   app.yaml
   database/
@@ -71,10 +71,10 @@ outdir/
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| 0 | Pull succeeded (including partial recursive pulls with component warnings). |
-| 1 | Invalid URI, manifest fetch failed, or registry error. |
+| Code | Meaning                                                                     |
+| ---- | --------------------------------------------------------------------------- |
+| 0    | Pull succeeded (including partial recursive pulls with component warnings). |
+| 1    | Invalid URI, manifest fetch failed, or registry error.                      |
 
 ## Example
 

@@ -6,7 +6,7 @@ itself.
 
 ## Project tree
 
-```
+```tree
 nginx-helm/
 ├── margo.yaml
 └── margo/
@@ -31,13 +31,17 @@ repository: public.ecr.aws/g2n4p2m7/margo
 ## app.yaml.jinja
 
 ```yaml+jinja
-apiVersion: margo.org/v1-alpha1
+apiVersion: v1
 kind: ApplicationDescription
 id: {{ manifest.id }}
 metadata:
   name: NGINX
   description: {{ manifest.description }}
   version: {{ manifest.version }}
+  catalog:
+    organization:
+      - name: "Margot"
+        site: "https://karnarokepoch.github.io/margot/"
 deploymentProfiles:
   - type: helm
     id: {{ manifest.id }}-helm

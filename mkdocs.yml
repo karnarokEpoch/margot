@@ -5,6 +5,8 @@ repo_name: karnarokEpoch/margot
 
 theme:
   name: material
+  logo: icon.png
+  favicon: icon.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -28,6 +30,7 @@ nav:
       - Authentication: guides/authentication.md
       - CI/CD integration: guides/ci-cd.md
   - margo.yaml: margo-yaml.md
+  - Templating: templating.md
   - Concepts: concepts.md
   - Configuration: config.md
   - Examples:
@@ -48,6 +51,8 @@ nav:
 markdown_extensions:
   - admonition
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
 
 extra_css:
   - stylesheets/extra.css

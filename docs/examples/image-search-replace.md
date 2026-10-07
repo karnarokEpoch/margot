@@ -6,7 +6,7 @@ no drift between what you run locally and what gets pushed.
 
 ## Project tree
 
-```
+```tree
 myapp-compose/
 ├── margo.yaml
 ├── margo/
@@ -56,7 +56,7 @@ compose:
 ```
 
 - `search` — the literal string as it appears in `compose/compose.yaml`.
-- `replace` — a Jinja2 template rendered from the same [manifest context](../margo-yaml.md#template-context)
+- `replace` — a Jinja2 template rendered from the same [template context](../templating.md#template-context-reference)
   used for `app.yaml.jinja`. `{{ manifest.appVersion }}` resolves to `2.3.1`.
 
 Because `replace` is a template rather than a static string, bumping `appVersion` in `margo.yaml`

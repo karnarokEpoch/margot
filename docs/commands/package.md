@@ -3,7 +3,7 @@
 Bundle already-built Margo application artifacts into a self-contained `.tgz` for
 offline deployment in disconnected environments.
 
-```
+```text
 margot package [-t margo|compose|quadlet] [--project-dir PATH]
                [--build-dir DIR] [--output PATH] [--no-images]
                [--runtime podman|docker|none] [--platform os/arch ...]
@@ -12,19 +12,19 @@ margot package [-t margo|compose|quadlet] [--project-dir PATH]
 !!! warning
     By default, `margot package` contacts an image registry to embed container images
     into the bundle. This includes scanning all image references found in built compose/quadlet
-    content, regardless of any `image: {search, replace}` configuration. Image inclusion requires 
-    network access. Use `--no-images` to skip image retrieval entirely and produce a 
+    content, regardless of any `image: {search, replace}` configuration. Image inclusion requires
+    network access. Use `--no-images` to skip image retrieval entirely and produce a
     network-free bundle.
 
 !!! note "Optional: Local container daemon and manifest list lookup"
     If you have locally-built images (e.g., built but not yet pushed to a registry),
-    or a local Podman manifest list, you can use `--runtime podman` or `--runtime docker` to 
-    pull them directly from your local container daemon before falling back to the registry. 
-    **Podman users:** If you've created a local manifest list via `podman manifest create` and 
-    `podman manifest add`, margot will check it first and export ALL resolvable platforms from 
-    that list without any registry contact. By default, `margot package` silently checks the 
-    local Podman manifest list, then per-platform daemon lookups (Podman → Docker), then falls 
-    back to the registry — no configuration needed. This requires the `podman` or `docker` Python 
+    or a local Podman manifest list, you can use `--runtime podman` or `--runtime docker` to
+    pull them directly from your local container daemon before falling back to the registry.
+    **Podman users:** If you've created a local manifest list via `podman manifest create` and
+    `podman manifest add`, margot will check it first and export ALL resolvable platforms from
+    that list without any registry contact. By default, `margot package` silently checks the
+    local Podman manifest list, then per-platform daemon lookups (Podman → Docker), then falls
+    back to the registry — no configuration needed. This requires the `podman` or `docker` Python
     SDK (installed as an optional dependency by default).
 
 ## Prerequisites
@@ -58,9 +58,9 @@ lookup.
 By default, `package` also discovers container image references from the built compose and
 quadlet component archives and pulls them into the bundle as OCI image-layout tar archives
 under `images/`. This scans all image references found in built component content, including
-base/third-party images and images with no `image: {search, replace}` block — making the 
+base/third-party images and images with no `image: {search, replace}` block — making the
 bundle fully self-contained for offline loading. No registry access is required at deploy time.
-When image references are discovered and `--runtime` is not `none`, `package` checks local 
+When image references are discovered and `--runtime` is not `none`, `package` checks local
 container daemons first before pulling from the registry:
 
 - **`--runtime auto` (default):** Silently probe Podman → Docker → registry. If a local
@@ -103,7 +103,7 @@ For each eligible image reference (when `--no-images` is not passed)
 3. **If found locally:** Export from daemon (Podman: OCI-archive natively; Docker: Docker SDK
    export → normalized to OCI-layout) and save to `images/` folder.
 
-4. **If not found locally or daemon lookup skipped:** Pull from registry via OCI client. 
+4. **If not found locally or daemon lookup skipped:** Pull from registry via OCI client.
    - A registry with no stored credential attempts anonymous pull (not an error).
    - Only an **expired** stored credential is an error, reported via the aggregate failure mechanism.
 
@@ -112,7 +112,9 @@ For each eligible image reference (when `--no-images` is not passed)
 6. **Multi-platform:** All platforms in an image index are saved by default; use
    `--platform` to narrow (see below).
 
-7. **All-or-nothing:** All discovered images are attempted before any failure is reported. If any pulls fail, `package` hard-fails naming the complete set of failed references, and no images/-bearing bundle is written.
+7. **All-or-nothing:** All discovered images are attempted before any failure is reported.
+  If any pulls fail, `package` hard-fails naming the complete set of failed references,
+  and no images/-bearing bundle is written.
 
 All images are materialized as OCI image-layout tars (`oci-layout` + `index.json` +
 `blobs/sha256/...`), regardless of source, keeping `images/` format-uniform and loadable
@@ -144,7 +146,7 @@ with a clear error if both are set.
 
 ## Archive format
 
-```
+```tree
 <id>-<version>.tgz
 └── <id>-<version>/
     ├── app.yaml                          # margo build output, copied verbatim
@@ -235,10 +237,13 @@ OCI image layout archives.
 
 ## Common errors
 
-- **`Built margo artifact not found at .dist/<version>/margo. Run 'margot build' first.`** — run `margot build` (or `margot build -t margo`) first.
+- **`Built margo artifact not found at .dist/<version>/margo. Run 'margot build' first.`** — run `margot build` (or
+  `margot build -t margo`) first.
 - **`compose component not defined in margo.yaml`** — the requested type is not declared in your project descriptor.
-- **`Built compose artifact not found in .dist/<version>. Run 'margot build' first.`** — the type is declared but not yet built.
-- **`Collision: compose and quadlet would both write ...`** — two components resolve to the same folder and filename inside the bundle. Set distinct `repository:` values for each component in `margo.yaml`.
+- **`Built compose artifact not found in .dist/<version>. Run 'margot build' first.`** — the type is declared but not
+  yet built.
+- **`Collision: compose and quadlet would both write ...`** — two components resolve to the same folder and filename
+  inside the bundle. Set distinct `repository:` values for each component in `margo.yaml`.
 
 ## Example
 
@@ -263,7 +268,7 @@ margot package
 
 Produces `.dist/1.0.0/com-example-nginx-1.0.0.tgz` with this structure:
 
-```
+```tree
 com-example-nginx-1.0.0.tgz
 └── com-example-nginx-1.0.0/
     ├── app.yaml

@@ -2,7 +2,7 @@
 
 Push built Margo application artifacts to an OCI registry.
 
-```
+```text
 margot push [--type margo|compose|quadlet|all] [--project-dir PATH]
             [--registry REG] [--repository REPO] [--build-dir DIR]
             [--variant VARIANT] [--dry-run]
@@ -16,15 +16,15 @@ margot push [--type margo|compose|quadlet|all] [--project-dir PATH]
 
 ## Flags
 
-| Flag | Default | Description |
-|---|---|---|
-| `--type` | `all` | Package type to push: `margo`, `compose`, `quadlet`, or `all`. |
-| `--project-dir` | `.` | Project root directory (where `margo.yaml` lives). |
-| `--registry` | from config / `margo.yaml` | OCI registry hostname. |
-| `--repository` | from config / `margo.yaml` | OCI repository path. |
-| `--build-dir` | from config | Directory containing built artifacts. |
-| `--variant` | all variants | Variant to push: a variant name, or `all`. |
-| `--dry-run` | off | Validate and probe the registry without uploading anything. |
+| Flag            | Default                    | Description                                                    |
+| --------------- | -------------------------- | -------------------------------------------------------------- |
+| `--type`        | `all`                      | Package type to push: `margo`, `compose`, `quadlet`, or `all`. |
+| `--project-dir` | `.`                        | Project root directory (where `margo.yaml` lives).             |
+| `--registry`    | from config / `margo.yaml` | OCI registry hostname.                                         |
+| `--repository`  | from config / `margo.yaml` | OCI repository path.                                           |
+| `--build-dir`   | from config                | Directory containing built artifacts.                          |
+| `--variant`     | all variants               | Variant to push: a variant name, or `all`.                     |
+| `--dry-run`     | off                        | Validate and probe the registry without uploading anything.    |
 
 ## Dry run
 
@@ -47,7 +47,7 @@ not one per variant.
 
 On success, each target is reported:
 
-```
+```text
 Dry run OK: public.ecr.aws/g2n4p2m7/margo:1.0.0
 Dry run OK (simple): public.ecr.aws/g2n4p2m7/margo:1.0.0_compose-simple
 ```
@@ -56,7 +56,7 @@ Dry run OK (simple): public.ecr.aws/g2n4p2m7/margo:1.0.0_compose-simple
 
 A real push (no `--dry-run`) reports each pushed target:
 
-```
+```text
 Pushed: public.ecr.aws/g2n4p2m7/margo:1.0.0
 Pushed (simple): public.ecr.aws/g2n4p2m7/margo:1.0.0_compose-simple
 ```
@@ -65,20 +65,20 @@ Pushed (simple): public.ecr.aws/g2n4p2m7/margo:1.0.0_compose-simple
 
 ### margo artifact
 
-| Layer | Media type |
-|---|---|
-| `app.yaml` | `application/vnd.margo.app.description.v1+yaml` |
-| `resources/icon.png` | `application/vnd.margo.app.icon.v1+png` |
-| `resources/license.txt` | `application/vnd.margo.app.license.v1+plain` |
-| `resources/release-notes.md` | `application/vnd.margo.app.releaseNotes.v1+markdown` |
-| `resources/description.md` | `application/vnd.margo.app.descriptionFile.v1+markdown` |
+| Layer                        | Media type                                              |
+| ---------------------------- | ------------------------------------------------------- |
+| `app.yaml`                   | `application/vnd.margo.app.description.v1+yaml`         |
+| `resources/icon.png`         | `application/vnd.margo.app.icon.v1+png`                 |
+| `resources/license.txt`      | `application/vnd.margo.app.license.v1+plain`            |
+| `resources/release-notes.md` | `application/vnd.margo.app.releaseNotes.v1+markdown`    |
+| `resources/description.md`   | `application/vnd.margo.app.descriptionFile.v1+markdown` |
 
 Manifest `artifactType`: `application/vnd.margo.app.v1+json`
 
 ### compose / quadlet artifact
 
-| Layer | Media type |
-|---|---|
+| Layer                  | Media type                                                       |
+| ---------------------- | ---------------------------------------------------------------- |
 | `<name>-<version>.tgz` | `application/vnd.org.margo.component.compose.tar+gzip` (compose) |
 | `<name>-<version>.tgz` | `application/vnd.org.margo.component.quadlet.tar+gzip` (quadlet) |
 
@@ -86,19 +86,19 @@ Manifest `artifactType`: `application/vnd.org.margo.component.compose+json` / `a
 
 Annotations pushed with compose/quadlet:
 
-| Annotation | Value |
-|---|---|
-| `org.margo.component.type` | `compose` or `quadlet` |
-| `org.margo.component.version` | OCI tag |
-| `org.opencontainers.image.title` | application name |
+| Annotation                             | Value                   |
+| -------------------------------------- | ----------------------- |
+| `org.margo.component.type`             | `compose` or `quadlet`  |
+| `org.margo.component.version`          | OCI tag                 |
+| `org.opencontainers.image.title`       | application name        |
 | `org.opencontainers.image.description` | application description |
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| 0 | All artifacts pushed (or dry run passed). |
-| 1 | SemVer validation failed, artifact not built, credentials expired, registry error, or no write access (dry run). |
+| Code | Meaning                                                                                                          |
+| ---- | ---------------------------------------------------------------------------------------------------------------- |
+| 0    | All artifacts pushed (or dry run passed).                                                                        |
+| 1    | SemVer validation failed, artifact not built, credentials expired, registry error, or no write access (dry run). |
 
 ## Common errors
 

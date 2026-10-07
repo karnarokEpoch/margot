@@ -2,7 +2,7 @@
 
 Manage OCI registry credentials.
 
-```
+```text
 margot auth login REGISTRY [--username USER] [--password-stdin] [--expiry-hours N]
 margot auth logout REGISTRY
 margot auth status
@@ -12,23 +12,23 @@ margot auth status
 
 Authenticate with an OCI registry and persist credentials.
 
-```
+```text
 margot auth login REGISTRY [--username USER] [--password-stdin] [--expiry-hours N]
 ```
 
 ### Arguments
 
-| Argument | Description |
-|---|---|
+| Argument   | Description                                   |
+| ---------- | --------------------------------------------- |
 | `REGISTRY` | OCI registry hostname, e.g. `public.ecr.aws`. |
 
 ### Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--username` | — | Registry username. |
-| `--password-stdin` | off | Read the password from stdin instead of a prompt. |
-| `--expiry-hours` | — | Hours until the credentials expire. Overrides auto-detected expiry (see [Credential expiry tracking](#credential-expiry-tracking)) and saves the resulting timestamp to `~/.config/margot/credentials.toml`. |
+| Flag               | Default | Description                                                                                                                                                                                                  |
+| ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--username`       | —       | Registry username.                                                                                                                                                                                           |
+| `--password-stdin` | off     | Read the password from stdin instead of a prompt.                                                                                                                                                            |
+| `--expiry-hours`   | —       | Hours until the credentials expire. Overrides auto-detected expiry (see [Credential expiry tracking](#credential-expiry-tracking)) and saves the resulting timestamp to `~/.config/margot/credentials.toml`. |
 
 ### How it works
 
@@ -83,7 +83,7 @@ command fails with a clear message and a `margot auth login` hint.
 
 Remove stored credentials for a registry.
 
-```
+```text
 margot auth logout REGISTRY
 ```
 
@@ -91,15 +91,15 @@ Removes the expiry entry from `~/.config/margot/credentials.toml`.
 
 ### Arguments
 
-| Argument | Description |
-|---|---|
+| Argument   | Description                            |
+| ---------- | -------------------------------------- |
 | `REGISTRY` | OCI registry hostname to log out from. |
 
 ## margot auth status
 
 Show credential status for all tracked OCI registries.
 
-```
+```text
 margot auth status
 ```
 
@@ -120,7 +120,7 @@ credentials file (i.e. logged in without `--expiry-hours`) appear in the same ta
 
 When no credentials are tracked at all, no table is shown:
 
-```
+```text
 No credentials tracked.
 ```
 
@@ -130,7 +130,7 @@ No credentials tracked.
 margot auth status
 ```
 
-```
+```text
               Registry Credential Status
 ┌──────────────────┬──────────────────────┬───────────────────────────┬──────────┐
 │ Registry         │ Expires At           │ Remaining                 │ Status   │
@@ -142,10 +142,10 @@ margot auth status
 
 ## Exit codes
 
-| Code | Meaning |
-| --- | --- |
-| 0 | Login/logout/status succeeded. |
-| 1 | Authentication failed, registry unreachable, or invalid arguments. |
+| Code | Meaning                                                            |
+| ---- | ------------------------------------------------------------------ |
+| 0    | Login/logout/status succeeded.                                     |
+| 1    | Authentication failed, registry unreachable, or invalid arguments. |
 
 ## Example
 

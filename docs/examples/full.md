@@ -5,7 +5,7 @@ and symlinks to avoid file duplication. This is the most realistic production la
 
 ## Project tree
 
-```
+```tree
 web-platform/
 ├── margo.yaml
 ├── margo/
@@ -82,7 +82,7 @@ No tag collisions, no manual versioning per variant.
 ## app.yaml.jinja
 
 ```yaml+jinja
-apiVersion: margo.org/v1-alpha1
+apiVersion: v1
 kind: ApplicationDescription
 id: {{ manifest.id }}
 metadata:
@@ -179,7 +179,7 @@ margot describe
 This produces three output panels: identity metadata (name, version, OCI URI, catalog), deployment profiles (tree of
 types, components, and their properties), and configuration (settings, parameters, and schemas).
 
-```
+```text
 ╭──────────────────────────── margo.org/v1-alpha1 ─────────────────────────────╮
 │ id    com-example-web-platform  version  1.0.0                               │
 │ name  Web Platform                                                           │
@@ -251,7 +251,7 @@ The configuration now includes the `nginxPort` setting properly wired to its sch
 Use `--section component-first` to see an alternative view listing each component with its incoming parameters.
 This is useful when understanding what configuration a specific component needs.
 
-```
+```text
 ╭───────────────────────── Components (6 components) ──────────────────────────╮
 │ nginx  [Component]                                                           │
 │ └── no parameters                                                            │
@@ -330,7 +330,9 @@ The minimal variant ships only nginx, no apache.
 
 ## Quadlet files
 
-Note: `${NGINX_PORT}` in the quadlet `PublishPort=` is resolved by the deploying Margo device at deploy time (not by margot during build), and the `Environment=NGINX_PORT=8080` in the `[Service]` section supplies the default value if not overridden by the device.
+Note: `${NGINX_PORT}` in the quadlet `PublishPort=` is resolved by the deploying Margo device at deploy time (not by
+margot during build), and the `Environment=NGINX_PORT=8080` in the `[Service]` section supplies the default value if not
+overridden by the device.
 
 ### default
 

@@ -1,5 +1,11 @@
 # margot
 
+<!-- markdownlint-disable MD033 -->
+<p align="center">
+  <img src="icon.png" alt="margot" width="240">
+</p>
+<!-- markdownlint-enable MD033 -->
+
 [![PyPI version](https://img.shields.io/pypi/v/margo-tooling)](https://pypi.org/project/margo-tooling/)
 [![Python versions](https://img.shields.io/pypi/pyversions/margo-tooling)](https://pypi.org/project/margo-tooling/)
 [![License](https://img.shields.io/pypi/l/margo-tooling)](https://github.com/karnarokEpoch/margot/blob/main/LICENSE)

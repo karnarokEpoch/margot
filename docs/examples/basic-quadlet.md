@@ -5,7 +5,7 @@ No variants — flat layout.
 
 ## Project tree
 
-```
+```tree
 nginx-quadlet/
 ├── margo.yaml
 ├── margo/
@@ -40,13 +40,17 @@ prevents tag collision with the margo artifact (which uses the root `version` as
 ## app.yaml.jinja
 
 ```yaml+jinja
-apiVersion: margo.org/v1-alpha1
+apiVersion: v1
 kind: ApplicationDescription
 id: {{ manifest.id }}
 metadata:
   name: NGINX
   description: {{ manifest.description }}
   version: {{ manifest.version }}
+  catalog:
+    organization:
+      - name: "Margot"
+        site: "https://karnarokepoch.github.io/margot/"
 deploymentProfiles:
   - type: quadlet
     id: {{ manifest.id }}-quadlet
@@ -64,8 +68,8 @@ At build time:
 - `{{ manifest.quadlet.component }}` → `com-example-nginx-quadlet` (derived: `<id>-<type>`)
 - `{{ manifest.quadlet.tag }}` → `1.0.0_quadlet` (OCI-safe form of `1.0.0+quadlet`)
 - `{{ manifest.quadlet.repository }}` → `public.ecr.aws/g2n4p2m7/margo` (bare registry/repository —
-  the `oci://` scheme required by `deploymentProfiles[].components[].properties.repository` is
-  prepended in the template, not part of the context value)
+    the `oci://` scheme required by `deploymentProfiles[].components[].properties.repository` is
+    prepended in the template, not part of the context value)
 
 ## Quadlet files
 
@@ -89,7 +93,7 @@ margot push
 
 This produces two OCI artifacts at `public.ecr.aws/g2n4p2m7/margo`:
 
-| Tag | Artifact type |
-|-----|---------------|
-| `1.0.0` | `application/vnd.margo.app.v1+json` |
+| Tag             | Artifact type                                      |
+| --------------- | -------------------------------------------------- |
+| `1.0.0`         | `application/vnd.margo.app.v1+json`                |
 | `1.0.0_quadlet` | `application/vnd.org.margo.component.quadlet+json` |

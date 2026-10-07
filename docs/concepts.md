@@ -15,13 +15,13 @@ optional supporting resources.
 
 Layers and their media types:
 
-| File | Media type |
-|---|---|
-| `app.yaml` | `application/vnd.margo.app.description.v1+yaml` |
-| `resources/icon.png` | `application/vnd.margo.app.icon.v1+png` |
-| `resources/license.txt` | `application/vnd.margo.app.license.v1+plain` |
-| `resources/release-notes.md` | `application/vnd.margo.app.releaseNotes.v1+markdown` |
-| `resources/description.md` | `application/vnd.margo.app.descriptionFile.v1+markdown` |
+| File                         | Media type                                              |
+| ---------------------------- | ------------------------------------------------------- |
+| `app.yaml`                   | `application/vnd.margo.app.description.v1+yaml`         |
+| `resources/icon.png`         | `application/vnd.margo.app.icon.v1+png`                 |
+| `resources/license.txt`      | `application/vnd.margo.app.license.v1+plain`            |
+| `resources/release-notes.md` | `application/vnd.margo.app.releaseNotes.v1+markdown`    |
+| `resources/description.md`   | `application/vnd.margo.app.descriptionFile.v1+markdown` |
 
 Build step: copy source → output dir, render `app.yaml` from `app.yaml.jinja` if present,
 or copy `app.yaml` verbatim. Both files present is a hard error.
@@ -64,19 +64,19 @@ coexist in the same repository.
     Write versions with `+` in `margo.yaml` — margot converts `+` to `_` automatically
     when producing OCI tags.
 
-| Type | Tag format | Example |
-|---|---|---|
-| margo | `<version>` | `1.3.0` |
-| compose (no variants) | `<version>` | `1.3.0` |
-| compose (variant) | `<version>_<variant-derived>` | `1.3.0_compose-simple` |
-| quadlet (no variants) | `<version>` | `1.3.0` |
-| quadlet (variant) | `<version>_<variant-derived>` | `1.3.0_quadlet-simple` |
+| Type                  | Tag format                    | Example                |
+| --------------------- | ----------------------------- | ---------------------- |
+| margo                 | `<version>`                   | `1.3.0`                |
+| compose (no variants) | `<version>`                   | `1.3.0`                |
+| compose (variant)     | `<version>_<variant-derived>` | `1.3.0_compose-simple` |
+| quadlet (no variants) | `<version>`                   | `1.3.0`                |
+| quadlet (variant)     | `<version>_<variant-derived>` | `1.3.0_quadlet-simple` |
 
 Variant tag derivation: when a variant has no explicit `version`, it is derived as
 `<component-version>+<type>-<variant-name>` → OCI tag `<component-version>_<type>-<variant-name>`.
 
-| `margo.yaml` version | OCI tag |
-|---|---|
+| `margo.yaml` version    | OCI tag                 |
+| ----------------------- | ----------------------- |
 | `1.0.0+compose-default` | `1.0.0_compose-default` |
 | `2.1.0+quadlet-minimal` | `2.1.0_quadlet-minimal` |
 
@@ -95,7 +95,7 @@ independently addressable.
 
 A Margo application project that margot operates on:
 
-```
+```tree
 <project-root>/
 ├── margo.yaml                     # project descriptor (required)
 ├── margo/                         # margo artifact source (default: margo/)
