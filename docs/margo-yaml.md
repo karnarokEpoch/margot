@@ -1,7 +1,17 @@
 # margo.yaml
 
-`margo.yaml` is the project descriptor file for a Margo application. It lives at the project root and is the single
-source of truth read by `margot build` and `margot push`.
+`margo.yaml` is the project descriptor file for a Margo application.
+It ancors the project root.
+
+If `margo.yaml` is absent from the current directory, margot fails with:
+
+```text
+margo.yaml not found in current directory. Create it manually.
+```
+
+Use `--project-dir` to point at a different directory.
+
+## Example
 
 ```yaml
 apiVersion: v1
@@ -54,16 +64,6 @@ quadlet:
 | `author` | No | List of authors, each with `name` (optional) and `email` (optional). Maps to `metadata.catalog.author` in the Margo spec. |
 | `organization` | No | List of organizations, each with `name` (required) and `site` (optional). Maps to `metadata.catalog.organization` in the Margo spec. |
 
-### Missing `margo.yaml`
-
-If `margo.yaml` is absent from the current directory, margot fails with:
-
-```text
-margo.yaml not found in current directory. Create it manually.
-```
-
-Use `--project-dir` to point at a different directory.
-
 ## Components
 
 `compose` and `quadlet` declare deployment components — each producing a separate OCI artifact when built.
@@ -111,10 +111,8 @@ compose:
 
 - `search` — a **literal string** (not a regex), exactly as it appears in the component's source
   text file(s), e.g. `localhost/myapp:dev`.
-- `replace` — a **Jinja2 template string**, rendered with the same [template context](#template-context)
-  used for `app.yaml.jinja`. Rendered once at build time, after every other `margo.yaml` field is
-  resolved — so bumping `appVersion` (or any other manifest field) alone updates every
-  `image.replace` result, with no separate edit to the `image` block itself.
+- `replace` — a **Jinja2 template string**, rendered with the same [template context](templating.md)
+  used for `app.yaml.jinja`.
 - May be declared at the component level (`compose:` / `quadlet:`) and/or per variant. A variant's
   `image` block **fully overrides** the component-level one — it does not merge.
 - Optional. A component/variant with no `image` block gets no substitution.
@@ -201,33 +199,10 @@ For example:
 This is the standard way to prevent tag collisions when multiple components share the same repository — append
 build metadata (`+margo`, `+quadlet`, `+compose-<variant>`, etc.) to distinguish them.
 
-## Template context
+## See also
 
-When `app.yaml.jinja` is present, margot renders it with Jinja2 using a context derived from `margo.yaml`. The
-entire context lives under the `manifest` namespace:
-
-- `manifest`
-  - `id`, `name`, `version`, `appVersion`, `description`
-  - `directory`, `repository`
-  - `annotations` — dict
-  - `author` — list of `{name, email}`
-  - `organization` — list of `{name, site}`
-  - `compose` and `quadlet`
-    - `version`, `repository`, `component`
-    - `variants` — ordered list of variant objects
-    - `<variant-name>` — direct access (e.g. `manifest.compose.default.tag`)
-
-Each **variant object** exposes:
-
-| Field | Derivation |
-| ------- | ------------ |
-| `name` | As declared in `margo.yaml`. |
-| `version` | Authored value, or `<component-version>+<type>-<name>` if omitted. |
-| `tag` | `version` with `+` replaced by `_`. **Computed, not authorable.** |
-| `ref` | `<repository>:<tag>`. **Computed, not authorable.** |
-| `repository` | Inherited from component, or overridden per variant. |
-| `component` | Authored value, or `<id>-<type>-<name>` if omitted. |
-
-!!! note
-    If `app.yaml.jinja` is absent, `app.yaml` is required and copied verbatim — no substitution occurs.
-    Both files present is a hard error.
+- [App description templating](templating.md) — full Jinja2 template context reference, variable
+  types, and worked examples (`app.yaml.jinja`, variant loops, conditional blocks, and more).
+- [Image search-and-replace example](examples/image-search-replace.md) — walkthrough with
+  `margot build` output showing the `image.search` / `image.replace` substitution in action.
+- [Concepts — Project layout](concepts.md#project-layout) — full directory tree for a Margo project.

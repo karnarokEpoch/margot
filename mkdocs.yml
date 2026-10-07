@@ -28,6 +28,7 @@ nav:
       - Authentication: guides/authentication.md
       - CI/CD integration: guides/ci-cd.md
   - margo.yaml: margo-yaml.md
+  - Templating: templating.md
   - Concepts: concepts.md
   - Configuration: config.md
   - Examples:

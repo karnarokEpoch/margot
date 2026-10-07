@@ -76,7 +76,7 @@ the tag. Multiple artifacts at different tags can coexist in the same repository
 
 - **`margo.yaml not found in current directory. Run margot init or create it manually.`** — run from the project root, or pass `--project-dir`.
 - **Both `app.yaml` and `app.yaml.jinja` present** — remove one. margot refuses to guess which is canonical.
-- **Unresolved Jinja2 variable** — check the template variable name against the [template context](../margo-yaml.md#template-context).
+- **Unresolved Jinja2 variable** — check the template variable name against the [template context](../templating.md#template-context-reference).
 
 ## Example
 
