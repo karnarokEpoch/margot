@@ -40,13 +40,8 @@ Two audiences — don't blend them in the same page:
 
 ## Style
 
-- Concise, actionable, high-signal. No filler, no marketing language.
-- Lead with the command or config snippet, then explain if needed — not the reverse.
 - One canonical OCI URI example everywhere: `public.ecr.aws/g2n4p2m7/margo:1.0.0`
   (see `code-conventions.md`). Never project- or customer-specific refs.
-- Code/config samples must be copy-pasteable and runnable as shown — no pseudo-code.
-- Use admonitions (`!!! note`, `!!! warning`) sparingly, only for things that would
-  otherwise cause a mistake.
 
 ## Structure
 
