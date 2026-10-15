@@ -22,6 +22,30 @@ catch-all across 22 call sites, a structured `--json` error envelope on stderr, 
 explicit `--no-color`/`NO_COLOR` support. No change to default rich rendering. Full plan
 at [`.kiro/sprints/sprint-10.md`](.kiro/sprints/sprint-10.md).
 
+### Sprint 11 — Margo resource media types driven by `app.yaml`
+
+Fixes two correctness bugs found in manual testing: `margot push` dropping any resource
+file that isn't exactly one of four hardcoded filenames (e.g. an `icon.svg` instead of
+`icon.png` was silently never shipped), and `describe`/`verify`/`pull --recursive`
+locating the descriptor layer by the literal filename `app.yaml` instead of its OCI
+`mediaType`, which fails on valid artifacts produced by tooling other than margot. Resource
+discovery becomes driven by `app.yaml`'s own fields (`icon`, `descriptionFile`,
+`licenseFile`, `releaseNotes`), typed by the file's real extension with no allow-list
+(generic passthrough, e.g. `+svg`, `+bmp`); any other file under `resources/` ships with
+an `application/octet-stream` fallback type. Descriptor-layer lookup becomes
+`mediaType`-based with a warning (first match wins) if more than one candidate layer is
+present. Full plan at [`.kiro/sprints/sprint-11.md`](.kiro/sprints/sprint-11.md).
+
+### Sprint 12 — Local descriptor fallback resolution (no `margo.yaml` required)
+
+Lets `margot describe` and `margot verify` run directly against a directory holding a
+bare, static `app.yaml` (e.g. produced by `margot pull`) with no `margo.yaml` present —
+silently, no new flag. Fallback search order: `<project_dir>/app.yaml`, then
+`<project_dir>/margo/app.yaml`; static-only, no Jinja2 (a `.jinja` found in fallback mode
+is an actionable error, since rendering requires `margo.yaml`'s context). `pull` itself is
+explicitly unchanged — it stays a simple layer dump, no synthesized files. Full plan at
+[`.kiro/sprints/sprint-12.md`](.kiro/sprints/sprint-12.md).
+
 ---
 
 ## Backlog / Stack (Sprint 11+)
@@ -50,6 +74,16 @@ Unordered within groups; sequencing decided at sprint planning.
   Already referenced in the "`margo.yaml` not found" error hint (`Run margot init or
   create it manually`) but not yet implemented — the command the error points at does not
   exist. Land the command, then reconcile `FEATURES.md`.
+- `margot migrate` — generate a `margo.yaml` from an existing manifest (pulled directory or
+  live OCI URI) that was never built with margot, so it can be adopted into margot going
+  forward. Reads identity/catalog fields straight from `app.yaml`. The hard part is the
+  component↔variant relationship: default to a 1:1 mapping (one declared component becomes
+  one variant); the developer deduplicates manually afterward if several components should
+  collapse into shared variants. Needs its own design pass before scheduling: read from a
+  pulled directory vs. a live URI directly, which fields have no `margo.yaml` equivalent
+  (dropped vs. warned about), and whether it also pulls resources as part of the same run.
+  Raised during Sprint 12 planning as the deliberate alternative to teaching `pull` to
+  synthesize a `margo.yaml` itself — `pull` stays a simple layer dump.
 
 ---
 
