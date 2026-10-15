@@ -62,9 +62,33 @@ compose/quadlet components 1:1 as variants and organises their sources into `com
 repository per type unless `--all-repositories`; helm warned, not representable). Depends on
 Sprints 11 and 12. Full plan at [`.kiro/sprints/sprint-13.md`](.kiro/sprints/sprint-13.md).
 
+### Sprint 14 — Helm components: build and push
+
+Helm is entirely absent today (no `PackageType.HELM`, `<helm_chart_tag>` hard-wired to `""`,
+no `helm:` block). Adds a `helm:` block to the project file mirroring `compose` / `quadlet`
+(variants, placeholder substitution and `image` search/replace on a temp copy — never Jinja2,
+since Go templates use `{{ }}`), and `build -t helm` / `push -t helm` delegated to the host
+`helm` binary through a thin wrapper (`infra/helm.py`, Helm >= 3.8, Helm 4 accepted; margot does
+not reimplement helm). Helm is required only when a `helm:` block is declared. Helm decides
+the pushed path from the chart's `Chart.yaml` name, so margot does not pre-validate it: it
+compares helm's own `Pushed:` reference with the expected `repository:tag` after the push and
+reports a mismatch. `describe` and `verify` also gain a first project-level check (helm component
+`name` vs the project's `Chart.yaml` name). Also
+ships a second container image that contains helm, and a CI job that tests Helm 3 and Helm 4.
+Depends on Sprint 13 (project file rename). Full plan at
+[`.kiro/sprints/sprint-14.md`](.kiro/sprints/sprint-14.md).
+
+### Sprint 15 — Helm charts on the pull side
+
+Detects Helm charts from the manifest's config/layer media types (they set no `artifactType`),
+so `pull` stops refusing them, `pull --recursive` follows helm components instead of warning,
+and `margot package` can bundle built helm archives. No `helm` binary needed. Images referenced
+only inside a chart are not bundled (documented limitation). Depends on Sprint 14. Full plan at
+[`.kiro/sprints/sprint-15.md`](.kiro/sprints/sprint-15.md).
+
 ---
 
-## Backlog / Stack (Sprint 14+)
+## Backlog / Stack (Sprint 16+)
 
 Unordered within groups; sequencing decided at sprint planning.
 
@@ -85,8 +109,9 @@ Unordered within groups; sequencing decided at sprint planning.
 ### More artifact types
 
 - `pull` already detects margo, compose and quadlet via `artifactType`; `fetch` prints the
-  raw manifest for anything. Remaining: detect image and helm chart artifacts — extend
-  `PackageType` (no `HELM`/`IMAGE` members today) with per-type handling and display.
+  raw manifest for anything. Helm chart detection is scheduled in Sprint 15. Remaining: detect
+  plain image artifacts — extend `PackageType` (no `IMAGE` member today) with per-type handling
+  and display.
 
 ### Cross-cutting
 
