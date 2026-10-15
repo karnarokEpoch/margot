@@ -186,14 +186,15 @@ class TestVerifyCLI:
         assert not (cli_project / "margo" / "app.yaml").exists()
 
     def test_missing_margo_yaml_exits_1(self, tmp_path: Path, monkeypatch: Any) -> None:
-        """Should exit 1 when margo.yaml is absent."""
+        """Should exit 1 when neither margo.yaml nor app.yaml exist (Sprint 12 fallback)."""
         monkeypatch.chdir(tmp_path)
 
         result = runner.invoke(app, ["verify"])
         plain = _output(result)
 
         assert result.exit_code == 1
-        assert "margo.yaml" in plain
+        # With Sprint 12 fallback, error should mention the searched app.yaml paths
+        assert "app.yaml" in plain
 
     def test_missing_manifest_exits_1(self, cli_project: Path) -> None:
         """Should exit 1 when --manifest points at a missing file."""
