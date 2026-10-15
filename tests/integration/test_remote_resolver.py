@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from pytest import raises
 
+from margot.domain.layers import MARGO_DESCRIPTION_MEDIA_TYPE
 from margot.domain.models import PackageType
 from margot.infra.credentials import CredentialsExpiredError
 from margot.services import remote as remote_service
@@ -17,6 +18,16 @@ def _make_manifest(
     annotations: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a minimal OCI manifest dict for testing."""
+    # Default layers include the descriptor layer if not specified
+    if layers is None and artifact_type == "application/vnd.margo.app.v1+json":
+        layers = [
+            {
+                "mediaType": MARGO_DESCRIPTION_MEDIA_TYPE,
+                "digest": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                "size": 1000,
+            }
+        ]
+
     manifest: dict[str, Any] = {
         "schemaVersion": 2,
         "mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -171,12 +182,13 @@ class TestRemoteResolver:
         assert "margot fetch" in str(exc_info.value).lower()
 
     def test_resolve_remote_raises_for_missing_app_yaml(self, mocker: Any, tmp_path: Any) -> None:
-        """Should raise ValueError when pulled artifact has no app.yaml."""
+        """Should raise ValueError when pulled artifact has no app.yaml (descriptor layer)."""
 
-        # Mock prepare to return a margo artifact
+        # Mock prepare to return a margo artifact with NO descriptor layer
         mockprepared = MagicMock()
         mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/margo:1.0.0"
-        mockprepared.manifest = _make_manifest()
+        # Create manifest with margo type but no descriptor layer
+        mockprepared.manifest = _make_manifest(layers=[])
         mockprepared.package_type = PackageType.MARGO
 
         mocker.patch(
@@ -184,24 +196,25 @@ class TestRemoteResolver:
             return_value=mockprepared,
         )
 
-        # Mock pullprepared to return paths without app.yaml
+        # Mock pullprepared to return any paths
         mocker.patch(
             "margot.services.remote.pull_service.pull_prepared_context",
             return_value=[str(tmp_path / "some-other-file.txt")],
         )
 
-        with raises(ValueError, match=r"app\.yaml") as exc_info:
+        with raises(ValueError, match=r"mediaType") as exc_info:
             remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
 
-        assert "no root app.yaml" in str(exc_info.value).lower()
+        assert "no layer" in str(exc_info.value).lower()
 
     def test_resolve_remote_cleans_up_temp_dir_on_exception(self, mocker: Any, tmp_path: Any) -> None:
         """Should clean up temp directory when exception occurs."""
 
-        # Mock prepare to return a margo artifact
+        # Mock prepare to return a margo artifact with NO descriptor layer
         mockprepared = MagicMock()
         mockprepared.normalized_uri = "public.ecr.aws/g2n4p2m7/margo:1.0.0"
-        mockprepared.manifest = _make_manifest()
+        # Create manifest with margo type but no descriptor layer
+        mockprepared.manifest = _make_manifest(layers=[])
         mockprepared.package_type = PackageType.MARGO
 
         mocker.patch(
@@ -209,15 +222,15 @@ class TestRemoteResolver:
             return_value=mockprepared,
         )
 
-        # Mock pullprepared to return empty list (no app.yaml)
+        # Mock pullprepared to return any paths
         mocker.patch(
             "margot.services.remote.pull_service.pull_prepared_context",
-            return_value=[],
+            return_value=[str(tmp_path / "some-file.txt")],
         )
 
         # The test passes if no exception is raised from cleanup
         # (the temp directory should be cleaned up before raising ValueError)
-        with raises(ValueError, match=r"app\.yaml"):
+        with raises(ValueError, match=r"mediaType"):
             remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
 
     def test_resolve_remote_pull_with_recursive_false(self, mocker: Any, tmp_path: Any) -> None:
