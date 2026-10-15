@@ -46,44 +46,63 @@ is an actionable error, since rendering requires `margo.yaml`'s context). `pull`
 explicitly unchanged — it stays a simple layer dump, no synthesized files. Full plan at
 [`.kiro/sprints/sprint-12.md`](.kiro/sprints/sprint-12.md).
 
+### Sprint 13 — `margot.yaml` project file and `margot migrate`
+
+Five items in one sprint. (1) `fix(pull)`: sanitise component names in `pull --recursive`
+(shippable first as a patch). (2) The project descriptor is renamed `margo.yaml` →
+`margot.yaml` (same content, `apiVersion: v1`; margot's own file, not part of the Margo
+standard); legacy `margo.yaml` is read with a deprecation warning until 1.0.0, and
+`margot migrate` renames it. (3) Per-variant `repository` in `margot.yaml`. (4) `margot
+migrate` adopts an existing manifest — typically after `margot pull --recursive` — in the
+current folder by default (`--output` for elsewhere): `margot.yaml` plus the `margo/` layout,
+`app.yaml` copied verbatim and static, `name` = `metadata.name`; `--dry-run`, `--force`,
+nothing left behind when migrating in place. (5) `margot migrate --components` declares
+compose/quadlet components 1:1 as variants and organises their sources into `compose/` /
+`quadlet/` (local `pull -r` archives first, registry otherwise; safe extraction; one
+repository per type unless `--all-repositories`; helm warned, not representable). Depends on
+Sprints 11 and 12. Full plan at [`.kiro/sprints/sprint-13.md`](.kiro/sprints/sprint-13.md).
+
 ---
 
-## Backlog / Stack (Sprint 11+)
+## Backlog / Stack (Sprint 14+)
 
 Unordered within groups; sequencing decided at sprint planning.
 
 ### Display UX
 
 - Minified JSON output + make minified the **default** display for artifacts
-  (fetch may keep pretty as default — TBD).
+  (`console.print_json` is still pretty-printed; fetch may keep pretty as default — TBD).
 - Table output when listing **multiple** URIs (new `list`-style command).
+- `--json` for the action commands `build`, `push`, `pull` (deferred from Sprint 10, which
+  only covers `describe` and `verify`). Revisit once Sprint 10's pattern is proven.
 
-### Manifest recognition & validation (on JSON output)
+### Manifest recognition in `fetch`
 
-- Detect & label: recognized margo manifest / valid / invalid / unknown OCI artifact.
+- `verify` / `describe` already validate and render Margo descriptors, locally and from an
+  OCI URI (Sprints 6–9); what is missing is `fetch` *classifying* what it prints:
+  recognised margo manifest / compose / quadlet component / unknown OCI artifact.
 
-### More artifact types in `fetch`
+### More artifact types
 
-- image, compose component, quadlet component, helm chart.
-- Extend `PackageType` enum + per-type display.
+- `pull` already detects margo, compose and quadlet via `artifactType`; `fetch` prints the
+  raw manifest for anything. Remaining: detect image and helm chart artifacts — extend
+  `PackageType` (no `HELM`/`IMAGE` members today) with per-type handling and display.
 
 ### Cross-cutting
 
-- `margot init` — scaffold a new Margo project: generate a starter `margo.yaml` and the
+- `margot init` — scaffold a new Margo project: generate a starter `margot.yaml` and the
   expected directory layout (`margo/app.yaml.jinja`, optional `compose/` / `quadlet/`).
-  Already referenced in the "`margo.yaml` not found" error hint (`Run margot init or
-  create it manually`) but not yet implemented — the command the error points at does not
-  exist. Land the command, then reconcile `FEATURES.md`.
-- `margot migrate` — generate a `margo.yaml` from an existing manifest (pulled directory or
-  live OCI URI) that was never built with margot, so it can be adopted into margot going
-  forward. Reads identity/catalog fields straight from `app.yaml`. The hard part is the
-  component↔variant relationship: default to a 1:1 mapping (one declared component becomes
-  one variant); the developer deduplicates manually afterward if several components should
-  collapse into shared variants. Needs its own design pass before scheduling: read from a
-  pulled directory vs. a live URI directly, which fields have no `margo.yaml` equivalent
-  (dropped vs. warned about), and whether it also pulls resources as part of the same run.
-  Raised during Sprint 12 planning as the deliberate alternative to teaching `pull` to
-  synthesize a `margo.yaml` itself — `pull` stays a simple layer dump.
+  The command does not exist yet. Sprint 13 reworks the "project file not found" error hint
+  to point at `margot migrate`; once `init` lands, mention it there too.
+- `margot migrate` — now scheduled as Sprint 13 (see Planned Sprints).
+- `migrate` follow-up (low priority, owner prefers static `app.yaml`): partial reverse
+  templating — only the few fields `margot.yaml` manages (`id`, `version`, component
+  `repository`/`revision`, catalog), everything else verbatim. Acceptance: render the
+  template with the generated `margot.yaml` and compare parsed YAML to the source.
+- **chore:** remove the legacy `margo.yaml` read path at **1.0.0** (deprecated in Sprint 13);
+  and rename the internal `MargoYaml` / `load_margo_yaml` identifiers to match `margot.yaml`.
+- Scheduled in Sprint 13 (no longer backlog): `pull --recursive` component-name
+  sanitisation (Item 1, may ship as an earlier patch) and per-variant `repository` (Item 3).
 
 ---
 
