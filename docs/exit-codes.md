@@ -16,6 +16,23 @@ Errors retain the normal human-readable form and are written to stderr, prefixed
 `Error:`. The exit code is the machine-readable part of the failure contract; messages may
 provide additional diagnostic detail.
 
+Commands that support `--json` replace this prose only for machine-readable command output:
+JSON results are written to stdout, while JSON error envelopes are written to stderr in the
+form `{"error": true, "code": <int>, "message": "..."}`. The message is plain JSON data,
+not Rich markup.
+
+## Color controls
+
+Use the global `--no-color` option to disable ANSI styling for one invocation:
+
+```bash
+margot --no-color describe
+```
+
+margot also honors the [`NO_COLOR` convention](https://no-color.org/): if the `NO_COLOR`
+environment variable is present, regardless of its value, color is disabled. These controls
+affect both stdout and stderr while preserving the normal output text and stream routing.
+
 ## Examples
 
 An invalid build type is a usage error:

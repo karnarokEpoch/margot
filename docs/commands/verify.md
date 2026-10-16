@@ -34,7 +34,7 @@ margot verify public.ecr.aws/g2n4p2m7/margo:1.0.0
 | `--json`               | off                        | Print the existing verification result as JSON instead of Rich/text output.            |
 
 `--recommend` and `--only-recommend` are mutually exclusive. Passing both is rejected before
-any validation runs (exit 1).
+any validation runs (exit 2).
 
 `--strict` has no effect without `--recommend` or `--only-recommend` — it emits a warning
 and proceeds.
@@ -115,9 +115,9 @@ reports.
 | `--strict`                     | yes           | no            | Schema A errors (`--strict` warns it has nothing to act on) |
 | `--recommend`                  | yes           | yes           | Schema A errors — Schema B is advisory                      |
 | `--recommend --strict`         | yes           | yes           | Schema A errors **or** any Schema B finding                 |
-| `--only-recommend`             | no            | yes           | nothing — always 0                                          |
-| `--only-recommend --strict`    | no            | yes           | any Schema B finding                                        |
-| `--recommend --only-recommend` | —             | —             | rejected, exit 1                                            |
+| `--only-recommend`                 | no            | yes           | nothing — always 0                                          |
+| `--only-recommend --strict`        | no            | yes           | any Schema B finding                                        |
+| `--recommend --only-recommend`     | —             | —             | rejected, exit 2                                            |
 
 ## Output
 
@@ -151,13 +151,27 @@ For example:
 ```
 
 All local and remote resolution options and schema-selection flags retain their existing behavior with `--json`.
+On a validation failure, the result object is still written to stdout and the command exits with code `3`; no Rich
+error line is added. Resolution, usage, and unexpected failures do not have a result object and instead use the JSON
+error envelope on stderr:
+
+```json
+{"error": true, "code": 3, "message": "No app.yaml or app.yaml.jinja found in margo source directory."}
+```
+
+The envelope uses code `2` for mutually exclusive options, `3` for descriptor/schema/semantic failures, `4` for
+remote or authentication failures, and `1` for unexpected failures. In JSON mode stdout remains reserved for a
+successful result or validation result; errors are emitted only on stderr.
 
 ## Exit codes
 
-| Code | Meaning                                                                                                         |
-| ---- | --------------------------------------------------------------------------------------------------------------- |
-| 0    | Validation passed.                                                                                              |
-| 1    | Schema A error, Schema B finding (with `--strict`), mutually exclusive flags, or descriptor cannot be resolved. |
+| Code | Meaning                                                                                                      |
+| ---- | ------------------------------------------------------------------------------------------------------------ |
+| 0    | Validation passed.                                                                                            |
+| 1    | Unexpected or uncategorized failure.                                                                         |
+| 2    | Usage failure, such as `--recommend` and `--only-recommend` together.                                        |
+| 3    | Descriptor resolution, schema, or semantic validation failure.                                              |
+| 4    | Remote registry or authentication failure.                                                                   |
 
 ## Example
 

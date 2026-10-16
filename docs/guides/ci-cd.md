@@ -9,7 +9,7 @@ shape, and how to handle credentials.
 ### Schema validation gate: `margot verify --strict`
 
 `margot verify` validates `app.yaml` (or a rendered `app.yaml.jinja`) against the
-upstream Margo spec schema and exits 0 on pass, 1 on any error. Adding `--strict` turns
+upstream Margo spec schema and exits 0 on pass, 3 on descriptor/schema/semantic validation failure. Adding `--strict` turns
 the optional recommended-schema pass into a contract: any finding at any severity level
 fails the run.
 
@@ -90,11 +90,11 @@ when the pipeline runs on a fresh runner.
 
 ## Exit codes
 
-margot uses exit code `0` for success and `1` for any failure. CI systems treat
-non-zero exit codes as step failures automatically.
+margot uses the stable exit-code categories documented in [Exit codes](../exit-codes.md). CI systems treat
+any non-zero exit code as a step failure; scripts that need to distinguish causes can branch on `2` (usage),
+`3` (validation or semantic input), `4` (remote/authentication), and `1` (unexpected failure).
 
-For the exact conditions that produce exit code `1` per command, see the exit-code tables
-in:
+For the exact conditions that produce each code per command, see the exit-code tables in:
 
 - [`margot verify` — Exit codes](../commands/verify.md#exit-codes)
 - [`margot push` — Exit codes](../commands/push.md#exit-codes)

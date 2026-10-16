@@ -117,7 +117,8 @@ Four categories of dangling or unreferenced descriptor elements:
 - Dangling component references: a `Parameter.targets[].components` entry naming a component absent from all deployment
     profiles.
 
-These are observations only — `describe` always exits 0. Use [`margot verify`](verify.md) for validation gates.
+These are observations only and do not affect the exit code. Descriptor loading and semantic failures still fail the
+command; use [`margot verify`](verify.md) for the full schema validation gate.
 
 Request with `--section orphans`.
 
@@ -156,6 +157,16 @@ profile objects, `config-first` and `component-first` use their corresponding di
 
 `--section` may be repeated with `--json`; requested sections are still emitted in canonical order.
 
+When descriptor loading or semantic interpretation fails with `--json`, no Rich panels or prose are emitted. The
+command writes an error envelope to stderr and exits with the stable category code:
+
+```json
+{"error": true, "code": 3, "message": "..."}
+```
+
+The envelope uses code `2` for URI/local option conflicts, `3` for descriptor or semantic failures, `4` for remote
+or authentication failures, and `1` for unexpected failures. Successful JSON output is written to stdout.
+
 ## Rendering notes
 
 Values are rendered in literal form: strings quoted, numbers and booleans bare, `""` for
@@ -170,10 +181,13 @@ upstream spec, and the spec's property set is still in flux.
 
 ## Exit codes
 
-| Code | Meaning                                                                                                                                                                   |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Always, even when orphans are found.                                                                                                                                      |
-| 1    | Descriptor cannot be loaded: missing, both `app.yaml` and `app.yaml.jinja` present, unresolved Jinja2 variable, unparseable YAML, or `kind` not `ApplicationDescription`. |
+| Code | Meaning                                                                                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Descriptor loaded and rendered/serialized successfully. Orphan observations do not affect this code.                                                   |
+| 1    | Unexpected or uncategorized failure.                                                                                                                    |
+| 2    | Usage failure, such as combining a remote URI with `--project-dir` or `--manifest`.                                                                    |
+| 3    | Descriptor loading or semantic failure: missing descriptor, both descriptor forms present, unresolved template, invalid YAML, or wrong `kind`.          |
+| 4    | Remote registry or authentication failure.                                                                                                               |
 
 On exit 1, the error message points at `margot verify`.
 
