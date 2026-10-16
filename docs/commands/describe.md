@@ -189,7 +189,7 @@ upstream spec, and the spec's property set is still in flux.
 | 3    | Descriptor loading or semantic failure: missing descriptor, both descriptor forms present, unresolved template, invalid YAML, or wrong `kind`.          |
 | 4    | Remote registry or authentication failure.                                                                                                               |
 
-On exit 1, the error message points at `margot verify`.
+On a descriptor failure, the error message points at `margot verify`.
 
 ## Example
 
