@@ -39,7 +39,7 @@ uploaded.
 
 The probe opens an OCI blob-upload session (`POST /v2/<repository>/blobs/uploads/`),
 reads the response code, and immediately cancels the session. A `202 Accepted` confirms
-write access; `401`/`403` is reported as a clear error with exit code 1.
+write access; `401`/`403` is reported as a clear error with exit code 4.
 
 The probe runs once per unique `(registry, repository)` pair per invocation — pushing
 `--type all --variant all` against components that share one repository triggers the
