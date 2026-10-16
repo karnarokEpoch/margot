@@ -1046,3 +1046,28 @@ class TestVerifyJsonFailures:
         assert envelope["error"] is True
         assert envelope["code"] == 2
         assert "mutually exclusive" in envelope["message"]
+
+
+class TestVerifyGlobalOutputControls:
+    """E2E coverage for global color controls alongside command execution."""
+
+    def test_no_color_flag_disables_color_for_command(self, cli_project: Path) -> None:
+        """The global flag should be accepted before a subcommand and disable Rich color."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["--no-color", "verify"])
+
+        assert result.exit_code == 0
+        assert "\x1b[" not in result.stdout
+        assert "\x1b[" not in (result.stderr or "")
+
+    def test_no_color_environment_uses_presence_not_value(self, cli_project: Path, monkeypatch: Any) -> None:
+        """An empty NO_COLOR variable should disable color for the whole invocation."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+        monkeypatch.setenv("NO_COLOR", "")
+
+        result = runner.invoke(app, ["verify"])
+
+        assert result.exit_code == 0
+        assert "\x1b[" not in result.stdout
+        assert "\x1b[" not in (result.stderr or "")
