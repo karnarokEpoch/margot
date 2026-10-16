@@ -8,6 +8,8 @@ All descriptor-derived values are escaped before rendering.
 from dataclasses import asdict, replace
 from typing import Annotated, Any
 
+from oras.auth import AuthenticationException
+from requests.exceptions import RequestException
 from rich.console import Group
 from rich.markup import escape
 from rich.panel import Panel
@@ -35,6 +37,8 @@ from margot.domain.describe import (
     build_orphan_report,
     component_index,
 )
+from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.oci import OciRegistryError
 from margot.services import describe as describe_service
 from margot.services import remote as remote_service
 
@@ -718,11 +722,14 @@ def describe_cmd(
     Provide either a remote OCI reference as the first argument, or describe a local project
     via --project-dir or --manifest. They are mutually exclusive.
     """
+    console.set_json(json)
+
     # Mutual exclusion: URI vs local-mode flags
     if uri is not None and (project_dir is not None or manifest is not None):
         console.fatal(
             "URI and --project-dir/--manifest are mutually exclusive "
-            "— describe or verify either a remote artifact or a local project, not both."
+            "— describe or verify either a remote artifact or a local project, not both.",
+            code=2,
         )
 
     try:
@@ -751,8 +758,12 @@ def describe_cmd(
             rendered = loaded.rendered
             source_metadata = None  # Local mode uses default behavior
             is_remote = False
+    except (AuthenticationException, CredentialsExpiredError, OciRegistryError, PermissionError, RequestException) as e:
+        console.fatal(str(e), code=4 if uri is not None else 1)
     except (ValueError, TypeError) as e:
-        console.fatal(f"{e!s} Run 'margot verify' to debug.")
+        console.fatal(f"{e!s} Run 'margot verify' to debug.", code=3)
+    except Exception as e:  # noqa: BLE001
+        console.fatal(f"Describe failed: {e}", code=1)
 
     # Build display model from dict, threading meta into build_identity for OCI URI
     identity = build_identity(descriptor_dict, meta)

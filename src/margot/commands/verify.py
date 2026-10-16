@@ -3,11 +3,15 @@
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict
 
+from oras.auth import AuthenticationException
+from requests.exceptions import RequestException
 from rich.markup import escape
 from typer import Argument, Exit, Option
 
 from margot import console
 from margot.domain.validation import Severity, ValidationFinding, VerifyResult, has_errors
+from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.oci import OciRegistryError
 from margot.schemas import SCHEMA_A_SHORT_COMMIT
 from margot.services import remote as remote_service
 from margot.services import verify as verify_service
@@ -56,15 +60,18 @@ def verify_cmd(  # noqa: PLR0913
     Provide either a remote OCI reference as the first argument, or validate a local project
     via --project-dir or --manifest. They are mutually exclusive.
     """
+    console.set_json(json)
+
     # Mutual exclusion: URI vs local-mode flags
     if uri is not None and (project_dir is not None or manifest is not None):
         console.fatal(
             "URI and --project-dir/--manifest are mutually exclusive "
-            "— describe or verify either a remote artifact or a local project, not both."
+            "— describe or verify either a remote artifact or a local project, not both.",
+            code=2,
         )
 
     if recommend and only_recommend:
-        console.fatal(MUTUALLY_EXCLUSIVE)
+        console.fatal(MUTUALLY_EXCLUSIVE, code=2)
     if strict and not (recommend or only_recommend):
         console.warning(STRICT_NO_OP)
 
@@ -97,15 +104,17 @@ def verify_cmd(  # noqa: PLR0913
                 strict=strict,
                 only_recommend=only_recommend,
             )
-    except ValueError as e:
-        console.fatal(str(e))
+    except (AuthenticationException, CredentialsExpiredError, OciRegistryError, PermissionError, RequestException) as e:
+        console.fatal(str(e), code=4 if uri is not None else 1)
+    except (ValueError, TypeError) as e:
+        console.fatal(str(e), code=3)
     except Exception as e:  # noqa: BLE001
-        console.fatal(f"Verify failed: {e}")
+        console.fatal(f"Verify failed: {e}", code=1)
 
     if json:
         console.print_json(_serialize_result(result))
         if not result.passed:
-            raise Exit(1)
+            raise Exit(3)
         return
 
     _render(result, recommend=recommend, strict=strict, only_recommend=only_recommend)
@@ -153,7 +162,7 @@ def _render_schema_a_only(result: VerifyResult) -> None:
 
     errors = [finding for finding in findings if finding.severity is Severity.ERROR]
     error_lines = "\n".join(escape(line) for line in format_findings(errors))
-    console.fatal(f"{error_lines}\n{SCHEMA_A_LABEL}: FAIL — {summary}")
+    console.fatal(f"{error_lines}\n{SCHEMA_A_LABEL}: FAIL — {summary}", code=3)
 
 
 def _render_schema_b_only(result: VerifyResult, strict: bool) -> None:
@@ -221,7 +230,7 @@ def _verdict(result: VerifyResult) -> None:
     if result.passed:
         console.success("verify: PASS")
         return
-    console.fatal("verify: FAIL")
+    console.fatal("verify: FAIL", code=3)
 
 
 def _emit(findings: Iterable[ValidationFinding]) -> None:
