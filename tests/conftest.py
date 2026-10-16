@@ -66,12 +66,16 @@ def capture_console():
 
 @fixture(autouse=False)
 def reset_console():
-    """Reset verbose and debug flags to default state."""
+    """Reset all module-level output flags to default state."""
     _console.set_verbose(False)
     _console.set_debug(False)
+    _console.set_json(False)
+    _console.set_no_color(False)
     yield
     _console.set_verbose(False)
     _console.set_debug(False)
+    _console.set_json(False)
+    _console.set_no_color(False)
 
 
 @fixture

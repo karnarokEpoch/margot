@@ -217,7 +217,7 @@ x-placeholder-extensions:
         result = runner.invoke(app, ["describe"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "margo.yaml" in plain or "Error" in plain
 
     def test_describe_missing_manifest_exits_1(self, cli_project: Path) -> None:
@@ -225,7 +225,7 @@ x-placeholder-extensions:
         result = runner.invoke(app, ["describe", "--manifest", str(cli_project / "margo" / "absent.yaml")])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Error" in plain or "not found" in plain.lower()
 
     def test_describe_wrong_kind_exits_1(self, cli_project: Path) -> None:
@@ -235,7 +235,7 @@ x-placeholder-extensions:
         result = runner.invoke(app, ["describe"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Error" in plain or "kind" in plain.lower()
         # Should mention running verify
         assert "verify" in plain.lower()
@@ -1540,7 +1540,7 @@ class TestDescribeRemote:
         )
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "mutually exclusive" in plain.lower() or "error" in plain.lower()
 
     def test_describe_remote_uri_mutual_exclusion_with_manifest(self) -> None:
@@ -1551,5 +1551,34 @@ class TestDescribeRemote:
         )
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "mutually exclusive" in plain.lower() or "error" in plain.lower()
+
+
+class TestDescribeJsonFailures:
+    """JSON describe failures must use the same stable error envelope."""
+
+    def test_json_semantic_failure_is_error_envelope_on_stderr(self, cli_project: Path) -> None:
+        """A descriptor rejected by the describe pipeline should exit 3 without Rich prose."""
+        (cli_project / "margo" / "app.yaml").write_text(WRONG_KIND_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--json"])
+
+        assert result.exit_code == 3
+        assert result.stdout == ""
+        envelope = json.loads(result.stderr)
+        assert envelope["error"] is True
+        assert envelope["code"] == 3
+        assert "verify" in envelope["message"]
+        assert "[red]" not in result.stderr
+
+    def test_json_mutual_exclusion_is_usage_envelope(self, cli_project: Path) -> None:
+        """Remote/local mode mixing should exit 2 and emit no stdout."""
+        result = runner.invoke(
+            app,
+            ["describe", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--json", "--project-dir", "."],
+        )
+
+        assert result.exit_code == 2
+        assert result.stdout == ""
+        assert json.loads(result.stderr)["code"] == 2
