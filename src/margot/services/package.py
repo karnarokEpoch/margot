@@ -1868,7 +1868,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
             _validate_platform(platform)
         except ValueError as e:
             msg = f"Invalid --platform value: {e}"
-            console.fatal(msg)
+            console.fatal(msg, code=3)
             raise OciRegistryError(msg) from e
 
     images_dir = staging_root / "images"
@@ -2159,7 +2159,7 @@ def _discover_and_include_images(  # noqa: C901, PLR0912, PLR0913, PLR0915
     if failed_pulls:
         msg = f"Failed to pull {len(failed_pulls)} image(s): "
         refs_str = ", ".join(ref for ref, _ in failed_pulls)
-        console.fatal(f"{msg}{refs_str}")
+        console.fatal(f"{msg}{refs_str}", code=4)
         raise OciRegistryError(msg + refs_str)
 
     console.info(f"Successfully pulled and materialized {len(pulled_images)} unique image(s)")

@@ -32,6 +32,7 @@ nav:
   - margo.yaml: margo-yaml.md
   - Templating: templating.md
   - Concepts: concepts.md
+  - Exit codes: exit-codes.md
   - Configuration: config.md
   - Examples:
       - Minimal (Helm): examples/minimal.md

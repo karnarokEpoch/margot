@@ -1,6 +1,7 @@
 """Unit tests for margot.console module."""
 
 from io import StringIO
+from json import loads
 import re
 
 from pytest import fixture, raises
@@ -43,12 +44,16 @@ def capture_console():
 
 @fixture(autouse=False)
 def reset_console():
-    """Reset verbose and debug flags to default state."""
+    """Reset all module-level output flags to default state."""
     _console.set_verbose(False)
     _console.set_debug(False)
+    _console.set_json(False)
+    _console.set_no_color(False)
     yield
     _console.set_verbose(False)
     _console.set_debug(False)
+    _console.set_json(False)
+    _console.set_no_color(False)
 
 
 class TestVerboseControl:
@@ -304,10 +309,21 @@ class TestFatal:
         assert "Test error" in err_text
 
     def test_fatal_raises_exit_with_code_1(self, reset_console):
-        """fatal() should raise Exit(1)."""
+        """fatal() should raise Exit(1) by default."""
         with raises(Exit) as exc_info:
             _console.fatal("Fatal error")
         assert exc_info.value.exit_code == 1
+
+    def test_fatal_raises_supplied_exit_code_and_keeps_prose_output(self, capture_console, reset_console):
+        """fatal() should use the supplied code without changing prose routing."""
+        out, err = capture_console
+        with raises(Exit) as exc_info:
+            _console.fatal("Validation failed", code=3)
+
+        assert exc_info.value.exit_code == 3
+        assert out.getvalue() == ""
+        assert "Error:" in err.getvalue()
+        assert "Validation failed" in err.getvalue()
 
     def test_fatal_is_ignored_outside_try(self, reset_console):
         """fatal() raises Exit, so execution stops."""
@@ -496,3 +512,65 @@ class TestPrintJson:
         output = out.getvalue()
         assert '"a"' in output
         assert '"b"' in output
+
+
+class TestJsonControl:
+    """Tests for JSON fatal mode and its module-level isolation."""
+
+    def test_json_mode_defaults_to_false(self, reset_console):
+        """JSON mode should be disabled for normal output."""
+        assert _console.is_json() is False
+
+    def test_json_fatal_is_exact_stderr_envelope(self, capture_console, reset_console):
+        """JSON fatal output should be parseable and stay on stderr."""
+        out, err = capture_console
+        _console.set_json(True)
+
+        with raises(Exit) as exc_info:
+            _console.fatal("bad [value]", code=3)
+
+        assert exc_info.value.exit_code == 3
+        assert out.getvalue() == ""
+        assert loads(err.getvalue()) == {
+            "error": True,
+            "code": 3,
+            "message": "bad [value]",
+        }
+        assert "Error:" not in err.getvalue()
+
+    def test_json_mode_reset_restores_prose_fatal(self, capture_console, reset_console):
+        """Resetting JSON mode should restore the normal Error envelope."""
+        _out, err = capture_console
+        _console.set_json(True)
+        _console.set_json(False)
+
+        with raises(Exit):
+            _console.fatal("ordinary failure")
+
+        assert "Error:" in err.getvalue()
+        assert not err.getvalue().lstrip().startswith('{"error"')
+
+
+class TestNoColor:
+    """Tests for color suppression and dynamic stream factories."""
+
+    def test_no_color_applies_to_both_console_factories(self, reset_console):
+        """The no-color flag should configure stdout and stderr equally."""
+        _console.set_no_color(True)
+
+        assert _console.is_no_color() is True
+        assert _console._get_stdout().no_color is True
+        assert _console._get_stderr().no_color is True
+
+    def test_console_factories_follow_current_streams(self, monkeypatch, reset_console):
+        """Factories should resolve sys streams at call time, not import time."""
+        stdout = StringIO()
+        stderr = StringIO()
+        monkeypatch.setattr("sys.stdout", stdout)
+        monkeypatch.setattr("sys.stderr", stderr)
+
+        _console.success("dynamic stdout")
+        _console.warning("dynamic stderr")
+
+        assert "dynamic stdout" in stdout.getvalue()
+        assert "dynamic stderr" in stderr.getvalue()
