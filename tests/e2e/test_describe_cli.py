@@ -156,6 +156,19 @@ class TestDescribeCLI:
         assert payload["config-first"]["sections"][0]["settings"][0]["immutable"] is False
         assert "Panel" not in result.stdout
 
+    def test_json_no_color_is_plain_and_pretty(self, cli_project: Path) -> None:
+        """Should emit parser-safe, indented JSON when color is disabled."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["--no-color", "describe", "--json"])
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 0
+        assert payload["metadata"]["identity"]["id"] == "hello-world"
+        assert "\x1b[" not in result.stdout
+        assert '\n  "metadata": {' in result.stdout
+        assert "Panel" not in result.stdout
+
     def test_json_includes_extensions_when_present(self, cli_project: Path) -> None:
         """Should include the extension section in the default selection when present."""
         descriptor = VALID_APP_YAML + """
