@@ -3,10 +3,14 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
+from oras.auth import AuthenticationException
+from requests.exceptions import RequestException
 from rich.table import Table
 from typer import Argument, Option, Typer
 
 from margot import console
+from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.oci import OciRegistryError
 from margot.services import auth as auth_service
 
 app = Typer(name="auth", help="Manage OCI registry credentials.", no_args_is_help=True)
@@ -50,14 +54,14 @@ def login(
 ) -> None:
     """Login to an OCI registry."""
     if not username:
-        console.fatal("Username required. Use --username.")
+        console.fatal("Username required. Use --username.", code=2)
 
     if not password_stdin:
-        console.fatal("Password required. Use --password-stdin.")
+        console.fatal("Password required. Use --password-stdin.", code=2)
 
     password = console.read_stdin().strip()
     if not password:
-        console.fatal("Empty password received from stdin.")
+        console.fatal("Empty password received from stdin.", code=2)
 
     try:
         expires_at = auth_service.login(
@@ -69,8 +73,10 @@ def login(
         console.success(f"Logged in to {registry}.")
         if expires_at is not None:
             console.success(f"Token expires in {_format_expiry(expires_at)}")
+    except (AuthenticationException, CredentialsExpiredError, OciRegistryError, PermissionError, RequestException) as e:
+        console.fatal(f"Login failed: {e}", code=4)
     except Exception as e:  # noqa: BLE001
-        console.fatal(f"Login failed: {e}")
+        console.fatal(f"Login failed: {e}", code=1)
 
 
 @app.command()
@@ -81,8 +87,10 @@ def logout(
     try:
         auth_service.logout(registry=registry)
         console.success(f"Logged out from {registry}.")
+    except (AuthenticationException, CredentialsExpiredError, OciRegistryError, PermissionError, RequestException) as e:
+        console.fatal(f"Logout failed: {e}", code=4)
     except Exception as e:  # noqa: BLE001
-        console.fatal(f"Logout failed: {e}")
+        console.fatal(f"Logout failed: {e}", code=1)
 
 
 @app.command()

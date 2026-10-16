@@ -17,7 +17,7 @@ def _resolve_types(types: list[str] | None) -> tuple[list[str], bool]:
     valid_types = ("margo", "compose", "quadlet", "all")
     for t in types:
         if t not in valid_types:
-            console.fatal(f"invalid --type '{t}'. Must be one of: margo, compose, quadlet, all")
+            console.fatal(f"invalid --type '{t}'. Must be one of: margo, compose, quadlet, all", code=2)
 
     if "all" in types:
         return ["margo", "compose", "quadlet"], True
@@ -85,6 +85,6 @@ def build_cmd(
             console.warning("Nothing was built.")
 
     except ValueError as e:
-        console.fatal(str(e))
+        console.fatal(str(e), code=3)
     except Exception as e:  # noqa: BLE001
-        console.fatal(f"Build failed: {e}")
+        console.fatal(f"Build failed: {e}", code=1)
