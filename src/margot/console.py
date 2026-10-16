@@ -155,13 +155,14 @@ def debug(message: str) -> None:
     _get_stderr().print(f"[dim]{_now_ms()} debug: [{_caller_location()}] {message}[/dim]", highlight=False)
 
 
-def fatal(message: str) -> None:
-    """Print a red error message to stderr and immediately exit with code 1.
+def fatal(message: str, code: int = 1) -> None:
+    """Print a red error message to stderr and immediately exit with ``code``.
 
-    Use for unrecoverable errors in commands.
+    Use for unrecoverable errors in commands. The default code preserves the
+    historical generic-failure behavior.
     """
     _get_stderr().print(f"[red]Error:[/red] {message}", highlight=False)
-    raise Exit(1)
+    raise Exit(code)
 
 
 def finding(text: str, severity: str) -> None:

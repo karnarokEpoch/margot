@@ -304,10 +304,21 @@ class TestFatal:
         assert "Test error" in err_text
 
     def test_fatal_raises_exit_with_code_1(self, reset_console):
-        """fatal() should raise Exit(1)."""
+        """fatal() should raise Exit(1) by default."""
         with raises(Exit) as exc_info:
             _console.fatal("Fatal error")
         assert exc_info.value.exit_code == 1
+
+    def test_fatal_raises_supplied_exit_code_and_keeps_prose_output(self, capture_console, reset_console):
+        """fatal() should use the supplied code without changing prose routing."""
+        out, err = capture_console
+        with raises(Exit) as exc_info:
+            _console.fatal("Validation failed", code=3)
+
+        assert exc_info.value.exit_code == 3
+        assert out.getvalue() == ""
+        assert "Error:" in err.getvalue()
+        assert "Validation failed" in err.getvalue()
 
     def test_fatal_is_ignored_outside_try(self, reset_console):
         """fatal() raises Exit, so execution stops."""
