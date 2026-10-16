@@ -6,6 +6,7 @@ and tables. Read-only, no schema validation.
 ```text
 margot describe [URI] [--project-dir PATH] [--manifest PATH]
                 [--section metadata|profiles|config-first|component-first|extensions|orphans]
+                [--json]
 ```
 
 Pass a tagged OCI URI to inspect a published artifact directly, without a local project:
@@ -22,6 +23,7 @@ margot describe public.ecr.aws/g2n4p2m7/margo:1.0.0
 | `--project-dir` | `.`                        | Directory holding `margo.yaml`. Local mode only.                        |
 | `--manifest`    | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. Local mode only.          |
 | `--section`     | all default sections       | Filter to one or more sections. Multiple `--section` flags are allowed. |
+| `--json`        | off                        | Print selected sections as one JSON object instead of Rich panels and trees. |
 
 ## Local mode vs remote mode
 
@@ -118,6 +120,41 @@ Four categories of dangling or unreferenced descriptor elements:
 These are observations only — `describe` always exits 0. Use [`margot verify`](verify.md) for validation gates.
 
 Request with `--section orphans`.
+
+## JSON output
+
+Pass `--json` to replace Rich panels and trees with one JSON object on stdout. The object contains the selected
+sections as keys in canonical order. The default keys are `metadata`, `profiles`, and `config-first`; `extensions`
+is included by default when `x-placeholder-extensions` is present. `component-first` and `orphans` remain opt-in
+through `--section`, just as in Rich mode.
+
+The values reuse the pure display data: `metadata` contains `identity` and `catalog`, `profiles` is a list of
+profile objects, `config-first` and `component-first` use their corresponding display-model structures, and
+`orphans` contains its four report lists. `extensions` contains the descriptor's extension mapping. For example:
+
+```json
+{
+  "metadata": {
+    "identity": {
+      "id": "hello-world",
+      "api_version": "application.margo.org/v1alpha1",
+      "kind": "ApplicationDescription",
+      "name": "Hello World",
+      "version": "1.0.0",
+      "description": null,
+      "oci_uri": null
+    },
+    "catalog": null
+  },
+  "profiles": [],
+  "config-first": {
+    "sections": [],
+    "unreferenced": []
+  }
+}
+```
+
+`--section` may be repeated with `--json`; requested sections are still emitted in canonical order.
 
 ## Rendering notes
 

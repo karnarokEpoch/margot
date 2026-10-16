@@ -1,5 +1,6 @@
 """E2E tests for describe command via CLI."""
 
+import json
 from pathlib import Path
 import re
 import tempfile
@@ -127,6 +128,7 @@ class TestDescribeHelp:
         assert "--project-dir" in plain
         assert "--manifest" in plain
         assert "--section" in plain
+        assert "--json" in plain
 
     def test_describe_is_registered_on_root_help(self) -> None:
         """Should appear in the root command list."""
@@ -138,6 +140,64 @@ class TestDescribeHelp:
 
 class TestDescribeCLI:
     """E2E tests for margot describe."""
+
+    def test_json_uses_default_sections_and_display_data(self, cli_project: Path) -> None:
+        """Should serialize the default sections without Rich panel details."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--json"])
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 0
+        assert list(payload) == ["metadata", "profiles", "config-first"]
+        assert payload["metadata"]["identity"]["id"] == "hello-world"
+        assert payload["metadata"]["catalog"]["application"]["tagline"] == "Simple test application"
+        assert payload["profiles"][0]["components"][0]["name"] == "hello-compose"
+        assert payload["config-first"]["sections"][0]["settings"][0]["immutable"] is False
+        assert "Panel" not in result.stdout
+
+    def test_json_includes_extensions_when_present(self, cli_project: Path) -> None:
+        """Should include the extension section in the default selection when present."""
+        descriptor = VALID_APP_YAML + """
+x-placeholder-extensions:
+  vendor-acme:
+    enabled: true
+"""
+        (cli_project / "margo" / "app.yaml").write_text(descriptor, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--json"])
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 0
+        assert list(payload) == ["metadata", "profiles", "config-first", "extensions"]
+        assert payload["extensions"] == {"vendor-acme": {"enabled": True}}
+
+    def test_json_honors_section_selection_and_canonical_order(self, cli_project: Path) -> None:
+        """Should serialize requested component and orphan sections in canonical order."""
+        (cli_project / "margo" / "app.yaml").write_text(ORPHAN_FIXTURE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            ["describe", "--json", "--section", "orphans", "--section", "component-first"],
+        )
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 0
+        assert list(payload) == ["component-first", "orphans"]
+        assert payload["component-first"]["components"][0]["name"] == "comp1"
+        assert "orphan_param" in payload["orphans"]["unreferenced_params"]
+        assert "Orphans" not in result.stdout
+
+    def test_default_output_remains_rich_without_json(self, cli_project: Path) -> None:
+        """Should keep the existing Rich output when --json is absent."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        assert "application.margo.org/v1alpha1" in plain
+        assert "Configuration" in plain
 
     def test_describe_valid_descriptor_exits_0(self, cli_project: Path) -> None:
         """Should describe the descriptor and exit 0."""

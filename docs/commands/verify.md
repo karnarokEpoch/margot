@@ -6,7 +6,7 @@ upstream Margo spec schema, and optionally against margot's curated recommended 
 ```text
 margot verify [URI] [--project-dir PATH] [--manifest PATH]
               [--schema PATH] [--recommended-schema PATH]
-              [--recommend | --only-recommend] [--strict]
+              [--recommend | --only-recommend] [--strict] [--json]
 ```
 
 Pass a tagged OCI URI to validate a published artifact directly, without a local project:
@@ -30,7 +30,8 @@ margot verify public.ecr.aws/g2n4p2m7/margo:1.0.0
 | `--recommended-schema` | vendored Schema B          | Override the curated recommended schema.                                      |
 | `--recommend`          | off                        | Run Schema B as a second pass, after Schema A.                                |
 | `--only-recommend`     | off                        | Run Schema B instead of Schema A.                                             |
-| `--strict`             | off                        | Turn the Schema B lint pass into a hard contract — any finding fails the run. |
+| `--strict`             | off                        | Turn the Schema B lint pass into a hard contract — any finding fails the run.         |
+| `--json`               | off                        | Print the existing verification result as JSON instead of Rich/text output.            |
 
 `--recommend` and `--only-recommend` are mutually exclusive. Passing both is rejected before
 any validation runs (exit 1).
@@ -130,6 +131,26 @@ Plain CI-check-style pass/fail lines, pipeable into CI logs.
 - **`--only-recommend`:** Schema B findings and verdict only. No draft-spec line.
 
 For visual inspection of a descriptor's structure, use [`margot describe`](describe.md).
+
+### JSON output
+
+Pass `--json` to replace the normal validation lines with one JSON object on stdout. It contains the same
+`VerifyResult` fields used by the command: `passed`, `schema_a_version`, `schema_a_results`, and
+`schema_b_results`. Each finding contains `field_path`, `message`, and `severity`; severity is serialized as
+`ERROR`, `WARNING`, or `INFO`.
+
+For example:
+
+```json
+{
+  "passed": true,
+  "schema_a_version": "45f4359",
+  "schema_a_results": [],
+  "schema_b_results": []
+}
+```
+
+All local and remote resolution options and schema-selection flags retain their existing behavior with `--json`.
 
 ## Exit codes
 

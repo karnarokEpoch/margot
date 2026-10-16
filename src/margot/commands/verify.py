@@ -1,9 +1,10 @@
 """Verify command: validate the Margo application description against the spec schema."""
 
 from collections.abc import Iterable, Sequence
+from dataclasses import asdict
 
 from rich.markup import escape
-from typer import Argument, Option
+from typer import Argument, Exit, Option
 
 from margot import console
 from margot.domain.validation import Severity, ValidationFinding, VerifyResult, has_errors
@@ -48,6 +49,7 @@ def verify_cmd(  # noqa: PLR0913
         "--only-recommend",
         help="Lint against the recommended schema only, skipping the Margo spec schema.",
     ),
+    json: bool = Option(False, "--json", help="Print the validation result as JSON."),
 ) -> None:
     """Validate the Margo application description against the Margo spec schema.
 
@@ -100,7 +102,30 @@ def verify_cmd(  # noqa: PLR0913
     except Exception as e:  # noqa: BLE001
         console.fatal(f"Verify failed: {e}")
 
+    if json:
+        console.print_json(_serialize_result(result))
+        if not result.passed:
+            raise Exit(1)
+        return
+
     _render(result, recommend=recommend, strict=strict, only_recommend=only_recommend)
+
+
+def _serialize_result(result: VerifyResult) -> dict:
+    """Serialize the existing verification result without adding command metadata."""
+    return {
+        "passed": result.passed,
+        "schema_a_version": result.schema_a_version,
+        "schema_a_results": [_serialize_finding(finding) for finding in result.schema_a_results],
+        "schema_b_results": [_serialize_finding(finding) for finding in result.schema_b_results],
+    }
+
+
+def _serialize_finding(finding: ValidationFinding) -> dict[str, str]:
+    """Serialize a validation finding, replacing the enum with its string value."""
+    serialized = asdict(finding)
+    serialized["severity"] = finding.severity.value
+    return serialized
 
 
 def _render(result: VerifyResult, recommend: bool, strict: bool, only_recommend: bool) -> None:

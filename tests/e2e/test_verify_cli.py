@@ -1,5 +1,6 @@
 """E2E tests for verify command via CLI."""
 
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -131,6 +132,7 @@ class TestVerifyHelp:
         assert "--schema" in plain
         assert "--recommend" in plain
         assert "--recommended-schema" in plain
+        assert "--json" in plain
 
     def test_verify_help_lists_the_schema_b_gate_flags(self) -> None:
         """Should advertise --strict and --only-recommend: Schema B can gate a run now."""
@@ -150,6 +152,37 @@ class TestVerifyHelp:
 
 class TestVerifyCLI:
     """E2E tests for margot verify."""
+
+    def test_json_serializes_the_verify_result(self, cli_project: Path) -> None:
+        """Should emit only the existing VerifyResult fields as parseable JSON."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--json"])
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 0
+        assert payload == {
+            "passed": True,
+            "schema_a_version": "45f4359d129c1f04532d17b358d6f50eaa3ca62f",
+            "schema_a_results": [],
+            "schema_b_results": [],
+        }
+        assert "Schema A" not in result.stdout
+
+    def test_json_serializes_severity_and_preserves_validation_status(self, cli_project: Path) -> None:
+        """Should emit enum severities as strings and retain a failing exit status."""
+        descriptor = VALID_APP_YAML.replace("  version: 1.0.0\n", "")
+        (cli_project / "margo" / "app.yaml").write_text(descriptor, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--json"])
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 1
+        assert payload["passed"] is False
+        assert payload["schema_b_results"] == []
+        assert payload["schema_a_results"]
+        assert all(finding["severity"] in {"ERROR", "WARNING", "INFO"} for finding in payload["schema_a_results"])
+        assert "Schema A" not in result.stdout
 
     def test_valid_descriptor_exits_0(self, cli_project: Path) -> None:
         """Should pass and print the draft-spec commit line."""

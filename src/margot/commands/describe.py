@@ -5,6 +5,7 @@ domain model are passed through Text objects, never interpolated into markup str
 All descriptor-derived values are escaped before rendering.
 """
 
+from dataclasses import asdict, replace
 from typing import Annotated, Any
 
 from rich.console import Group
@@ -612,6 +613,41 @@ def build_orphans_panel(orphan_report: OrphanReport) -> Panel:  # noqa: PLR0912,
     return Panel(Group(*interleaved), title=title)
 
 
+def _serialize_sections(  # noqa: PLR0913
+    sections: list[str],
+    identity: Identity,
+    catalog: Catalog | None,
+    profiles: list[DeploymentProfile],
+    index: list[str],
+    config: Configuration,
+    descriptor_dict: dict,
+    is_remote: bool = False,
+    remote_uri: str | None = None,
+) -> dict[str, object]:
+    """Serialize selected display data without exposing Rich rendering details."""
+    if is_remote and remote_uri:
+        identity = replace(identity, oci_uri=remote_uri)
+
+    serialized: dict[str, object] = {}
+    for section_name in sections:
+        if section_name == "metadata":
+            serialized[section_name] = {
+                "identity": asdict(identity),
+                "catalog": asdict(catalog) if catalog is not None else None,
+            }
+        elif section_name == "profiles":
+            serialized[section_name] = [asdict(profile) for profile in profiles]
+        elif section_name == "config-first":
+            serialized[section_name] = asdict(config)
+        elif section_name == "component-first":
+            serialized[section_name] = asdict(build_component_first(config, index))
+        elif section_name == "extensions":
+            serialized[section_name] = descriptor_dict.get("x-placeholder-extensions") or {}
+        elif section_name == "orphans":
+            serialized[section_name] = asdict(build_orphan_report(config, index, descriptor_dict))
+    return serialized
+
+
 def _render_section(  # noqa: PLR0913
     section_name: str,
     identity: Identity,
@@ -672,6 +708,7 @@ def describe_cmd(
             "(metadata|profiles|config-first|component-first|extensions|orphans). Repeatable.",
         ),
     ] = None,
+    json: bool = Option(False, "--json", help="Print the selected sections as JSON."),
 ) -> None:
     """Describe a Margo application description in rich, structured output.
 
@@ -735,6 +772,22 @@ def describe_cmd(
     # Canonical order, regardless of flag order
     canonical_order = ["metadata", "profiles", "config-first", "component-first", "extensions", "orphans"]
     sections_to_render = [s for s in canonical_order if s in requested_sections]
+
+    if json:
+        console.print_json(
+            _serialize_sections(
+                sections_to_render,
+                identity,
+                catalog,
+                profiles,
+                index,
+                config,
+                descriptor_dict,
+                is_remote,
+                source_metadata,
+            )
+        )
+        return
 
     # Render sections
     for section_name in sections_to_render:
