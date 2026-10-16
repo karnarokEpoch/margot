@@ -138,7 +138,14 @@ def success(message: str) -> None:
 
 def print_json(data: dict | list) -> None:
     """Pretty-print a JSON-serializable object to stdout. Always shown."""
-    _get_stdout().print_json(dumps(data))
+    _get_stdout().print(
+        dumps(data, indent=2),
+        markup=False,
+        highlight=False,
+        no_wrap=True,
+        overflow="ignore",
+        crop=False,
+    )
 
 
 def print_table(table: Table) -> None:

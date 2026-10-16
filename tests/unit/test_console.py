@@ -513,6 +513,60 @@ class TestPrintJson:
         assert '"a"' in output
         assert '"b"' in output
 
+    def test_print_json_preserves_values_and_pretty_format(self, capture_console, reset_console):
+        """print_json() should preserve JSON scalar types and use indentation."""
+        out, _err = capture_console
+        payload = {
+            "enabled": True,
+            "missing": None,
+            "nested": {"items": [1, False, "[Container]", "array[string]"]},
+        }
+
+        _console.print_json(payload)
+        output = out.getvalue()
+
+        assert loads(output) == payload
+        assert '\n  "enabled": true' in output
+        assert '\n    "items": [' in output
+        assert '"[Container]"' in output
+        assert '"array[string]"' in output
+
+    def test_print_json_is_plain_with_forced_terminal(self, monkeypatch, reset_console):
+        """print_json() should not syntax-highlight or wrap long JSON on a terminal."""
+        out = StringIO()
+        monkeypatch.setattr(
+            _console,
+            "_get_stdout",
+            lambda: Console(file=out, force_terminal=True, no_color=False, color_system="256", width=20),
+        )
+        payload = {"nested": {"long_value": "x" * 100}, "enabled": True, "missing": None}
+
+        _console.print_json(payload)
+        output = out.getvalue()
+
+        assert loads(output) == payload
+        assert "\x1b[" not in output
+        assert '"long_value": "' in output
+        assert max(map(len, output.splitlines())) > 20
+
+    def test_print_json_is_plain_with_no_color(self, monkeypatch, reset_console):
+        """print_json() should remain plain when no-color mode is enabled."""
+        out = StringIO()
+        monkeypatch.setattr(
+            _console,
+            "_get_stdout",
+            lambda: Console(file=out, force_terminal=True, no_color=True, width=20),
+        )
+        _console.set_no_color(True)
+        payload = {"enabled": False, "missing": None, "nested": {"value": "[bold]literal[/bold]"}}
+
+        _console.print_json(payload)
+        output = out.getvalue()
+
+        assert loads(output) == payload
+        assert "\x1b[" not in output
+        assert '"[bold]literal[/bold]"' in output
+
 
 class TestJsonControl:
     """Tests for JSON fatal mode and its module-level isolation."""
