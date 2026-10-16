@@ -23,6 +23,8 @@ _stdout: Console | None = None
 _stderr: Console | None = None
 _verbose: bool = False
 _debug: bool = False
+_json: bool = False
+_no_color: bool = False
 
 
 def _now_ms() -> str:
@@ -58,15 +60,15 @@ def _caller_location() -> str:
 
 
 def _get_stdout() -> Console:
-    """Get or create stdout Console (uses current sys.stdout for test compatibility)."""
+    """Get or create stdout Console using the current stream and color mode."""
     # Always create fresh to use current sys.stdout (important for test runners)
-    return Console(file=sys.stdout)
+    return Console(file=sys.stdout, no_color=True if _no_color else None)
 
 
 def _get_stderr() -> Console:
-    """Get or create stderr Console (uses current sys.stderr for test compatibility)."""
+    """Get or create stderr Console using the current stream and color mode."""
     # Always create fresh to use current sys.stderr (important for test runners)
-    return Console(file=sys.stderr)
+    return Console(file=sys.stderr, no_color=True if _no_color else None)
 
 
 def read_stdin() -> str:
@@ -95,6 +97,28 @@ def set_debug(enabled: bool) -> None:
     _debug = enabled
     if enabled:
         _verbose = True
+
+
+def set_json(enabled: bool) -> None:
+    """Enable or disable JSON error output mode for the active command."""
+    global _json  # noqa: PLW0603
+    _json = enabled
+
+
+def is_json() -> bool:
+    """Return True when fatal errors use the JSON error envelope."""
+    return _json
+
+
+def set_no_color(enabled: bool) -> None:
+    """Enable or disable color suppression for Rich consoles."""
+    global _no_color  # noqa: PLW0603
+    _no_color = enabled
+
+
+def is_no_color() -> bool:
+    """Return True when Rich output is configured without color."""
+    return _no_color
 
 
 def is_verbose() -> bool:
@@ -156,12 +180,18 @@ def debug(message: str) -> None:
 
 
 def fatal(message: str, code: int = 1) -> None:
-    """Print a red error message to stderr and immediately exit with ``code``.
+    """Print an error to stderr and immediately exit with ``code``.
 
-    Use for unrecoverable errors in commands. The default code preserves the
-    historical generic-failure behavior.
+    JSON mode emits the stable machine-readable envelope; normal invocations retain
+    the historical Rich-formatted ``Error:`` message.
     """
-    _get_stderr().print(f"[red]Error:[/red] {message}", highlight=False)
+    if _json:
+        envelope = {"error": True, "code": code, "message": message}
+        _get_stderr().print(
+            dumps(envelope), markup=False, highlight=False, no_wrap=True, overflow="ignore", crop=False
+        )
+    else:
+        _get_stderr().print(f"[red]Error:[/red] {message}", highlight=False)
     raise Exit(code)
 
 
