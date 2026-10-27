@@ -69,6 +69,50 @@ Rules:
 - `infra/` emit `debug` per I/O call.
 - The one exception: `echo(f"margot {get_version()}")` in `global_options.py` — version output is not a log message.
 
+## Exit codes
+
+Every command failure exits with one of five codes. `docs/exit-codes.md` is the public
+contract; this section is the rule for writing code and tests against it.
+
+| Code | Meaning | Use for |
+|---|---|---|
+| `0` | Success | The command completed. |
+| `1` | Generic / unexpected failure | An uncategorized exception (`Verify failed: …`, `Push failed: …`). Never a default for a known failure. |
+| `2` | Usage error | Invalid flag value or incompatible flag combination, detected before any work (`invalid --type`, mutually exclusive flags, missing required flag). |
+| `3` | Validation / semantic input failure | Malformed or invalid URI, descriptor, version, package selection, or local build output; missing `margo.yaml` or descriptor; schema validation failure. |
+| `4` | Remote / authentication failure | Registry access, credential expiry or rejection, authentication, permission. |
+
+**In code.** Pass the code explicitly: `console.fatal(msg, code=3)`. Do not rely on the
+`code=1` default for a failure you can categorize. A `ValueError` from `domain/` or
+`services/` is a `3`; an OCI/registry/auth error is a `4`; the final `except Exception`
+fallback in a command is the only `1`. Codes are bare integers today — no shared constant.
+
+**In tests.** The number in a test's name, docstring and comments must be the number it
+asserts, and that number must be the category above for the situation under test.
+
+```python
+# correct — name, docstring and assertion agree, and 3 is the documented code for an invalid descriptor
+def test_invalid_descriptor_exits_3(...) -> None:
+    """Should exit 3 when the descriptor fails Schema A."""
+    assert result.exit_code == 3
+
+# wrong — "1" is the pre-taxonomy convention; the assertion says 3
+def test_invalid_descriptor_exits_1(...) -> None:
+    """Should exit 1 when the descriptor fails Schema A."""
+    assert result.exit_code == 3
+```
+
+Rules:
+- Name tests `…_exits_<code>` when the exit code is the point of the test; keep the docstring
+  (`Should exit <code> …`) in sync.
+- Never write "exits 1" for a known, categorized failure. `1` appears in a test only for an
+  unexpected exception path.
+- When changing a command's exit code, update in the same change: the code, the tests'
+  names, docstrings and assertions, `docs/exit-codes.md`, and the command's page under
+  `docs/commands/`.
+- With `--json`, the same code is carried in the stderr envelope
+  `{"error": true, "code": <int>, "message": "..."}`; the envelope `code` must equal the exit code.
+
 ## Overriding methods on a third-party base class
 
 When a class in `infra/` subclasses a third-party library class (e.g.
@@ -129,6 +173,7 @@ wraps a third-party class.
 ## Testing
 
 - **TDD is mandatory.** Write tests for the expected final behavior before or alongside implementation. Never write stub tests that just verify a `NotImplementedError` — test what the code *should* do. A failing test is correct and expected until the implementation catches up.
+- **Exit-code tests follow the taxonomy.** Any test that asserts `exit_code` must use the category from the "Exit codes" section above, and its name/docstring must state that same number.
 
 ### Running tests
 
