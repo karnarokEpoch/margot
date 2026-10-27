@@ -39,7 +39,22 @@ description: >
 | Media type | Use |
 |---|---|
 | `application/vnd.margo.app.v1+json` | `artifactType` for Margo app artifacts |
-| `application/vnd.margo.app.description.v1+yaml` | Layer: `margo.yaml` descriptor |
+| `application/vnd.margo.app.description.v1+yaml` | Layer: `app.yaml` application descriptor. Descriptor-layer lookup (remote `describe`/`verify`, `pull --recursive`) matches this `mediaType`, never the layer filename |
+| `application/vnd.margo.app.icon.v1+{ext}` | Layer: file referenced by the `icon` field |
+| `application/vnd.margo.app.license.v1+{ext}` | Layer: file referenced by the `licenseFile` field |
+| `application/vnd.margo.app.releaseNotes.v1+{ext}` | Layer: file referenced by the `releaseNotes` field |
+| `application/vnd.margo.app.descriptionFile.v1+{ext}` | Layer: file referenced by the `descriptionFile` field |
+| `application/octet-stream` | Layer: any other file under `resources/` not referenced by one of the four fields above |
+
+Templated types are built from the constants in `src/margot/domain/layers.py`
+(`MARGO_*_MEDIA_TYPE_TEMPLATE`, `MARGO_RESOURCE_FALLBACK_MEDIA_TYPE`):
+
+- `{ext}` is the referenced file's extension, lowercased, without the dot (`icon.SVG` →
+  `application/vnd.margo.app.icon.v1+svg`). There is no allow-list; any extension passes through.
+- A file with no extension uses `bin` (`…icon.v1+bin`).
+- Each resource layer carries an `org.opencontainers.image.title` annotation holding its path
+  relative to the margo build directory (e.g. `resources/icon.svg`).
+- Use the `MARGO_*` constants in code and tests; do not retype these strings.
 
 ## Notes
 
