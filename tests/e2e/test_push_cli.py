@@ -176,8 +176,8 @@ class TestPushCLI:
         assert result.exit_code == 4
         assert "No write access to registry" in _strip_ansi(result.stdout + (result.stderr or ""))
 
-    def test_push_service_value_error_exits_1(self, mocker: Any) -> None:
-        """Should exit 1 with error message when service raises ValueError."""
+    def test_push_service_value_error_exits_3(self, mocker: Any) -> None:
+        """Should exit 3 with error message when service raises ValueError."""
         mocker.patch(
             "margot.commands.push.push_service.push",
             side_effect=ValueError("Built margo artifact not found"),
