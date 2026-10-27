@@ -9,7 +9,12 @@ from yaml import YAMLError, safe_load
 from margot import console
 from margot.domain import uri as uri_domain
 from margot.domain.app_description import extract_component_refs
-from margot.domain.layers import COMPOSE_LAYER_MEDIA_TYPE, QUADLET_LAYER_MEDIA_TYPE, resolve_filename
+from margot.domain.layers import (
+    COMPOSE_LAYER_MEDIA_TYPE,
+    MARGO_DESCRIPTION_MEDIA_TYPE,
+    QUADLET_LAYER_MEDIA_TYPE,
+    resolve_filename,
+)
 from margot.domain.models import (
     _ARTIFACT_TYPE_MAP,
     PackageType,
@@ -157,7 +162,7 @@ def pull_prepared_context(
         )
 
     if package_type == PackageType.MARGO:
-        return _handle_margo_artifact(prepared.client, prepared.normalized_uri, outdir, recursive, force)
+        return _handle_margo_artifact(prepared.client, prepared.normalized_uri, outdir, recursive, force, prepared.manifest)
 
     # Handle compose/quadlet
     return _handle_compose_or_quadlet_artifact(
@@ -197,15 +202,48 @@ def _available_layer_types(layers: list[dict]) -> str:
     return "Available layer types: " + ", ".join(parts)
 
 
-def _pull_recursive_components(outdir: str, root_paths: list[str], force: bool) -> list[str]:
+def _find_descriptor_layer_index_in_manifest(manifest: dict[str, Any]) -> int | None:
+    """Find the index of the descriptor layer in the manifest.
+
+    Locates the first layer with mediaType == MARGO_DESCRIPTION_MEDIA_TYPE.
+    If more than one layer matches, logs a warning and returns the first.
+
+    Args:
+        manifest: OCI manifest dict.
+
+    Returns:
+        The index of the first descriptor layer, or None if no matching layer.
+    """
+    layers: list[dict[str, Any]] = manifest.get("layers", [])
+    matching_indices: list[int] = []
+
+    for idx, layer in enumerate(layers):
+        if layer.get("mediaType") == MARGO_DESCRIPTION_MEDIA_TYPE:
+            matching_indices.append(idx)
+
+    if not matching_indices:
+        return None
+
+    if len(matching_indices) > 1:
+        console.warning(
+            f"Multiple app.yaml (descriptor) layers found in manifest ({len(matching_indices)} matches); using first."
+        )
+
+    return matching_indices[0]
+
+
+def _pull_recursive_components(
+    outdir: str, root_paths: list[str], manifest: dict[str, Any], force: bool
+) -> list[str]:
     """Pull declared components from a margo app.yaml into component subdirectories.
 
-    Locates app.yaml in the root_paths, parses it, extracts component refs,
-    and recursively pulls each into outdir/<component-name>/.
+    Locates the descriptor layer in root_paths using the manifest, parses it, extracts
+    component refs, and recursively pulls each into outdir/<component-name>/.
 
     Args:
         outdir: Root output directory (where app.yaml was pulled).
         root_paths: List of paths that were pulled for the root artifact.
+        manifest: OCI manifest dict (used to locate descriptor layer by mediaType).
         force: Pass-through to recursive pull_artifact calls.
 
     Returns:
@@ -213,16 +251,19 @@ def _pull_recursive_components(outdir: str, root_paths: list[str], force: bool) 
     """
     result = root_paths.copy()
 
-    # Locate app.yaml in the pulled paths
-    app_yaml_path = None
-    for path in root_paths:
-        if Path(path).name == "app.yaml":
-            app_yaml_path = path
-            break
+    # Locate descriptor layer by mediaType in the manifest
+    descriptor_layer_index = _find_descriptor_layer_index_in_manifest(manifest)
 
-    if app_yaml_path is None:
-        console.warning("app.yaml not found in pulled layers; skipping component recursion.")
+    if descriptor_layer_index is None:
+        console.warning("app.yaml not found in manifest layers; skipping component recursion.")
         return result
+
+    # Get the path for this layer (same order as manifest layers)
+    if descriptor_layer_index >= len(root_paths):
+        console.warning("Descriptor layer index exceeds pulled paths; skipping component recursion.")
+        return result
+
+    app_yaml_path = root_paths[descriptor_layer_index]
 
     # Load and parse app.yaml
     try:
@@ -295,12 +336,13 @@ def _handle_unknown_artifact(
     return pulled_paths or []
 
 
-def _handle_margo_artifact(
+def _handle_margo_artifact(  # noqa: PLR0913
     client: OrasClient,
     uri: str,
     outdir: str,
     recursive: bool,
     force: bool,
+    manifest: dict[str, Any],
 ) -> list[str]:
     """Handle pull of Margo artifact type (with optional component recursion).
 
@@ -310,6 +352,7 @@ def _handle_margo_artifact(
         outdir: Output directory.
         recursive: Whether to recursively pull declared components.
         force: Whether force mode is enabled.
+        manifest: OCI manifest dict.
 
     Returns:
         List of pulled paths (root + component paths).
@@ -320,7 +363,7 @@ def _handle_margo_artifact(
 
     # Handle recursive component pulling if requested
     if recursive:
-        result = _pull_recursive_components(outdir, result, force)
+        result = _pull_recursive_components(outdir, result, manifest, force)
 
     return result
 

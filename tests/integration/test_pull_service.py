@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from pytest import raises
 
 from margot import console
+from margot.domain.layers import MARGO_DESCRIPTION_MEDIA_TYPE
 from margot.domain.models import PackageType
 from margot.infra.credentials import CredentialsExpiredError
 from margot.services import pull as pull_service
@@ -19,6 +20,16 @@ def _make_manifest(
     annotations: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a minimal OCI manifest dict for testing."""
+    # Default layers include the descriptor layer for margo artifacts if not specified
+    if layers is None and artifact_type == "application/vnd.margo.app.v1+json":
+        layers = [
+            {
+                "mediaType": MARGO_DESCRIPTION_MEDIA_TYPE,
+                "digest": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                "size": 1000,
+            }
+        ]
+
     manifest: dict[str, Any] = {
         "schemaVersion": 2,
         "mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -818,8 +829,9 @@ deploymentProfiles:
         warning_mock.assert_any_call("Skipping component 'incomplete-component': missing repository or revision properties.")
 
     def test_recursive_pull_margo_app_yaml_missing(self, mocker: Any, tmp_path: Any) -> None:
-        """recursive=True when app.yaml is missing should emit warning and return root paths only."""
-        root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json")
+        """recursive=True when app.yaml (descriptor layer) is missing should emit warning and return root paths only."""
+        # Create manifest with NO descriptor layer
+        root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json", layers=[])
 
         # Pulled paths without app.yaml
         root_paths = [str(tmp_path / "README.md"), str(tmp_path / "resources.tar.gz")]
@@ -850,9 +862,10 @@ deploymentProfiles:
 
     def test_recursive_pull_margo_app_yaml_unparseable(self, mocker: Any, tmp_path: Any) -> None:
         """recursive=True when app.yaml is unparseable should emit warning and return root paths only."""
+        # Create manifest with descriptor layer at index 0
         root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json")
 
-        # Create invalid YAML
+        # Create invalid YAML file
         app_yaml_path = tmp_path / "app.yaml"
         app_yaml_path.write_text("{ invalid: yaml: content:")
 

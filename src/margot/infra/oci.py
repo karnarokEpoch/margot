@@ -10,8 +10,13 @@ from oras.client import OrasClient as OrasClientLib
 from oras.container import Container
 from oras.defaults import annotation_title
 from oras.oci import ManifestConfig, NewLayer, NewManifest
+from yaml import safe_load
 
 from margot import console
+from margot.domain.layers import (
+    MARGO_DESCRIPTION_MEDIA_TYPE,
+    resolve_margo_resource_files,
+)
 from margot.domain.uri import extract_hostname, normalize_registry_hostname
 from margot.infra import credentials
 
@@ -350,7 +355,8 @@ class OrasClient(OrasClientLib):
         Push a margo artifact to OCI registry.
 
         Reads files from: <build_dir>/<version>/margo/
-        Only includes files that actually exist in the build_dir (skip missing optional ones).
+        Resource files are discovered from app.yaml field references (icon, descriptionFile,
+        licenseFile, releaseNotes) plus any additional files under resources/.
 
         Args:
             build_dir: Root build output directory.
@@ -365,27 +371,32 @@ class OrasClient(OrasClientLib):
 
         margo_dir = Path(build_dir) / version / "margo"
 
-        # Build file list: (path, media_type, annotation_title)
+        # Load app.yaml to extract resource references
+        app_yaml_path = margo_dir / "app.yaml"
+        try:
+            app_yaml_content = app_yaml_path.read_text(encoding="utf-8")
+            app_yaml_dict = safe_load(app_yaml_content) or {}
+        except Exception as e:  # noqa: BLE001
+            console.warning(f"Failed to load app.yaml for resource resolution: {e}; pushing only descriptor.")
+            app_yaml_dict = {}
+
+        # Resolve resource files based on app.yaml references and resources/ directory
+        resource_files, missing_fields = resolve_margo_resource_files(app_yaml_dict, margo_dir)
+
+        # Emit warnings for missing referenced files
+        for field_name in missing_fields:
+            referenced_path = app_yaml_dict.get(field_name, "(unknown)")
+            console.warning(f"'{field_name}' references '{referenced_path}' but the file was not found; skipping.")
+
+        # Build file list: descriptor first, then resources
         file_entries: list[tuple[Path, str, str]] = [
-            (margo_dir / "app.yaml", "application/vnd.margo.app.description.v1+yaml", "app.yaml"),
+            (app_yaml_path, MARGO_DESCRIPTION_MEDIA_TYPE, "app.yaml"),
         ]
-        optional = [
-            (margo_dir / "resources" / "icon.png", "application/vnd.margo.app.icon.v1+png", "resources/icon.png"),
-            (margo_dir / "resources" / "license.txt", "application/vnd.margo.app.license.v1+plain", "resources/license.txt"),
-            (
-                margo_dir / "resources" / "release-notes.md",
-                "application/vnd.margo.app.releaseNotes.v1+markdown",
-                "resources/release-notes.md",
-            ),
-            (
-                margo_dir / "resources" / "description.md",
-                "application/vnd.margo.app.descriptionFile.v1+markdown",
-                "resources/description.md",
-            ),
-        ]
-        for path, mt, title in optional:
-            if path.exists():
-                file_entries.append((path, mt, title))
+
+        # Add resolved resource files
+        file_entries.extend(
+            (resource.path, resource.media_type, resource.title) for resource in resource_files
+        )
 
         self._push_artifact(
             target=target,

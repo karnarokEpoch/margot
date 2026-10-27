@@ -223,8 +223,8 @@ x-placeholder-extensions:
         # Should show the identity panel with apiVersion as title
         assert "application.margo.org/v1alpha1" in plain or "hello-world" in plain
 
-    def test_describe_missing_margo_yaml_exits_1(self, tmp_path: Path, monkeypatch: Any) -> None:
-        """Should exit 1 when margo.yaml is absent."""
+    def test_describe_missing_margo_yaml_exits_3(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """Should exit 3 when margo.yaml is absent."""
         monkeypatch.chdir(tmp_path)
 
         result = runner.invoke(app, ["describe"])
@@ -233,16 +233,16 @@ x-placeholder-extensions:
         assert result.exit_code == 3
         assert "margo.yaml" in plain or "Error" in plain
 
-    def test_describe_missing_manifest_exits_1(self, cli_project: Path) -> None:
-        """Should exit 1 when --manifest points at a missing file."""
+    def test_describe_missing_manifest_exits_3(self, cli_project: Path) -> None:
+        """Should exit 3 when --manifest points at a missing file."""
         result = runner.invoke(app, ["describe", "--manifest", str(cli_project / "margo" / "absent.yaml")])
         plain = _output(result)
 
         assert result.exit_code == 3
         assert "Error" in plain or "not found" in plain.lower()
 
-    def test_describe_wrong_kind_exits_1(self, cli_project: Path) -> None:
-        """Should exit 1 when kind is not ApplicationDescription."""
+    def test_describe_wrong_kind_exits_3(self, cli_project: Path) -> None:
+        """Should exit 3 when kind is not ApplicationDescription."""
         (cli_project / "margo" / "app.yaml").write_text(WRONG_KIND_APP_YAML, encoding="utf-8")
 
         result = runner.invoke(app, ["describe"])

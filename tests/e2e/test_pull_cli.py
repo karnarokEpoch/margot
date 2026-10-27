@@ -119,8 +119,8 @@ class TestPullCLI:
         assert result.exit_code == 4
         assert "registry unavailable" in _strip_ansi(result.stdout + (result.stderr or ""))
 
-    def test_pull_empty_uri_exits_1(self) -> None:
-        """Should exit 1 when an empty URI is provided."""
+    def test_pull_empty_uri_exits_3(self) -> None:
+        """Should exit 3 when an empty URI is provided."""
         result = runner.invoke(app, ["pull", ""])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 

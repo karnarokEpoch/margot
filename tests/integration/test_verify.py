@@ -281,9 +281,71 @@ class TestDescriptorResolution:
         with raises(ValueError, match=r"No app.yaml or app.yaml.jinja found"):
             resolve_descriptor(str(project))
 
-    def test_missing_margo_yaml_raises(self, tmp_path: Path) -> None:
-        """Should raise the metadata loader's margo.yaml error."""
-        with raises(ValueError, match=r"margo.yaml not found"):
+    def test_app_yaml_at_project_root_without_margo_yaml(self, tmp_path: Path) -> None:
+        """Should find app.yaml at root when no margo.yaml exists (Sprint 12 fallback)."""
+        (tmp_path / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        resolved = resolve_descriptor(str(tmp_path))
+
+        assert resolved.path == str(tmp_path / "app.yaml")
+        assert resolved.meta is None
+
+    def test_app_yaml_in_margo_subdir_without_margo_yaml(self, tmp_path: Path) -> None:
+        """Should find app.yaml in margo/ subdir when no margo.yaml exists (Sprint 12 fallback)."""
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        resolved = resolve_descriptor(str(tmp_path))
+
+        assert resolved.path == str(margo_dir / "app.yaml")
+        assert resolved.meta is None
+
+    def test_root_app_yaml_takes_priority_over_margo_subdir(self, tmp_path: Path) -> None:
+        """Should prefer root app.yaml over margo/app.yaml when both exist (Sprint 12 fallback)."""
+        (tmp_path / "app.yaml").write_text(VALID_APP_YAML.replace("hello-world", "root-app"), encoding="utf-8")
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text(VALID_APP_YAML.replace("hello-world", "subdir-app"), encoding="utf-8")
+
+        resolved = resolve_descriptor(str(tmp_path))
+
+        assert resolved.path == str(tmp_path / "app.yaml")
+        content = Path(resolved.path).read_text(encoding="utf-8")
+        assert "root-app" in content
+
+    def test_jinja_descriptor_without_margo_yaml_is_rejected(self, tmp_path: Path) -> None:
+        """Should reject .jinja descriptor when no margo.yaml is present (Sprint 12 constraint)."""
+        (tmp_path / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+
+        with raises(ValueError, match=r"Jinja2 templates require margo.yaml context"):
+            resolve_descriptor(str(tmp_path))
+
+    def test_jinja_in_subdir_without_margo_yaml_is_rejected(self, tmp_path: Path) -> None:
+        """Should reject .jinja in margo/ subdir when no margo.yaml is present."""
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+
+        with raises(ValueError, match=r"Jinja2 templates require margo.yaml context"):
+            resolve_descriptor(str(tmp_path))
+
+    def test_fallback_not_triggered_when_margo_yaml_exists(self, tmp_path: Path) -> None:
+        """Should use margo.yaml search path when margo.yaml is present (no fallback)."""
+        (tmp_path / "margo.yaml").write_text(MARGO_YAML, encoding="utf-8")
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        resolved = resolve_descriptor(str(tmp_path))
+
+        assert resolved.path == str(margo_dir / "app.yaml")
+        assert resolved.meta is not None
+        assert resolved.meta.id == "hello-world"
+
+    def test_missing_margo_yaml_and_no_fallback_match_raises(self, tmp_path: Path) -> None:
+        """Should raise with both fallback paths tried when neither descriptor exists."""
+        with raises(ValueError, match=r"No app.yaml found. Searched:"):
             resolve_descriptor(str(tmp_path))
 
 
