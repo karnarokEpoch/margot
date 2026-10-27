@@ -55,7 +55,7 @@ docs = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=margot --cov-report=term-missing --cov-fail-under=90"
+addopts = "-n auto --cov=margot --cov-report=term-missing --cov-fail-under=90"
 
 [tool.uv]
 managed = true
