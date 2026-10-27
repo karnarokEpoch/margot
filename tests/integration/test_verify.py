@@ -1,6 +1,7 @@
 """Integration tests for services/verify.py against the real vendored Margo spec schema."""
 
 from pathlib import Path
+from re import escape
 from typing import Any
 
 from pytest import fixture, raises
@@ -347,6 +348,38 @@ class TestDescriptorResolution:
         """Should raise with both fallback paths tried when neither descriptor exists."""
         with raises(ValueError, match=r"No app.yaml found. Searched:"):
             resolve_descriptor(str(tmp_path))
+
+    def test_root_jinja_wins_over_margo_subdir_static_is_rejected(self, tmp_path: Path) -> None:
+        """Should fail on root app.yaml.jinja instead of silently resolving margo/app.yaml (Sprint 12 order)."""
+        (tmp_path / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        with raises(ValueError, match=escape(str(tmp_path / "app.yaml.jinja"))):
+            resolve_descriptor(str(tmp_path))
+
+    def test_root_static_wins_over_margo_subdir_jinja(self, tmp_path: Path) -> None:
+        """Should return root app.yaml without inspecting margo/app.yaml.jinja (Sprint 12 order)."""
+        (tmp_path / "app.yaml").write_text(VALID_APP_YAML.replace("hello-world", "root-app"), encoding="utf-8")
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        (margo_dir / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+
+        resolved = resolve_descriptor(str(tmp_path))
+
+        assert resolved.path == str(tmp_path / "app.yaml")
+        assert resolved.meta is None
+
+    def test_static_wins_over_jinja_in_same_directory(self, tmp_path: Path) -> None:
+        """Should return static root app.yaml when root holds both app.yaml and app.yaml.jinja."""
+        (tmp_path / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+        (tmp_path / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+
+        resolved = resolve_descriptor(str(tmp_path))
+
+        assert resolved.path == str(tmp_path / "app.yaml")
+        assert resolved.meta is None
 
 
 class TestSchemaOverride:
