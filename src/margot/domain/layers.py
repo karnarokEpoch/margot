@@ -10,10 +10,24 @@ QUADLET_LAYER_MEDIA_TYPE = "application/vnd.org.margo.component.quadlet.tar+gzip
 # Margo application descriptor and resource media types
 MARGO_DESCRIPTION_MEDIA_TYPE = "application/vnd.margo.app.description.v1+yaml"
 MARGO_ICON_MEDIA_TYPE_TEMPLATE = "application/vnd.margo.app.icon.v1+{ext}"
-MARGO_LICENSE_MEDIA_TYPE_TEMPLATE = "application/vnd.margo.app.license.v1+{ext}"
+MARGO_LICENSE_FILE_MEDIA_TYPE_TEMPLATE = "application/vnd.margo.app.licenseFile.v1+{ext}"
 MARGO_RELEASE_NOTES_MEDIA_TYPE_TEMPLATE = "application/vnd.margo.app.releaseNotes.v1+{ext}"
 MARGO_DESCRIPTION_FILE_MEDIA_TYPE_TEMPLATE = "application/vnd.margo.app.descriptionFile.v1+{ext}"
 MARGO_RESOURCE_FALLBACK_MEDIA_TYPE = "application/octet-stream"
+
+# Annotation the Margo spec requires on every layer that references a Margo application resource
+MARGO_RESOURCE_ANNOTATION = "org.margo.app.resource"
+MARGO_RESOURCE_ANNOTATION_VALUE = "true"
+
+# Extension -> Margo {file format} token. Extensions not listed here pass through unchanged.
+_FILE_FORMAT_TOKENS: dict[str, str] = {
+    "jpg": "jpeg",
+    "jpeg": "jpeg",
+    "tif": "tiff",
+    "tiff": "tiff",
+    "md": "markdown",
+    "markdown": "markdown",
+}
 
 _OCI_TITLE = "org.opencontainers.image.title"
 _OCI_VERSION = "org.opencontainers.image.version"
@@ -112,27 +126,40 @@ def resolve_filename(
     return None
 
 
-def _get_file_extension(path_str: str) -> str:
-    """Extract file extension from a path, lowercased and dot-stripped.
+def _file_format_token(path_str: str) -> str:
+    """Derive the Margo {file format} token for a resource path.
 
-    A file with no extension uses 'bin' as the extension.
+    The extension is lowercased, the dot is stripped, and the result is looked up in a
+    small explicit table. Extensions not in the table pass through unchanged. A file with
+    no extension uses 'bin'. The mimetypes module is deliberately not used: it depends on
+    host mime files and yields values such as 'svg+xml'.
+
+    Table:
+        jpg, jpeg      -> jpeg
+        tif, tiff      -> tiff
+        md, markdown   -> markdown
+        anything else  -> the lowercased extension (svg, png, txt, bmp, ...)
+        no extension   -> bin
 
     Args:
         path_str: A file path string.
 
     Returns:
-        The lowercased extension without the dot, or 'bin' if no extension.
+        The {file format} token for the media type template.
 
     Examples:
         'icon.svg' -> 'svg'
         'icon.SVG' -> 'svg'
-        '.hidden' -> 'bin'
+        'photo.JPG' -> 'jpeg'
+        'notes.md' -> 'markdown'
+        'license.txt' -> 'txt'
         'file' -> 'bin'
     """
-    p = Path(path_str)
-    if p.suffix:
-        return p.suffix.lstrip(".").lower()
-    return "bin"
+    suffix = Path(path_str).suffix
+    if not suffix:
+        return "bin"
+    extension = suffix.lstrip(".").lower()
+    return _FILE_FORMAT_TOKENS.get(extension, extension)
 
 
 @dataclass(frozen=True)
@@ -159,24 +186,31 @@ def resolve_margo_resource_files(
     Resolves files in this order:
     1. For each of icon, descriptionFile, licenseFile, releaseNotes present and non-empty
        in app.yaml's top-level/ApplicationMetadata block: resolve the path relative to
-       margo_dir. If it exists, add it with a semantically correct media type based on
-       the field name and the file's real extension. If it does not exist, add the field
-       name to the missing list (the caller emits a warning for each missing field).
-    2. Scan <margo_dir>/resources/ (if it exists) for files not already matched by step 1.
-       Add each such file with the fallback media type (application/octet-stream).
+       margo_dir. If it exists inside margo_dir, add it with a semantically correct media
+       type based on the field name and the file's {file format} token. If it does not
+       exist, or resolves outside margo_dir, add the field name to the missing list (the
+       caller emits a warning for each missing field).
+    2. Scan <margo_dir>/resources/ (if it exists), sorted, for files not already matched by
+       step 1. Add each such file with the fallback media type (application/octet-stream).
+
+    margo_dir is resolved once up front, so every comparison and every title uses the same
+    absolute form regardless of whether it was given as a relative path or through a
+    symlink. Every title is the path relative to the resolved margo_dir with '/' separators
+    (e.g. 'resources/icon.svg', 'resources/screenshots/a.png').
 
     The descriptor layer (app.yaml itself) is NOT included in the returned list — it is
     always added as the first required entry by the caller.
 
     Args:
         app_yaml_dict: Parsed app.yaml dict (typically from safe_load of YAML content).
-        margo_dir: Path to the margo build directory.
+        margo_dir: Path to the margo build directory (relative or absolute).
 
     Returns:
         A tuple of (files_to_push, missing_fields). files_to_push is a list of
         ResourceFile entries in push order. missing_fields is a list of field names
-        that were referenced but whose files do not exist on disk.
+        that were referenced but whose files do not exist inside margo_dir.
     """
+    margo_dir = margo_dir.resolve()
     resource_files: list[ResourceFile] = []
     missing_fields: list[str] = []
 
@@ -184,57 +218,49 @@ def resolve_margo_resource_files(
     field_to_template = {
         "icon": MARGO_ICON_MEDIA_TYPE_TEMPLATE,
         "descriptionFile": MARGO_DESCRIPTION_FILE_MEDIA_TYPE_TEMPLATE,
-        "licenseFile": MARGO_LICENSE_MEDIA_TYPE_TEMPLATE,
+        "licenseFile": MARGO_LICENSE_FILE_MEDIA_TYPE_TEMPLATE,
         "releaseNotes": MARGO_RELEASE_NOTES_MEDIA_TYPE_TEMPLATE,
     }
 
-    # Track which files we've already added (by absolute path) to avoid duplicates
-    # when scanning resources/
+    # Resolved absolute paths already emitted, so the resources/ scan skips them
     processed_paths: set[Path] = set()
 
     # Step 1: Process app.yaml fields
     for field_name, template in field_to_template.items():
         value = app_yaml_dict.get(field_name)
-        if value and isinstance(value, str):
-            # Resolve the path relative to margo_dir
-            file_path = margo_dir / value
-            resolved_path = file_path.resolve()
+        if not value or not isinstance(value, str):
+            continue
 
-            # If the file exists, add it
-            if resolved_path.exists():
-                ext = _get_file_extension(str(file_path))
-                media_type = template.format(ext=ext)
-                # Use the relative path from margo_dir as the annotation title
-                try:
-                    relative_title = str(resolved_path.relative_to(margo_dir))
-                except ValueError:
-                    # Path is not relative to margo_dir (outside or symlink); use as-is
-                    relative_title = value
-                resource_files.append(
-                    ResourceFile(
-                        path=resolved_path,
-                        media_type=media_type,
-                        title=relative_title,
-                    )
-                )
-                processed_paths.add(resolved_path)
-            else:
-                # File does not exist; track it for missing-file warning
-                missing_fields.append(field_name)
+        resolved_path = (margo_dir / value).resolve()
+        # A reference that escapes margo_dir is treated as missing
+        if not resolved_path.is_relative_to(margo_dir) or not resolved_path.exists():
+            missing_fields.append(field_name)
+            continue
+
+        media_type = template.format(ext=_file_format_token(value))
+        resource_files.append(
+            ResourceFile(
+                path=resolved_path,
+                media_type=media_type,
+                title=resolved_path.relative_to(margo_dir).as_posix(),
+            )
+        )
+        processed_paths.add(resolved_path)
 
     # Step 2: Scan resources/ directory for unreferenced files
     resources_dir = margo_dir / "resources"
     if resources_dir.exists():
-        for resource_file in resources_dir.rglob("*"):
-            if resource_file.is_file() and resource_file not in processed_paths:
-                relative_title = f"resources/{resource_file.name}"
-                resource_files.append(
-                    ResourceFile(
-                        path=resource_file,
-                        media_type=MARGO_RESOURCE_FALLBACK_MEDIA_TYPE,
-                        title=relative_title,
-                    )
+        for resource_file in sorted(resources_dir.rglob("*")):
+            if not resource_file.is_file() or resource_file.resolve() in processed_paths:
+                continue
+            resource_files.append(
+                ResourceFile(
+                    path=resource_file,
+                    media_type=MARGO_RESOURCE_FALLBACK_MEDIA_TYPE,
+                    title=resource_file.relative_to(margo_dir).as_posix(),
                 )
-                processed_paths.add(resource_file)
+            )
+            processed_paths.add(resource_file.resolve())
 
     return resource_files, missing_fields
+

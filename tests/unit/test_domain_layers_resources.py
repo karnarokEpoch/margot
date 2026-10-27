@@ -3,10 +3,20 @@
 from pathlib import Path
 from typing import Any
 
+from pytest import MonkeyPatch, mark
+
 from margot.domain.layers import (
     MARGO_RESOURCE_FALLBACK_MEDIA_TYPE,
     resolve_margo_resource_files,
 )
+
+
+def _write_resource(margo_dir: Path, relative: str, content: bytes = b"x") -> Path:
+    """Create a resource file under margo_dir, creating parent folders as needed."""
+    path = margo_dir / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path
 
 
 class TestResolveMargoResourceFiles:
@@ -32,7 +42,7 @@ class TestResolveMargoResourceFiles:
         assert missing == []
 
     def test_icon_no_extension_uses_bin_fallback(self, tmp_path: Path) -> None:
-        """File with no extension should use 'bin' as extension."""
+        """File with no extension should use 'bin' as the {file format} token."""
         margo_dir = tmp_path / "margo"
         margo_dir.mkdir()
         resources_dir = margo_dir / "resources"
@@ -65,6 +75,56 @@ class TestResolveMargoResourceFiles:
         assert files[0].media_type == "application/vnd.margo.app.icon.v1+png"
         assert missing == []
 
+    @mark.parametrize(
+        ("filename", "expected_token"),
+        [
+            ("icon.jpg", "jpeg"),
+            ("icon.jpeg", "jpeg"),
+            ("icon.JPG", "jpeg"),
+            ("icon.tif", "tiff"),
+            ("icon.tiff", "tiff"),
+            ("icon.md", "markdown"),
+            ("icon.markdown", "markdown"),
+            ("icon.png", "png"),
+            ("icon.svg", "svg"),
+            ("icon.bmp", "bmp"),
+            ("icon.txt", "txt"),
+        ],
+    )
+    def test_file_format_token_table(self, tmp_path: Path, filename: str, expected_token: str) -> None:
+        """Each extension maps through the {file format} table; unmapped ones pass through."""
+        margo_dir = tmp_path / "margo"
+        _write_resource(margo_dir, f"resources/{filename}")
+
+        files, missing = resolve_margo_resource_files({"icon": f"resources/{filename}"}, margo_dir)
+
+        assert len(files) == 1
+        assert files[0].media_type == f"application/vnd.margo.app.icon.v1+{expected_token}"
+        assert missing == []
+
+    @mark.parametrize(
+        ("field", "filename", "expected_media_type"),
+        [
+            ("icon", "icon.png", "application/vnd.margo.app.icon.v1+png"),
+            ("licenseFile", "license.txt", "application/vnd.margo.app.licenseFile.v1+txt"),
+            ("releaseNotes", "release-notes.md", "application/vnd.margo.app.releaseNotes.v1+markdown"),
+            ("descriptionFile", "description.md", "application/vnd.margo.app.descriptionFile.v1+markdown"),
+        ],
+    )
+    def test_original_four_filenames_regression(
+        self, tmp_path: Path, field: str, filename: str, expected_media_type: str
+    ) -> None:
+        """The four filenames the old hardcoded list handled keep their media types."""
+        margo_dir = tmp_path / "margo"
+        _write_resource(margo_dir, f"resources/{filename}")
+
+        files, missing = resolve_margo_resource_files({field: f"resources/{filename}"}, margo_dir)
+
+        assert len(files) == 1
+        assert files[0].media_type == expected_media_type
+        assert files[0].title == f"resources/{filename}"
+        assert missing == []
+
     def test_missing_referenced_file(self, tmp_path: Path) -> None:
         """Missing referenced file should be tracked in missing_fields."""
         margo_dir = tmp_path / "margo"
@@ -77,7 +137,7 @@ class TestResolveMargoResourceFiles:
         assert missing == ["icon"]
 
     def test_description_file_field(self, tmp_path: Path) -> None:
-        """descriptionFile field should use correct media type template."""
+        """descriptionFile field should use the descriptionFile template with the markdown token."""
         margo_dir = tmp_path / "margo"
         margo_dir.mkdir()
         resources_dir = margo_dir / "resources"
@@ -90,11 +150,11 @@ class TestResolveMargoResourceFiles:
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 1
-        assert files[0].media_type == "application/vnd.margo.app.descriptionFile.v1+md"
+        assert files[0].media_type == "application/vnd.margo.app.descriptionFile.v1+markdown"
         assert missing == []
 
     def test_license_file_field(self, tmp_path: Path) -> None:
-        """licenseFile field should use correct media type template."""
+        """licenseFile field should use the licenseFile template (spec name) with the txt token."""
         margo_dir = tmp_path / "margo"
         margo_dir.mkdir()
         resources_dir = margo_dir / "resources"
@@ -107,11 +167,11 @@ class TestResolveMargoResourceFiles:
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 1
-        assert files[0].media_type == "application/vnd.margo.app.license.v1+txt"
+        assert files[0].media_type == "application/vnd.margo.app.licenseFile.v1+txt"
         assert missing == []
 
     def test_release_notes_field(self, tmp_path: Path) -> None:
-        """releaseNotes field should use correct media type template."""
+        """releaseNotes field should use the releaseNotes template with the markdown token."""
         margo_dir = tmp_path / "margo"
         margo_dir.mkdir()
         resources_dir = margo_dir / "resources"
@@ -124,7 +184,7 @@ class TestResolveMargoResourceFiles:
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 1
-        assert files[0].media_type == "application/vnd.margo.app.releaseNotes.v1+md"
+        assert files[0].media_type == "application/vnd.margo.app.releaseNotes.v1+markdown"
         assert missing == []
 
     def test_extra_resource_files_fallback(self, tmp_path: Path) -> None:
@@ -165,6 +225,59 @@ class TestResolveMargoResourceFiles:
         assert files[0].media_type == "application/vnd.margo.app.icon.v1+png"
         assert missing == []
 
+    def test_referenced_icon_emitted_once_with_relative_margo_dir(
+        self, tmp_path: Path, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A referenced icon should appear exactly once when margo_dir is a relative path (default .dist)."""
+        monkeypatch.chdir(tmp_path)
+        _write_resource(Path(".dist/1.0.0/margo"), "resources/icon.png", b"\x89PNG")
+
+        files, missing = resolve_margo_resource_files(
+            {"icon": "resources/icon.png"},
+            Path(".dist/1.0.0/margo"),
+        )
+
+        assert [f.media_type for f in files] == ["application/vnd.margo.app.icon.v1+png"]
+        assert files[0].title == "resources/icon.png"
+        assert missing == []
+
+    def test_referenced_icon_emitted_once_via_symlinked_margo_dir(self, tmp_path: Path) -> None:
+        """A referenced icon should appear exactly once when margo_dir is reached through a symlink."""
+        real_margo_dir = tmp_path / "real" / "margo"
+        _write_resource(real_margo_dir, "resources/icon.png", b"\x89PNG")
+        link_margo_dir = tmp_path / "link"
+        link_margo_dir.symlink_to(real_margo_dir, target_is_directory=True)
+
+        files, missing = resolve_margo_resource_files({"icon": "resources/icon.png"}, link_margo_dir)
+
+        assert [f.media_type for f in files] == ["application/vnd.margo.app.icon.v1+png"]
+        assert files[0].title == "resources/icon.png"
+        assert missing == []
+
+    def test_nested_extra_titles_keep_subfolder(self, tmp_path: Path) -> None:
+        """Same-named files in different sub-folders get distinct titles including their sub-folder."""
+        margo_dir = tmp_path / "margo"
+        _write_resource(margo_dir, "resources/screenshots/a.png")
+        _write_resource(margo_dir, "resources/other/a.png")
+
+        files, missing = resolve_margo_resource_files({}, margo_dir)
+
+        titles = [f.title for f in files]
+        assert titles == ["resources/other/a.png", "resources/screenshots/a.png"]
+        assert all(f.media_type == MARGO_RESOURCE_FALLBACK_MEDIA_TYPE for f in files)
+        assert missing == []
+
+    def test_referenced_path_escaping_margo_dir_is_missing(self, tmp_path: Path) -> None:
+        """A referenced path that resolves outside margo_dir is reported missing and not returned."""
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+        _write_resource(tmp_path, "outside.png", b"\x89PNG")
+
+        files, missing = resolve_margo_resource_files({"icon": "../outside.png"}, margo_dir)
+
+        assert files == []
+        assert missing == ["icon"]
+
     def test_multiple_fields_and_extra_resources(self, tmp_path: Path) -> None:
         """Multiple app.yaml fields plus extra resources should all resolve."""
         margo_dir = tmp_path / "margo"
@@ -191,7 +304,7 @@ class TestResolveMargoResourceFiles:
         # Check that all three files are present with correct media types
         media_types = {f.media_type for f in files}
         assert "application/vnd.margo.app.icon.v1+svg" in media_types
-        assert "application/vnd.margo.app.license.v1+" in next(mt for mt in media_types if "license" in mt)
+        assert "application/vnd.margo.app.licenseFile.v1+bin" in media_types
         assert MARGO_RESOURCE_FALLBACK_MEDIA_TYPE in media_types
 
     def test_empty_field_value_ignored(self, tmp_path: Path) -> None:

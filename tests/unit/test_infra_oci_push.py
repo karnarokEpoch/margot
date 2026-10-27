@@ -5,7 +5,17 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+from pytest import mark
+
 from margot.infra.oci import OrasClient
+
+RESOURCE_ANNOTATIONS = {"org.margo.app.resource": "true"}
+DESCRIPTOR_MEDIA_TYPE = "application/vnd.margo.app.description.v1+yaml"
+
+
+def _fake_new_layer(blob_path: str, media_type: str) -> dict[str, Any]:  # noqa: ARG001 - production calls NewLayer(blob_path=...) by keyword; the stub ignores the path.
+    """Return a fresh layer descriptor per call so per-layer annotations stay independent."""
+    return {"mediaType": media_type, "size": 10, "digest": "sha256:abc", "annotations": {}}
 
 
 class TestPushMargo:
@@ -45,7 +55,7 @@ class TestPushMargo:
         )
 
     def test_push_margo_includes_optional_files_when_present(self, mocker: Any, tmp_path: Path) -> None:
-        """Should include optional resource files when they exist on disk and referenced in app.yaml."""
+        """Should include referenced resource files with typed media types and the resource annotation."""
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
 
         # Create build dir with optional files referenced in app.yaml
@@ -71,13 +81,54 @@ class TestPushMargo:
         call_args = client._push_artifact.call_args
         file_entries = call_args[1]["file_entries"]
         assert len(file_entries) == 3
-        assert (margo_dir / "app.yaml", "application/vnd.margo.app.description.v1+yaml", "app.yaml") in file_entries
-        assert (resources_dir / "icon.png", "application/vnd.margo.app.icon.v1+png", "resources/icon.png") in file_entries
+        assert (margo_dir / "app.yaml", DESCRIPTOR_MEDIA_TYPE, "app.yaml") in file_entries
         assert (
-            resources_dir / "license.txt",
-            "application/vnd.margo.app.license.v1+txt",
-            "resources/license.txt",
+            (resources_dir / "icon.png").resolve(),
+            "application/vnd.margo.app.icon.v1+png",
+            "resources/icon.png",
+            RESOURCE_ANNOTATIONS,
         ) in file_entries
+        assert (
+            (resources_dir / "license.txt").resolve(),
+            "application/vnd.margo.app.licenseFile.v1+txt",
+            "resources/license.txt",
+            RESOURCE_ANNOTATIONS,
+        ) in file_entries
+
+    def test_push_margo_extra_resource_carries_resource_annotation_descriptor_does_not(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        """Generic resources/ extras get the resource annotation; the app.yaml descriptor entry does not."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+
+        margo_dir = tmp_path / "1.0.0" / "margo"
+        screenshot = margo_dir / "resources" / "screenshots" / "a.png"
+        screenshot.parent.mkdir(parents=True)
+        screenshot.write_bytes(b"\x89PNG")
+        (margo_dir / "app.yaml").write_text("name: test\n")
+
+        client = OrasClient()
+        mocker.patch.object(client, "_push_artifact")
+
+        client.push_margo(
+            build_dir=str(tmp_path),
+            version="1.0.0",
+            registry="public.ecr.aws",
+            repository="g2n4p2m7/margo",
+            name="testapp",
+            description="Test application",
+        )
+
+        file_entries = client._push_artifact.call_args[1]["file_entries"]
+        assert file_entries == [
+            (margo_dir / "app.yaml", DESCRIPTOR_MEDIA_TYPE, "app.yaml"),
+            (
+                screenshot.resolve(),
+                "application/octet-stream",
+                "resources/screenshots/a.png",
+                RESOURCE_ANNOTATIONS,
+            ),
+        ]
 
     def test_push_margo_skips_missing_optional_files(self, mocker: Any, tmp_path: Path) -> None:
         """Should skip optional files that don't exist on disk."""
@@ -103,7 +154,7 @@ class TestPushMargo:
         call_args = client._push_artifact.call_args
         file_entries = call_args[1]["file_entries"]
         assert len(file_entries) == 1
-        assert file_entries[0] == (margo_dir / "app.yaml", "application/vnd.margo.app.description.v1+yaml", "app.yaml")
+        assert file_entries[0] == (margo_dir / "app.yaml", DESCRIPTOR_MEDIA_TYPE, "app.yaml")
 
 
 class TestPushCompose:
@@ -210,10 +261,7 @@ class TestPushArtifact:
                 "annotations": {},
             },
         )
-        mocker.patch(
-            "margot.infra.oci.NewLayer",
-            return_value={"mediaType": "...", "size": 10, "digest": "sha256:abc", "annotations": {}},
-        )
+        mocker.patch("margot.infra.oci.NewLayer", side_effect=_fake_new_layer)
         mocker.patch(
             "margot.infra.oci.ManifestConfig",
             return_value=(
@@ -362,3 +410,53 @@ class TestPushArtifact:
         # The temp file should have been cleaned up despite the error
         assert len(created_temps) == 1
         assert not created_temps[0].exists()
+
+    def test_push_artifact_resource_layer_has_title_and_resource_annotation(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        """Resource layers carry the title and org.margo.app.resource; the descriptor carries only the title."""
+        mocks = self._setup_mocks(mocker)
+
+        descriptor = tmp_path / "app.yaml"
+        descriptor.write_text("name: test\n")
+        icon = tmp_path / "icon.png"
+        icon.write_bytes(b"\x89PNG")
+
+        client = OrasClient()
+        client._push_artifact(
+            target="public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            artifact_type="application/vnd.margo.app.v1+json",
+            file_entries=[
+                (descriptor, DESCRIPTOR_MEDIA_TYPE, "app.yaml"),
+                (icon, "application/vnd.margo.app.icon.v1+png", "resources/icon.png", RESOURCE_ANNOTATIONS),
+            ],
+            manifest_annotations={"org.opencontainers.image.title": "testapp"},
+        )
+
+        layers = mocks["upload_manifest"].call_args[1]["manifest"]["layers"]
+        assert layers[0]["annotations"] == {"org.opencontainers.image.title": "app.yaml"}
+        assert layers[1]["annotations"] == {
+            "org.opencontainers.image.title": "resources/icon.png",
+            "org.margo.app.resource": "true",
+        }
+
+    @mark.parametrize("method", ["push_compose", "push_quadlet"])
+    def test_component_layers_carry_only_title_annotation(self, mocker: Any, tmp_path: Path, method: str) -> None:
+        """Compose and quadlet pushes are unchanged: the component layer has only the title annotation."""
+        mocks = self._setup_mocks(mocker)
+
+        archive = tmp_path / "testapp-1.0.0.tgz"
+        archive.write_bytes(b"tgz")
+
+        client = OrasClient()
+        getattr(client, method)(
+            archive_path=str(archive),
+            version="1.0.0",
+            registry="public.ecr.aws",
+            repository="g2n4p2m7/margo",
+            name="testapp",
+            description="Test application",
+        )
+
+        layers = mocks["upload_manifest"].call_args[1]["manifest"]["layers"]
+        assert layers[0]["annotations"] == {"org.opencontainers.image.title": "testapp-1.0.0.tgz"}
