@@ -13,7 +13,11 @@ Make `margot push` ship every resource file an `app.yaml` actually references (a
 extension — not just the four hardcoded names/types it supports today), typed by its real
 extension, plus any additional file a developer drops under `resources/` with a generic
 fallback media type. Fix `describe`/`verify`/`pull --recursive`'s descriptor-layer lookup
-to key off the OCI layer `mediaType`, not the literal filename `app.yaml`.
+to key off the OCI layer `mediaType`, not the literal filename `app.yaml`. Bring resource
+layers in line with the Margo spec
+([Application Registry](https://docs.margo.org/specification/applications/application-registry)):
+`licenseFile` media type name, `{file format}` tokens (`jpeg`, `markdown`), and the
+`org.margo.app.resource` layer annotation.
 
 ---
 
@@ -56,8 +60,28 @@ requirement. `services/remote.py::resolve_remote_descriptor` and
 `services/pull.py::_pull_recursive_components` both match on
 `Path(path).name == "app.yaml"` instead of on `mediaType`.
 
+**Findings from the merge review (added after the first implementation landed).** Each is
+part of this sprint:
+
+- **Bug 3 — wrong license media type.** The Margo spec names it
+  `application/vnd.margo.app.licenseFile.v1+{file format}`. margot has always pushed
+  `application/vnd.margo.app.license.v1+…` (old hardcoded list and the first implementation).
+- **Bug 4 — `{ext}` is not the spec's `{file format}`.** The spec's example marks
+  `resources/margo.jpg` as `icon.v1+jpeg` and `license.md` as `licenseFile.v1+markdown`. Using
+  the raw extension yields `+jpg` and `+md`, which are wrong.
+- **Bug 5 — duplicate resource layer.** In `resolve_margo_resource_files`, referenced files are
+  stored in `processed_paths` as resolved absolute paths, but the `resources/` scan yields paths
+  built from `margo_dir` as given. With the default relative `--build-dir .dist` the two never
+  compare equal, so a referenced file is pushed twice (typed, then as `application/octet-stream`)
+  with the same title.
+- **Bug 6 — nested titles lose their sub-folder.** The scan is recursive but builds the title
+  from `resource_file.name`, so `resources/screenshots/a.png` is titled `resources/a.png`
+  (collisions between same-named files in different sub-folders).
+- **Gap 7 — missing `org.margo.app.resource` annotation.** The spec says this annotation key MUST
+  annotate every layer that references a Margo application resource. margot never sets it.
+
 Authoritative references: `.kiro/steering/oci-media-types.md` (media-type table, to be
-extended), `.kiro/steering/code-conventions.md` (console output, imports), ROADMAP.md
+extended), the Margo spec page linked in section 1, `.kiro/steering/code-conventions.md` (console output, imports), ROADMAP.md
 Sprint 9 (remote describe/verify — the code this sprint fixes).
 
 ---
@@ -78,6 +102,10 @@ Sprint 9 (remote describe/verify — the code this sprint fixes).
   `releaseNotes`) is set but the referenced file does not exist at push time.
 - Validation warning when more than one layer in a pulled manifest has the descriptor
   media type (first match wins, all matches named in the warning).
+- `licenseFile` media type name, `{file format}` token mapping, duplicate-layer fix, nested
+  titles, and the `org.margo.app.resource` layer annotation (findings 3–7 above).
+- `infra/oci.py::_push_artifact` — carry optional extra per-layer annotations (compose/quadlet
+  pushes unchanged).
 
 **Not in scope:**
 - `margot verify` schema changes (schema already allows arbitrary string paths for these
@@ -99,6 +127,14 @@ Sprint 9 (remote describe/verify — the code this sprint fixes).
   pushed too, with `artifactType`-adjacent fallback media type `application/octet-stream`
   and an OCI title annotation set to its path relative to the margo build dir (e.g.
   `resources/screenshot-1.png`).
+- `margot push`: every resource layer (the four referenced slots **and** the generic
+  `resources/` extras) carries the annotation `org.margo.app.resource` = `"true"` in addition to
+  its title. The descriptor layer (`app.yaml`) does not. The spec defines the key but not its
+  value; `"true"` is the value this sprint chooses — record it in `docs/` and the steering file.
+- `margot push`: a file referenced by one of the four fields is pushed exactly once, even when
+  `--build-dir` is relative (the default `.dist`).
+- `margot push`: the title of a generic extra is its path relative to the margo build dir with
+  `/` separators, sub-folders included (`resources/screenshots/a.png`).
 - `margot push`: if `icon`/`descriptionFile`/`licenseFile`/`releaseNotes` is set in
   `app.yaml` but the referenced file is missing from the build output, `console.warning`
   is emitted (file is skipped, push continues — this is advisory, not a push-blocking
@@ -117,17 +153,33 @@ Sprint 9 (remote describe/verify — the code this sprint fixes).
 ```python
 MARGO_DESCRIPTION_MEDIA_TYPE = "application/vnd.margo.app.description.v1+yaml"
 MARGO_ICON_MEDIA_TYPE_TEMPLATE = "application/vnd.margo.app.icon.v1+{ext}"
-MARGO_LICENSE_MEDIA_TYPE_TEMPLATE = "application/vnd.margo.app.license.v1+{ext}"
+MARGO_LICENSE_FILE_MEDIA_TYPE_TEMPLATE = "application/vnd.margo.app.licenseFile.v1+{ext}"
 MARGO_RELEASE_NOTES_MEDIA_TYPE_TEMPLATE = "application/vnd.margo.app.releaseNotes.v1+{ext}"
 MARGO_DESCRIPTION_FILE_MEDIA_TYPE_TEMPLATE = "application/vnd.margo.app.descriptionFile.v1+{ext}"
 MARGO_RESOURCE_FALLBACK_MEDIA_TYPE = "application/octet-stream"
+MARGO_RESOURCE_ANNOTATION = "org.margo.app.resource"
+MARGO_RESOURCE_ANNOTATION_VALUE = "true"
 ```
 
-`{ext}` is the file's extension, lowercased, dot stripped (`.SVG` → `svg`, `.PNG` →
-`png`). No allow-list — any extension is accepted and passed through generically
-(`icon: resources/icon.bmp` → `application/vnd.margo.app.icon.v1+bmp`). A file with no
-extension uses `bin` as `{ext}` (document this fallback explicitly in the function
-docstring).
+`MARGO_LICENSE_MEDIA_TYPE_TEMPLATE` is renamed to `MARGO_LICENSE_FILE_MEDIA_TYPE_TEMPLATE` and
+its string changes from `…app.license.v1…` to `…app.licenseFile.v1…` (spec name). Update every
+use (code, tests, docs, steering).
+
+`{ext}` is the spec's `{file format}` token, derived from the file's extension: lowercased, dot
+stripped, then run through this small explicit table (a table, not `mimetypes`, which depends on
+the host's mime files and returns values like `svg+xml`):
+
+| Extension | Token |
+|---|---|
+| `jpg`, `jpeg` | `jpeg` |
+| `tif`, `tiff` | `tiff` |
+| `md`, `markdown` | `markdown` |
+| anything else | the lowercased extension (`.SVG` → `svg`, `.png` → `png`, `.txt` → `txt`, `.bmp` → `bmp`) |
+
+No allow-list beyond that — any other extension passes through generically. `txt` is
+deliberately **not** mapped to `plain`: the spec does not define that token, so `license.txt`
+→ `application/vnd.margo.app.licenseFile.v1+txt`. A file with no extension uses `bin` (document
+this fallback explicitly in the function docstring). The old hardcoded `+plain` value is dropped.
 
 **`infra/oci.py::push_margo` — new resource resolution logic:**
 
@@ -149,6 +201,16 @@ returns the list of `(Path, media_type, annotation_title)` entries to push:
    MARGO_RESOURCE_FALLBACK_MEDIA_TYPE, f"resources/{path.name}")`.
 3. Always keep `app.yaml` itself as the first, required entry (unchanged from today —
    `MARGO_DESCRIPTION_MEDIA_TYPE`).
+
+Path handling rules for the function (findings 5 and 6):
+
+- Resolve `margo_dir` once at the top (`margo_dir.resolve()`) and use that for every path
+  comparison and `relative_to`, so referenced files and the `resources/` scan are compared in
+  the same (absolute, resolved) form regardless of how `--build-dir` was given.
+- Every title is `path.relative_to(resolved_margo_dir).as_posix()`. A referenced file that
+  resolves outside `margo_dir` is treated as missing (added to the missing list, not pushed).
+- Each returned `ResourceFile` gets the `org.margo.app.resource` annotation; `push_margo` passes
+  it through to `_push_artifact`, which writes it next to the title annotation on that layer.
 
 Keep `domain/` pure (no `rich`, no `console`, no I/O side effects beyond `Path.exists()`
 reads, which are acceptable I/O already used elsewhere in `domain/metadata.py` — confirm
@@ -210,9 +272,21 @@ paths.
 - [ ] Unit tests: icon as `.svg`, icon as no-extension file (`bin` fallback), an extra
   unreferenced `resources/` file (fallback media type + title annotation), a field
   pointing at a missing file (warning emitted, push continues without that file), and a
-  regression test confirming the four original filenames (`icon.png`, `license.txt`,
-  `release-notes.md`, `description.md`) still push with their original (now
-  templated-but-equivalent) media types.
+  regression test for the four original filenames: `icon.png` → `icon.v1+png`, `license.txt` →
+  `licenseFile.v1+txt`, `release-notes.md` → `releaseNotes.v1+markdown`, `description.md` →
+  `descriptionFile.v1+markdown`.
+- [ ] Rename the license template to `MARGO_LICENSE_FILE_MEDIA_TYPE_TEMPLATE` /
+  `…licenseFile.v1+{ext}`; update the two existing assertions that expect `license.v1+txt`.
+- [ ] Implement the extension → token table (`jpg`/`jpeg` → `jpeg`, `tif`/`tiff` → `tiff`,
+  `md`/`markdown` → `markdown`, else pass-through; `txt` NOT mapped); unit-test each row, an
+  uppercase extension, an unmapped extension, and no extension (`bin`).
+- [ ] Fix the duplicate resource layer: unit test with a **relative** `margo_dir` (chdir into
+  `tmp_path`) asserting a referenced icon appears exactly once; also a symlinked build dir.
+- [ ] Fix nested titles: unit test with `resources/screenshots/a.png` and
+  `resources/other/a.png` asserting distinct titles with their sub-folder.
+- [ ] Add `MARGO_RESOURCE_ANNOTATION` / `MARGO_RESOURCE_ANNOTATION_VALUE`; extend
+  `_push_artifact` to write extra per-layer annotations; tests assert the annotation is on every
+  resource layer (referenced and generic) and absent on the descriptor, compose and quadlet layers.
 - [ ] Fix `services/remote.py::resolve_remote_descriptor` to key off
   `MARGO_DESCRIPTION_MEDIA_TYPE` instead of filename; add the duplicate-layer warning
   path.
@@ -222,13 +296,13 @@ paths.
   something other than `app.yaml` (e.g. `manifest.yaml`) resolves correctly in both
   `describe`'s remote path and `pull --recursive`; a fixture manifest with two
   description-media-type layers triggers the warning and picks the first.
-- [ ] Update `.kiro/steering/oci-media-types.md` — add the templated icon/license/
-  releaseNotes/descriptionFile media types and the `application/octet-stream` fallback to
-  the "Margot-specific types" table.
-- [ ] Update `docs/` (push command reference and/or concepts page) to document: resource
-  files are discovered from `app.yaml` fields plus any extra file under `resources/`;
-  extensions are passed through generically; missing referenced files warn rather than
-  fail push.
+- [ ] Update `.kiro/steering/oci-media-types.md` — already has the templated types and the
+  `application/octet-stream` fallback; correct `license` → `licenseFile`, add the token table
+  and the `org.margo.app.resource` annotation.
+- [ ] Update `docs/` (`commands/push.md`, `concepts.md`) to document: resource files are
+  discovered from `app.yaml` fields plus any extra file under `resources/`; the `{file format}`
+  token table (replacing the old fixed `+plain` / `+markdown` rows); `licenseFile` naming; the
+  `org.margo.app.resource` annotation; missing referenced files warn rather than fail push.
 - [ ] `make docs-check` passes.
 - [ ] Each task committed as one or more commits (conventional-commit messages, e.g. `fix(push): ship resource files by app.yaml reference, not fixed filename`, `fix(describe): resolve descriptor layer by mediaType`).
 

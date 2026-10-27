@@ -21,8 +21,10 @@ file that isn't exactly one of four hardcoded filenames (e.g. an `icon.svg` inst
 locating the descriptor layer by the literal filename `app.yaml` instead of its OCI
 `mediaType`, which fails on valid artifacts produced by tooling other than margot. Resource
 discovery becomes driven by `app.yaml`'s own fields (`icon`, `descriptionFile`,
-`licenseFile`, `releaseNotes`), typed by the file's real extension with no allow-list
-(generic passthrough, e.g. `+svg`, `+bmp`); any other file under `resources/` ships with
+`licenseFile`, `releaseNotes`), typed by the file's format per the Margo spec (`.jpg` →
+`+jpeg`, `.md` → `+markdown`, any other extension passed through, e.g. `+svg`, `+txt`);
+the license type is the spec's `licenseFile` name and every resource layer carries the
+`org.margo.app.resource` annotation. Any other file under `resources/` ships with
 an `application/octet-stream` fallback type. Descriptor-layer lookup becomes
 `mediaType`-based with a warning (first match wins) if more than one candidate layer is
 present. Full plan at [`.kiro/sprints/sprint-11.md`](.kiro/sprints/sprint-11.md).
