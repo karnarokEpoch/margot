@@ -526,8 +526,9 @@ class TestVerifyStrict:
 
         assert result.exit_code == 0
         assert STRICT_WITHOUT_SCHEMA_B_WARNING in plain
-        assert "Schema B" not in plain
-        assert "──" not in plain
+        # Schema B validation should not have run — no section headers or advisories
+        assert "Schema B (recommended)" not in plain
+        assert SCHEMA_B_SECTION not in plain
         assert "Schema A (Margo spec): PASS" in plain
 
     def test_strict_without_schema_b_still_fails_on_schema_a(self, cli_project: Path) -> None:
