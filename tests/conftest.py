@@ -11,6 +11,21 @@ from rich.console import Console
 import margot.console as _console
 
 
+@fixture(autouse=True)
+def _pin_terminal_width(monkeypatch: Any) -> None:
+    """Pin terminal width to 120 columns to ensure consistent output across xdist workers.
+
+    xdist worker tmp paths can be long, causing output wrapping at the default 80-column
+    terminal width. This breaks tests that assert on specific output substrings. Pinning
+    to 120 ensures consistent layout whether tests run serially or in parallel.
+
+    Rich honours the COLUMNS environment variable when constructing Console objects,
+    and _get_stdout()/_get_stderr() create fresh Console instances at call time, so this
+    fixture takes effect globally across the test suite without requiring code changes.
+    """
+    monkeypatch.setenv("COLUMNS", "120")
+
+
 @fixture
 def mock_oras_client(mocker: Any) -> MagicMock:
     """Mock OrasClient for infra layer tests."""
@@ -66,12 +81,16 @@ def capture_console():
 
 @fixture(autouse=False)
 def reset_console():
-    """Reset verbose and debug flags to default state."""
+    """Reset all module-level output flags to default state."""
     _console.set_verbose(False)
     _console.set_debug(False)
+    _console.set_json(False)
+    _console.set_no_color(False)
     yield
     _console.set_verbose(False)
     _console.set_debug(False)
+    _console.set_json(False)
+    _console.set_no_color(False)
 
 
 @fixture

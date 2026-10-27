@@ -2,14 +2,18 @@
 
 from typing import Annotated
 
-from typer import Option
+from oras.auth import AuthenticationException
+from requests.exceptions import RequestException
+from typer import Exit, Option
 
 from margot import console
 from margot.domain.models import PackageType
+from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.oci import OciRegistryError
 from margot.services import package as package_service
 
 
-def package_cmd(  # noqa: PLR0913
+def package_cmd(  # noqa: C901, PLR0912, PLR0913
     t: Annotated[
         list[str] | None,
         Option(
@@ -73,7 +77,7 @@ def package_cmd(  # noqa: PLR0913
         # Validate runtime and --no-images mutual exclusion
         if no_images and runtime != "auto":
             msg = "--runtime and --no-images are mutually exclusive"
-            console.fatal(msg)
+            console.fatal(msg, code=2)
 
         # Determine package type
         if not t:
@@ -84,17 +88,17 @@ def package_cmd(  # noqa: PLR0913
             valid_types = ("margo", "compose", "quadlet", "bundle")
             for type_str in t:
                 if type_str not in valid_types:
-                    console.fatal(f"invalid --type '{type_str}'. Must be one of: margo, compose, quadlet, bundle")
+                    console.fatal(f"invalid --type '{type_str}'. Must be one of: margo, compose, quadlet, bundle", code=2)
 
             if len(t) == 1 and t[0] == "bundle":
                 package_type = PackageType.BUNDLE
             elif "bundle" in t:
-                console.fatal("--type bundle cannot be combined with other types")
+                console.fatal("--type bundle cannot be combined with other types", code=2)
             else:
                 # For explicit types (margo, compose, quadlet), we'd need to handle multiple
                 # For now, keep it simple: one type at a time
                 if len(t) > 1:
-                    console.fatal("multiple --type values not supported; specify one type at a time")
+                    console.fatal("multiple --type values not supported; specify one type at a time", code=2)
                 package_type = PackageType(t[0])
 
         # Call the service
@@ -110,5 +114,11 @@ def package_cmd(  # noqa: PLR0913
 
         console.success(f"Packaged: {bundle_path}")
 
+    except Exit:
+        raise
+    except (AuthenticationException, CredentialsExpiredError, OciRegistryError, PermissionError, RequestException) as e:
+        console.fatal(str(e), code=4)
     except ValueError as e:
-        console.fatal(str(e))
+        console.fatal(str(e), code=3)
+    except Exception as e:  # noqa: BLE001
+        console.fatal(f"Package failed: {e}", code=1)

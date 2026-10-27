@@ -164,8 +164,20 @@ class TestPushCLI:
             dry_run=False,
         )
 
-    def test_push_service_value_error_exits_1(self, mocker: Any) -> None:
-        """Should exit 1 with error message when service raises ValueError."""
+    def test_push_permission_error_exits_4(self, mocker: Any) -> None:
+        """Should exit 4 when the registry denies push permission."""
+        mocker.patch(
+            "margot.commands.push.push_service.push",
+            side_effect=PermissionError("No write access to registry"),
+        )
+
+        result = runner.invoke(app, ["push", "--type", "margo"])
+
+        assert result.exit_code == 4
+        assert "No write access to registry" in _strip_ansi(result.stdout + (result.stderr or ""))
+
+    def test_push_service_value_error_exits_3(self, mocker: Any) -> None:
+        """Should exit 3 with error message when service raises ValueError."""
         mocker.patch(
             "margot.commands.push.push_service.push",
             side_effect=ValueError("Built margo artifact not found"),
@@ -174,7 +186,7 @@ class TestPushCLI:
         result = runner.invoke(app, ["push", "--type", "margo"])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Built margo artifact not found" in plain
 
     def test_push_service_exception_exits_1(self, mocker: Any) -> None:
@@ -200,12 +212,12 @@ class TestPushCLI:
         assert result.exit_code == 0
         assert "Nothing was pushed" in plain
 
-    def test_push_invalid_type_exits_1(self) -> None:
-        """Should exit 1 with error message for invalid --type."""
+    def test_push_invalid_type_exits_2(self) -> None:
+        """Should exit 2 with error message for invalid --type."""
         result = runner.invoke(app, ["push", "--type", "invalid"])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "invalid --type" in plain
 
     def test_push_with_project_dir_override(self, mocker: Any) -> None:

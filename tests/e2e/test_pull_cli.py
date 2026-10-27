@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from typer.testing import CliRunner
 
+from margot.infra.oci import OciRegistryError
 from margot.main import app
 
 runner = CliRunner()
@@ -105,12 +106,25 @@ class TestPullCLI:
         assert result.exit_code == 1
         assert "Error pulling artifact" in plain
 
-    def test_pull_empty_uri_exits_1(self) -> None:
-        """Should exit 1 when an empty URI is provided."""
+    def test_pull_registry_error_exits_4(self, mocker: Any) -> None:
+        """Should exit 4 when the registry reports a concrete OCI failure."""
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = _make_margo_manifest()
+        mock_client.pull.side_effect = OciRegistryError("registry unavailable")
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
+
+        result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
+
+        assert result.exit_code == 4
+        assert "registry unavailable" in _strip_ansi(result.stdout + (result.stderr or ""))
+
+    def test_pull_empty_uri_exits_3(self) -> None:
+        """Should exit 3 when an empty URI is provided."""
         result = runner.invoke(app, ["pull", ""])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Error" in plain
 
 
@@ -238,15 +252,15 @@ class TestPullCLIForce:
 
         assert result.exit_code == 0
 
-    def test_force_type_invalid_exits_1(self) -> None:
-        """Invalid --force-type value should exit 1 with an error about invalid type."""
+    def test_force_type_invalid_exits_2(self) -> None:
+        """Invalid --force-type value should exit 2 with an error about invalid type."""
         result = runner.invoke(
             app,
             ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--force-type", "invalid", "--force"],
         )
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "invalid" in plain.lower()
 
     def test_force_shows_warning_in_output(self, mocker: Any, tmp_path: Any) -> None:
@@ -265,8 +279,8 @@ class TestPullCLIForce:
         assert result.exit_code == 0
         assert "warning: --force is active. Safety checks bypassed." in plain
 
-    def test_unknown_artifact_type_without_force_exits_1(self, mocker: Any) -> None:
-        """Unknown artifact type without --force should exit 1 with 'Unknown artifact type' in output."""
+    def test_unknown_artifact_type_without_force_exits_3(self, mocker: Any) -> None:
+        """Unknown artifact type without --force should exit 3 with 'Unknown artifact type' in output."""
         unknown_manifest = {
             "schemaVersion": 2,
             "mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -286,7 +300,7 @@ class TestPullCLIForce:
         result = runner.invoke(app, ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0"])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Unknown artifact type" in plain
 
 

@@ -151,32 +151,32 @@ class TestBuildCLI:
         built_count = plain.count("Built")
         assert built_count == 1, f"Expected 1 'Built' line for simple variant, got {built_count}"
 
-    def test_build_invalid_type_exits_1(self, cli_project: Path) -> None:
-        """Should exit 1 with error message for invalid --type."""
+    def test_build_invalid_type_exits_2(self, cli_project: Path) -> None:
+        """Should exit 2 with error message for invalid --type."""
         result = runner.invoke(app, ["build", "--type", "invalid"])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "invalid --type" in plain
 
-    def test_build_no_margo_yaml_exits_1(self, tmp_path: Path, monkeypatch: Any) -> None:
-        """Should exit 1 when margo.yaml is not found."""
+    def test_build_no_margo_yaml_exits_3(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """Should exit 3 when margo.yaml is not found."""
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(app, ["build", "--build-dir", str(tmp_path / ".dist")])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "margo.yaml" in plain.lower()
 
-    def test_build_invalid_semver_exits_1(self, cli_project: Path) -> None:
-        """Should exit 1 when version is not valid SemVer."""
+    def test_build_invalid_semver_exits_3(self, cli_project: Path) -> None:
+        """Should exit 3 when version is not valid SemVer."""
         result = runner.invoke(
             app,
             ["build", "--type", "margo", "--version", "not-semver", "--build-dir", str(cli_project / ".dist")],
         )
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         # Should contain a semver validation error
         assert "semver" in plain.lower() or "version" in plain.lower()
 
@@ -193,15 +193,15 @@ class TestBuildCLI:
         # The output dir should contain the overridden version
         assert "2.5.3" in plain
 
-    def test_build_variant_not_found_exits_1(self, cli_project: Path) -> None:
-        """Should exit 1 when requesting a variant that doesn't exist."""
+    def test_build_variant_not_found_exits_3(self, cli_project: Path) -> None:
+        """Should exit 3 when requesting a variant that doesn't exist."""
         result = runner.invoke(
             app,
             ["build", "--type", "compose", "--variant", "nonexistent", "--build-dir", str(cli_project / ".dist")],
         )
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "nonexistent" in plain or "variant" in plain.lower()
 
     def test_build_default_build_dir(self, cli_project: Path) -> None:
@@ -278,7 +278,7 @@ class TestBuildAllSkipsMissingE2E:
         assert "Built" in plain
 
     def test_build_all_reraises_non_skip_value_error(self, cli_project_partial: Path, mocker: Any) -> None:
-        """Should exit 1 when --type all triggers a ValueError unrelated to missing component."""
+        """Should exit 3 when --type all triggers a ValueError unrelated to missing component."""
 
         def _raise_for_compose(package_type: PackageType, **_kwargs: Any) -> list[Any]:
             if package_type.value == "compose":
@@ -293,7 +293,7 @@ class TestBuildAllSkipsMissingE2E:
         )
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "invalid version format" in plain
 
 

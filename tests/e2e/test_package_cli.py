@@ -41,8 +41,8 @@ class TestPackageCLIHelp:
 class TestPackageTypeValidation:
     """CLI-level type validation tests for package command."""
 
-    def test_package_invalid_type_exits_1(self, mocker: Any) -> None:
-        """Should exit 1 with error for invalid --type."""
+    def test_package_invalid_type_exits_2(self, mocker: Any) -> None:
+        """Should exit 2 with error for invalid --type."""
         # Mock the service to avoid needing real build artifacts
         mocker.patch("margot.commands.package.package_service.package")
 
@@ -52,11 +52,11 @@ class TestPackageTypeValidation:
         )
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "invalid" in plain.lower()
 
-    def test_package_bundle_with_margo_exits_1(self, mocker: Any) -> None:
-        """Should exit 1 when --type bundle is combined with --type margo."""
+    def test_package_bundle_with_margo_exits_2(self, mocker: Any) -> None:
+        """Should exit 2 when --type bundle is combined with --type margo."""
         mocker.patch("margot.commands.package.package_service.package")
 
         result = runner.invoke(
@@ -65,11 +65,11 @@ class TestPackageTypeValidation:
         )
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "bundle" in plain.lower()
 
-    def test_package_multiple_types_exits_1(self, mocker: Any) -> None:
-        """Should exit 1 when multiple non-bundle types are specified."""
+    def test_package_multiple_types_exits_2(self, mocker: Any) -> None:
+        """Should exit 2 when multiple non-bundle types are specified."""
         mocker.patch("margot.commands.package.package_service.package")
 
         result = runner.invoke(
@@ -78,7 +78,7 @@ class TestPackageTypeValidation:
         )
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "multiple" in plain.lower()
 
 
@@ -134,8 +134,8 @@ class TestPackageSuccessPath:
 class TestPackageServiceError:
     """Tests for service-layer error handling."""
 
-    def test_package_value_error_exits_1(self, mocker: Any) -> None:
-        """Should exit 1 when service raises ValueError."""
+    def test_package_value_error_exits_3(self, mocker: Any) -> None:
+        """Should exit 3 when service raises ValueError."""
         mocker.patch(
             "margot.commands.package.package_service.package",
             side_effect=ValueError("Build output not found"),
@@ -144,5 +144,5 @@ class TestPackageServiceError:
         result = runner.invoke(app, ["package", "--type", "margo"])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Build output not found" in plain

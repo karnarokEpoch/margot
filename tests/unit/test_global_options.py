@@ -47,3 +47,21 @@ class TestGlobalOptions:
 
         mock_set_debug.assert_called_once_with(True)
         mock_set_verbose.assert_not_called()
+
+
+    def test_no_color_flag_calls_set_no_color(self, mocker: Any) -> None:
+        """--no-color should enable color suppression."""
+        mock_set_no_color = mocker.patch("margot.commands.global_options.set_no_color")
+
+        global_options(version_flag=False, verbose=False, debug=False, no_color=True)
+
+        mock_set_no_color.assert_called_once_with(True)
+
+    def test_no_color_environment_is_presence_based(self, mocker: Any, monkeypatch: Any) -> None:
+        """An empty NO_COLOR value still disables color because presence is the contract."""
+        mock_set_no_color = mocker.patch("margot.commands.global_options.set_no_color")
+        monkeypatch.setenv("NO_COLOR", "")
+
+        global_options(version_flag=False, verbose=False, debug=False, no_color=False)
+
+        mock_set_no_color.assert_called_once_with(True)

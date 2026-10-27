@@ -45,14 +45,14 @@ class TestPushMargo:
         )
 
     def test_push_margo_includes_optional_files_when_present(self, mocker: Any, tmp_path: Path) -> None:
-        """Should include optional resource files when they exist on disk."""
+        """Should include optional resource files when they exist on disk and referenced in app.yaml."""
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
 
-        # Create build dir with optional files
+        # Create build dir with optional files referenced in app.yaml
         margo_dir = tmp_path / "1.0.0" / "margo"
         resources_dir = margo_dir / "resources"
         resources_dir.mkdir(parents=True)
-        (margo_dir / "app.yaml").write_text("name: test\n")
+        (margo_dir / "app.yaml").write_text("apiVersion: v1\nicon: resources/icon.png\nlicenseFile: resources/license.txt\n")
         (resources_dir / "icon.png").write_bytes(b"\x89PNG")
         (resources_dir / "license.txt").write_text("MIT")
 
@@ -75,7 +75,7 @@ class TestPushMargo:
         assert (resources_dir / "icon.png", "application/vnd.margo.app.icon.v1+png", "resources/icon.png") in file_entries
         assert (
             resources_dir / "license.txt",
-            "application/vnd.margo.app.license.v1+plain",
+            "application/vnd.margo.app.license.v1+txt",
             "resources/license.txt",
         ) in file_entries
 
