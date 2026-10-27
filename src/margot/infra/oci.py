@@ -391,9 +391,8 @@ class OrasClient(OrasClientLib):
         resource_files, missing_fields = resolve_margo_resource_files(app_yaml_dict, margo_dir)
 
         # Emit warnings for missing referenced files
-        for field_name in missing_fields:
-            referenced_path = app_yaml_dict.get(field_name, "(unknown)")
-            console.warning(f"'{field_name}' references '{referenced_path}' but the file was not found; skipping.")
+        for field_name, referenced_value in missing_fields:
+            console.warning(f"'{field_name}' references '{referenced_value}' but the file was not found; skipping.")
 
         # Build file list: descriptor first, then resources. Every resource layer carries the
         # org.margo.app.resource annotation; the descriptor layer does not.

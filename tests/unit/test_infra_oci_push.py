@@ -62,7 +62,14 @@ class TestPushMargo:
         margo_dir = tmp_path / "1.0.0" / "margo"
         resources_dir = margo_dir / "resources"
         resources_dir.mkdir(parents=True)
-        (margo_dir / "app.yaml").write_text("apiVersion: v1\nicon: resources/icon.png\nlicenseFile: resources/license.txt\n")
+        (margo_dir / "app.yaml").write_text(
+            "apiVersion: v1\n"
+            "metadata:\n"
+            "  catalog:\n"
+            "    application:\n"
+            "      icon: resources/icon.png\n"
+            "      licenseFile: resources/license.txt\n"
+        )
         (resources_dir / "icon.png").write_bytes(b"\x89PNG")
         (resources_dir / "license.txt").write_text("MIT")
 
@@ -155,6 +162,87 @@ class TestPushMargo:
         file_entries = call_args[1]["file_entries"]
         assert len(file_entries) == 1
         assert file_entries[0] == (margo_dir / "app.yaml", DESCRIPTOR_MEDIA_TYPE, "app.yaml")
+
+    def test_push_margo_warns_with_exact_message_for_missing_reference(self, mocker: Any, tmp_path: Path) -> None:
+        """A referenced local file that does not exist emits the warning naming the field and the value."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+
+        margo_dir = tmp_path / "1.0.0" / "margo"
+        margo_dir.mkdir(parents=True)
+        (margo_dir / "app.yaml").write_text(
+            "metadata:\n  catalog:\n    application:\n      licenseFile: ./resources/LICENSE.txt\n"
+        )
+
+        client = OrasClient()
+        mocker.patch.object(client, "_push_artifact")
+        console_mock = mocker.patch("margot.infra.oci.console")
+
+        client.push_margo(
+            build_dir=str(tmp_path),
+            version="1.0.0",
+            registry="public.ecr.aws",
+            repository="g2n4p2m7/margo",
+            name="testapp",
+            description="Test application",
+        )
+
+        console_mock.warning.assert_called_once_with(
+            "'licenseFile' references './resources/LICENSE.txt' but the file was not found; skipping."
+        )
+        file_entries = client._push_artifact.call_args[1]["file_entries"]
+        assert file_entries == [(margo_dir / "app.yaml", DESCRIPTOR_MEDIA_TYPE, "app.yaml")]
+
+    def test_push_margo_remote_reference_is_silent_and_not_pushed(self, mocker: Any, tmp_path: Path) -> None:
+        """An https icon is neither pushed nor reported as missing."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+
+        margo_dir = tmp_path / "1.0.0" / "margo"
+        margo_dir.mkdir(parents=True)
+        (margo_dir / "app.yaml").write_text(
+            "metadata:\n  catalog:\n    application:\n      icon: https://example.com/icon.png\n"
+        )
+
+        client = OrasClient()
+        mocker.patch.object(client, "_push_artifact")
+        console_mock = mocker.patch("margot.infra.oci.console")
+
+        client.push_margo(
+            build_dir=str(tmp_path),
+            version="1.0.0",
+            registry="public.ecr.aws",
+            repository="g2n4p2m7/margo",
+            name="testapp",
+            description="Test application",
+        )
+
+        console_mock.warning.assert_not_called()
+        file_entries = client._push_artifact.call_args[1]["file_entries"]
+        assert file_entries == [(margo_dir / "app.yaml", DESCRIPTOR_MEDIA_TYPE, "app.yaml")]
+
+    def test_push_margo_top_level_fields_are_not_resource_references(self, mocker: Any, tmp_path: Path) -> None:
+        """A top-level icon is not a reference: no typed entry and no missing-file warning."""
+        mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
+
+        margo_dir = tmp_path / "1.0.0" / "margo"
+        margo_dir.mkdir(parents=True)
+        (margo_dir / "app.yaml").write_text("icon: resources/missing.png\n")
+
+        client = OrasClient()
+        mocker.patch.object(client, "_push_artifact")
+        console_mock = mocker.patch("margot.infra.oci.console")
+
+        client.push_margo(
+            build_dir=str(tmp_path),
+            version="1.0.0",
+            registry="public.ecr.aws",
+            repository="g2n4p2m7/margo",
+            name="testapp",
+            description="Test application",
+        )
+
+        console_mock.warning.assert_not_called()
+        file_entries = client._push_artifact.call_args[1]["file_entries"]
+        assert file_entries == [(margo_dir / "app.yaml", DESCRIPTOR_MEDIA_TYPE, "app.yaml")]
 
 
 class TestPushCompose:

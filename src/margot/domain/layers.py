@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 COMPOSE_LAYER_MEDIA_TYPE = "application/vnd.org.margo.component.compose.tar+gzip"
 QUADLET_LAYER_MEDIA_TYPE = "application/vnd.org.margo.component.quadlet.tar+gzip"
@@ -31,6 +32,10 @@ _FILE_FORMAT_TOKENS: dict[str, str] = {
 
 _OCI_TITLE = "org.opencontainers.image.title"
 _OCI_VERSION = "org.opencontainers.image.version"
+
+# Application-level fields in metadata.catalog.application that reference a local resource file
+_RESOURCE_REFERENCE_FIELDS: tuple[str, ...] = ("icon", "descriptionFile", "licenseFile", "releaseNotes")
+_REMOTE_SCHEMES = frozenset({"http", "https"})
 
 
 def select_payload_layer(
@@ -177,26 +182,65 @@ class ResourceFile:
     title: str
 
 
+def _child_mapping(node: object, key: str) -> dict[str, Any] | None:
+    """Return node[key] if node is a dict and that value is also a dict, otherwise None."""
+    if not isinstance(node, dict):
+        return None
+    child = node.get(key)
+    return child if isinstance(child, dict) else None
+
+
+def extract_resource_references(app_yaml_dict: object) -> dict[str, str]:
+    """Extract the resource file references from a Margo application description.
+
+    In a Margo application description the references live at
+    ``metadata.catalog.application.<field>``. Any missing level, a None value, or a
+    non-mapping value at any level yields no references rather than an error. Only
+    non-empty string values are returned; other values are ignored. There is no fallback
+    to top-level keys.
+
+    Args:
+        app_yaml_dict: Parsed app.yaml content. Any value is accepted; a non-mapping value yields {}.
+
+    Returns:
+        Mapping of field name (icon, descriptionFile, licenseFile, releaseNotes) to the
+        stripped referenced value, for each field that holds a non-empty string.
+    """
+    application = _child_mapping(_child_mapping(_child_mapping(app_yaml_dict, "metadata"), "catalog"), "application")
+    if application is None:
+        return {}
+
+    references: dict[str, str] = {}
+    for field_name in _RESOURCE_REFERENCE_FIELDS:
+        value = application.get(field_name)
+        if isinstance(value, str) and value.strip():
+            references[field_name] = value.strip()
+    return references
+
+
 def resolve_margo_resource_files(
     app_yaml_dict: dict[str, Any],
     margo_dir: Path,
-) -> tuple[list[ResourceFile], list[str]]:
+) -> tuple[list[ResourceFile], list[tuple[str, str]]]:
     """Resolve resource files to push based on app.yaml and the margo build directory.
 
     Resolves files in this order:
-    1. For each of icon, descriptionFile, licenseFile, releaseNotes present and non-empty
-       in app.yaml's top-level/ApplicationMetadata block: resolve the path relative to
-       margo_dir. If it exists inside margo_dir, add it with a semantically correct media
-       type based on the field name and the file's {file format} token. If it does not
-       exist, or resolves outside margo_dir, add the field name to the missing list (the
-       caller emits a warning for each missing field).
+    1. For each reference returned by extract_resource_references() (icon, descriptionFile,
+       licenseFile, releaseNotes under metadata.catalog.application):
+       - Values with an http or https scheme are remote, not local files. They are skipped
+         silently: not pushed and not reported missing.
+       - Otherwise the value is resolved relative to margo_dir. If it names an existing file
+         inside margo_dir, it is added with a semantically correct media type based on the
+         field name and the file's {file format} token. If it is absent, is not a file, or
+         resolves outside margo_dir, (field, value) is added to the missing list. The caller
+         emits a warning for each entry.
     2. Scan <margo_dir>/resources/ (if it exists), sorted, for files not already matched by
        step 1. Add each such file with the fallback media type (application/octet-stream).
 
     margo_dir is resolved once up front, so every comparison and every title uses the same
     absolute form regardless of whether it was given as a relative path or through a
     symlink. Every title is the path relative to the resolved margo_dir with '/' separators
-    (e.g. 'resources/icon.svg', 'resources/screenshots/a.png').
+    (e.g. 'resources/icon.svg', 'resources/screenshots/a.png'). './' prefixes normalise away.
 
     The descriptor layer (app.yaml itself) is NOT included in the returned list — it is
     always added as the first required entry by the caller.
@@ -206,13 +250,13 @@ def resolve_margo_resource_files(
         margo_dir: Path to the margo build directory (relative or absolute).
 
     Returns:
-        A tuple of (files_to_push, missing_fields). files_to_push is a list of
-        ResourceFile entries in push order. missing_fields is a list of field names
-        that were referenced but whose files do not exist inside margo_dir.
+        A tuple of (files_to_push, missing). files_to_push is a list of ResourceFile entries
+        in push order. missing is a list of (field_name, referenced_value) pairs for local
+        references whose files do not exist inside margo_dir.
     """
     margo_dir = margo_dir.resolve()
     resource_files: list[ResourceFile] = []
-    missing_fields: list[str] = []
+    missing: list[tuple[str, str]] = []
 
     # Field name → media type template mapping
     field_to_template = {
@@ -225,16 +269,17 @@ def resolve_margo_resource_files(
     # Resolved absolute paths already emitted, so the resources/ scan skips them
     processed_paths: set[Path] = set()
 
-    # Step 1: Process app.yaml fields
+    # Step 1: Process metadata.catalog.application references
+    references = extract_resource_references(app_yaml_dict)
     for field_name, template in field_to_template.items():
-        value = app_yaml_dict.get(field_name)
-        if not value or not isinstance(value, str):
+        value = references.get(field_name)
+        if value is None or urlparse(value).scheme in _REMOTE_SCHEMES:
             continue
 
         resolved_path = (margo_dir / value).resolve()
         # A reference that escapes margo_dir is treated as missing
-        if not resolved_path.is_relative_to(margo_dir) or not resolved_path.exists():
-            missing_fields.append(field_name)
+        if not resolved_path.is_relative_to(margo_dir) or not resolved_path.is_file():
+            missing.append((field_name, value))
             continue
 
         media_type = template.format(ext=_file_format_token(value))
@@ -262,5 +307,4 @@ def resolve_margo_resource_files(
             )
             processed_paths.add(resource_file.resolve())
 
-    return resource_files, missing_fields
-
+    return resource_files, missing

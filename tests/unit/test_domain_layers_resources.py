@@ -7,6 +7,7 @@ from pytest import MonkeyPatch, mark
 
 from margot.domain.layers import (
     MARGO_RESOURCE_FALLBACK_MEDIA_TYPE,
+    extract_resource_references,
     resolve_margo_resource_files,
 )
 
@@ -17,6 +18,73 @@ def _write_resource(margo_dir: Path, relative: str, content: bytes = b"x") -> Pa
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     return path
+
+
+def _descriptor(**application: Any) -> dict[str, Any]:
+    """Build an app.yaml dict with the resource fields at metadata.catalog.application."""
+    return {"metadata": {"catalog": {"application": application}}}
+
+
+# Shapes that are not a complete metadata.catalog.application mapping; none may yield references.
+PARTIAL_SHAPES: list[Any] = [
+    None,
+    "not a mapping",
+    [],
+    {},
+    {"metadata": None},
+    {"metadata": "text"},
+    {"metadata": {}},
+    {"metadata": {"catalog": None}},
+    {"metadata": {"catalog": []}},
+    {"metadata": {"catalog": {}}},
+    {"metadata": {"catalog": {"application": None}}},
+    {"metadata": {"catalog": {"application": ["icon"]}}},
+    {"metadata": {"catalog": {"application": "icon"}}},
+]
+
+
+class TestExtractResourceReferences:
+    """Tests for extract_resource_references()."""
+
+    def test_reads_all_four_fields_from_nested_application(self) -> None:
+        """Should return the four reference fields found under metadata.catalog.application."""
+        app_yaml = _descriptor(
+            icon="./resources/icon.png",
+            descriptionFile="resources/description.md",
+            licenseFile="resources/license.txt",
+            releaseNotes="resources/release-notes.md",
+            tagline="ignored",
+        )
+
+        assert extract_resource_references(app_yaml) == {
+            "icon": "./resources/icon.png",
+            "descriptionFile": "resources/description.md",
+            "licenseFile": "resources/license.txt",
+            "releaseNotes": "resources/release-notes.md",
+        }
+
+    @mark.parametrize("app_yaml", PARTIAL_SHAPES)
+    def test_partial_or_invalid_shape_yields_no_references(self, app_yaml: Any) -> None:
+        """Should return {} for any missing, None or non-mapping level without raising."""
+        assert extract_resource_references(app_yaml) == {}
+
+    def test_top_level_fields_are_ignored(self) -> None:
+        """Should not read the four fields from the top level of the document."""
+        app_yaml = {"icon": "resources/icon.png", "licenseFile": "resources/license.txt"}
+
+        assert extract_resource_references(app_yaml) == {}
+
+    def test_non_string_and_blank_values_are_ignored(self) -> None:
+        """Should ignore non-string, empty and whitespace-only values."""
+        app_yaml = _descriptor(icon=1, licenseFile="   ", releaseNotes=None, descriptionFile=["x"])
+
+        assert extract_resource_references(app_yaml) == {}
+
+    def test_values_are_stripped(self) -> None:
+        """Should strip surrounding whitespace from referenced values."""
+        app_yaml = _descriptor(icon="  resources/icon.png  ")
+
+        assert extract_resource_references(app_yaml) == {"icon": "resources/icon.png"}
 
 
 class TestResolveMargoResourceFiles:
@@ -32,7 +100,7 @@ class TestResolveMargoResourceFiles:
         icon_path = resources_dir / "icon.svg"
         icon_path.write_text("<svg></svg>")
 
-        app_yaml = {"icon": "resources/icon.svg"}
+        app_yaml = _descriptor(icon="resources/icon.svg")
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 1
@@ -51,7 +119,7 @@ class TestResolveMargoResourceFiles:
         icon_path = resources_dir / "icon"
         icon_path.write_bytes(b"binary")
 
-        app_yaml = {"icon": "resources/icon"}
+        app_yaml = _descriptor(icon="resources/icon")
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 1
@@ -68,7 +136,7 @@ class TestResolveMargoResourceFiles:
         icon_path = resources_dir / "icon.PNG"
         icon_path.write_bytes(b"\x89PNG")
 
-        app_yaml = {"icon": "resources/icon.PNG"}
+        app_yaml = _descriptor(icon="resources/icon.PNG")
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 1
@@ -96,7 +164,7 @@ class TestResolveMargoResourceFiles:
         margo_dir = tmp_path / "margo"
         _write_resource(margo_dir, f"resources/{filename}")
 
-        files, missing = resolve_margo_resource_files({"icon": f"resources/{filename}"}, margo_dir)
+        files, missing = resolve_margo_resource_files(_descriptor(icon=f"resources/{filename}"), margo_dir)
 
         assert len(files) == 1
         assert files[0].media_type == f"application/vnd.margo.app.icon.v1+{expected_token}"
@@ -111,30 +179,106 @@ class TestResolveMargoResourceFiles:
             ("descriptionFile", "description.md", "application/vnd.margo.app.descriptionFile.v1+markdown"),
         ],
     )
-    def test_original_four_filenames_regression(
+    def test_each_reference_field_gets_its_typed_media_type(
         self, tmp_path: Path, field: str, filename: str, expected_media_type: str
     ) -> None:
-        """The four filenames the old hardcoded list handled keep their media types."""
+        """Each nested reference field resolves to its own typed media type, never octet-stream."""
         margo_dir = tmp_path / "margo"
         _write_resource(margo_dir, f"resources/{filename}")
 
-        files, missing = resolve_margo_resource_files({field: f"resources/{filename}"}, margo_dir)
+        files, missing = resolve_margo_resource_files(_descriptor(**{field: f"resources/{filename}"}), margo_dir)
 
         assert len(files) == 1
         assert files[0].media_type == expected_media_type
         assert files[0].title == f"resources/{filename}"
         assert missing == []
 
+    def test_all_four_nested_references_typed_and_emitted_once(self, tmp_path: Path) -> None:
+        """A nested descriptor referencing all four files yields four typed entries, each exactly once."""
+        margo_dir = tmp_path / "margo"
+        _write_resource(margo_dir, "resources/icon.png", b"\x89PNG")
+        _write_resource(margo_dir, "resources/description.md", b"# d")
+        _write_resource(margo_dir, "resources/license.txt", b"MIT")
+        _write_resource(margo_dir, "resources/release-notes.md", b"# n")
+
+        app_yaml = _descriptor(
+            icon="resources/icon.png",
+            descriptionFile="resources/description.md",
+            licenseFile="resources/license.txt",
+            releaseNotes="resources/release-notes.md",
+        )
+        files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
+
+        by_title = {f.title: f.media_type for f in files}
+        assert len(files) == 4
+        assert by_title == {
+            "resources/icon.png": "application/vnd.margo.app.icon.v1+png",
+            "resources/description.md": "application/vnd.margo.app.descriptionFile.v1+markdown",
+            "resources/license.txt": "application/vnd.margo.app.licenseFile.v1+txt",
+            "resources/release-notes.md": "application/vnd.margo.app.releaseNotes.v1+markdown",
+        }
+        assert MARGO_RESOURCE_FALLBACK_MEDIA_TYPE not in by_title.values()
+        assert missing == []
+
     def test_missing_referenced_file(self, tmp_path: Path) -> None:
-        """Missing referenced file should be tracked in missing_fields."""
+        """Missing referenced file should be reported as (field, referenced value)."""
         margo_dir = tmp_path / "margo"
         margo_dir.mkdir()
 
-        app_yaml = {"icon": "resources/icon.svg"}
+        app_yaml = _descriptor(icon="resources/icon.svg")
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
-        assert len(files) == 0
-        assert missing == ["icon"]
+        assert files == []
+        assert missing == [("icon", "resources/icon.svg")]
+
+    def test_dot_slash_prefix_is_normalised(self, tmp_path: Path) -> None:
+        """A ./resources/... reference resolves to the same title and is not duplicated by the scan."""
+        margo_dir = tmp_path / "margo"
+        _write_resource(margo_dir, "resources/icon.png", b"\x89PNG")
+
+        files, missing = resolve_margo_resource_files(_descriptor(icon="./resources/icon.png"), margo_dir)
+
+        assert [(f.title, f.media_type) for f in files] == [
+            ("resources/icon.png", "application/vnd.margo.app.icon.v1+png"),
+        ]
+        assert missing == []
+
+    def test_dot_slash_missing_reference_keeps_written_value(self, tmp_path: Path) -> None:
+        """A missing ./ reference is reported with the value exactly as the author wrote it."""
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+
+        files, missing = resolve_margo_resource_files(_descriptor(icon="./resources/icon.png"), margo_dir)
+
+        assert files == []
+        assert missing == [("icon", "./resources/icon.png")]
+
+    def test_https_reference_is_skipped_silently(self, tmp_path: Path) -> None:
+        """http and https references are remote: neither pushed nor reported missing."""
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+
+        app_yaml = _descriptor(
+            icon="https://example.com/icon.png",
+            licenseFile="http://example.com/license.txt",
+        )
+        files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
+
+        assert files == []
+        assert missing == []
+
+    def test_remote_reference_does_not_hide_local_reference(self, tmp_path: Path) -> None:
+        """A remote icon alongside a local licenseFile still pushes the local file with its typed media type."""
+        margo_dir = tmp_path / "margo"
+        _write_resource(margo_dir, "resources/license.txt", b"MIT")
+
+        app_yaml = _descriptor(icon="https://example.com/icon.png", licenseFile="resources/license.txt")
+        files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
+
+        assert [(f.title, f.media_type) for f in files] == [
+            ("resources/license.txt", "application/vnd.margo.app.licenseFile.v1+txt"),
+        ]
+        assert missing == []
 
     def test_description_file_field(self, tmp_path: Path) -> None:
         """descriptionFile field should use the descriptionFile template with the markdown token."""
@@ -146,7 +290,7 @@ class TestResolveMargoResourceFiles:
         desc_path = resources_dir / "DESCRIPTION.md"
         desc_path.write_text("# Description")
 
-        app_yaml = {"descriptionFile": "resources/DESCRIPTION.md"}
+        app_yaml = _descriptor(descriptionFile="resources/DESCRIPTION.md")
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 1
@@ -163,7 +307,7 @@ class TestResolveMargoResourceFiles:
         license_path = resources_dir / "LICENSE.txt"
         license_path.write_text("MIT License")
 
-        app_yaml = {"licenseFile": "resources/LICENSE.txt"}
+        app_yaml = _descriptor(licenseFile="resources/LICENSE.txt")
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 1
@@ -180,7 +324,7 @@ class TestResolveMargoResourceFiles:
         notes_path = resources_dir / "RELEASE.md"
         notes_path.write_text("# Release Notes")
 
-        app_yaml = {"releaseNotes": "resources/RELEASE.md"}
+        app_yaml = _descriptor(releaseNotes="resources/RELEASE.md")
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 1
@@ -207,6 +351,18 @@ class TestResolveMargoResourceFiles:
         assert files[0].title == "resources/screenshot.png"
         assert missing == []
 
+    def test_unreferenced_resource_is_octet_stream(self, tmp_path: Path) -> None:
+        """A file only present under resources/, and not referenced, is pushed as octet-stream."""
+        margo_dir = tmp_path / "margo"
+        _write_resource(margo_dir, "resources/icon.png", b"\x89PNG")
+
+        files, missing = resolve_margo_resource_files(_descriptor(), margo_dir)
+
+        assert [(f.title, f.media_type) for f in files] == [
+            ("resources/icon.png", MARGO_RESOURCE_FALLBACK_MEDIA_TYPE),
+        ]
+        assert missing == []
+
     def test_referenced_file_not_duplicated_in_scan(self, tmp_path: Path) -> None:
         """A file referenced in app.yaml should not be added again during resources/ scan."""
         margo_dir = tmp_path / "margo"
@@ -217,7 +373,7 @@ class TestResolveMargoResourceFiles:
         icon_path = resources_dir / "icon.png"
         icon_path.write_bytes(b"\x89PNG")
 
-        app_yaml = {"icon": "resources/icon.png"}
+        app_yaml = _descriptor(icon="resources/icon.png")
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         # Should only appear once, with the icon media type, not the fallback
@@ -233,7 +389,7 @@ class TestResolveMargoResourceFiles:
         _write_resource(Path(".dist/1.0.0/margo"), "resources/icon.png", b"\x89PNG")
 
         files, missing = resolve_margo_resource_files(
-            {"icon": "resources/icon.png"},
+            _descriptor(icon="resources/icon.png"),
             Path(".dist/1.0.0/margo"),
         )
 
@@ -248,7 +404,7 @@ class TestResolveMargoResourceFiles:
         link_margo_dir = tmp_path / "link"
         link_margo_dir.symlink_to(real_margo_dir, target_is_directory=True)
 
-        files, missing = resolve_margo_resource_files({"icon": "resources/icon.png"}, link_margo_dir)
+        files, missing = resolve_margo_resource_files(_descriptor(icon="resources/icon.png"), link_margo_dir)
 
         assert [f.media_type for f in files] == ["application/vnd.margo.app.icon.v1+png"]
         assert files[0].title == "resources/icon.png"
@@ -273,13 +429,23 @@ class TestResolveMargoResourceFiles:
         margo_dir.mkdir()
         _write_resource(tmp_path, "outside.png", b"\x89PNG")
 
-        files, missing = resolve_margo_resource_files({"icon": "../outside.png"}, margo_dir)
+        files, missing = resolve_margo_resource_files(_descriptor(icon="../outside.png"), margo_dir)
 
         assert files == []
-        assert missing == ["icon"]
+        assert missing == [("icon", "../outside.png")]
+
+    def test_reference_to_directory_is_missing(self, tmp_path: Path) -> None:
+        """A reference that names a directory rather than a file is reported missing."""
+        margo_dir = tmp_path / "margo"
+        (margo_dir / "resources" / "screens").mkdir(parents=True)
+
+        files, missing = resolve_margo_resource_files(_descriptor(icon="resources/screens"), margo_dir)
+
+        assert files == []
+        assert missing == [("icon", "resources/screens")]
 
     def test_multiple_fields_and_extra_resources(self, tmp_path: Path) -> None:
-        """Multiple app.yaml fields plus extra resources should all resolve."""
+        """Multiple nested fields plus extra resources should all resolve."""
         margo_dir = tmp_path / "margo"
         margo_dir.mkdir()
         resources_dir = margo_dir / "resources"
@@ -292,10 +458,7 @@ class TestResolveMargoResourceFiles:
         screenshot_path = resources_dir / "screenshot.png"
         screenshot_path.write_bytes(b"\x89PNG")
 
-        app_yaml = {
-            "icon": "resources/icon.svg",
-            "licenseFile": "resources/LICENSE",
-        }
+        app_yaml = _descriptor(icon="resources/icon.svg", licenseFile="resources/LICENSE")
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 3
@@ -312,13 +475,33 @@ class TestResolveMargoResourceFiles:
         margo_dir = tmp_path / "margo"
         margo_dir.mkdir()
 
-        app_yaml = {
-            "icon": "",
-            "licenseFile": None,
-        }
+        app_yaml = _descriptor(icon="", licenseFile=None)
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 0
+        assert missing == []
+
+    @mark.parametrize("app_yaml", PARTIAL_SHAPES)
+    def test_partial_or_invalid_shape_does_not_crash(self, tmp_path: Path, app_yaml: Any) -> None:
+        """Partial, None or non-mapping metadata/catalog/application yields no references and no error."""
+        margo_dir = tmp_path / "margo"
+        margo_dir.mkdir()
+
+        files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
+
+        assert files == []
+        assert missing == []
+
+    def test_partial_shape_still_scans_resources(self, tmp_path: Path) -> None:
+        """A descriptor without catalog still pushes files found under resources/ as octet-stream."""
+        margo_dir = tmp_path / "margo"
+        _write_resource(margo_dir, "resources/icon.png", b"\x89PNG")
+
+        files, missing = resolve_margo_resource_files({"metadata": {"catalog": None}}, margo_dir)
+
+        assert [(f.title, f.media_type) for f in files] == [
+            ("resources/icon.png", MARGO_RESOURCE_FALLBACK_MEDIA_TYPE),
+        ]
         assert missing == []
 
     def test_no_resources_dir(self, tmp_path: Path) -> None:
@@ -327,23 +510,27 @@ class TestResolveMargoResourceFiles:
         margo_dir.mkdir()
         # Don't create resources dir
 
-        app_yaml = {"icon": "resources/icon.svg"}
+        app_yaml = _descriptor(icon="resources/icon.svg")
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
         assert len(files) == 0
-        assert missing == ["icon"]
+        assert missing == [("icon", "resources/icon.svg")]
 
     def test_multiple_missing_fields(self, tmp_path: Path) -> None:
-        """Multiple missing referenced files should all be tracked."""
+        """Multiple missing referenced files should all be tracked with their values."""
         margo_dir = tmp_path / "margo"
         margo_dir.mkdir()
 
-        app_yaml = {
-            "icon": "resources/icon.svg",
-            "licenseFile": "resources/LICENSE",
-            "releaseNotes": "resources/RELEASE.md",
-        }
+        app_yaml = _descriptor(
+            icon="resources/icon.svg",
+            licenseFile="resources/LICENSE",
+            releaseNotes="resources/RELEASE.md",
+        )
         files, missing = resolve_margo_resource_files(app_yaml, margo_dir)
 
-        assert len(files) == 0
-        assert set(missing) == {"icon", "licenseFile", "releaseNotes"}
+        assert files == []
+        assert missing == [
+            ("icon", "resources/icon.svg"),
+            ("licenseFile", "resources/LICENSE"),
+            ("releaseNotes", "resources/RELEASE.md"),
+        ]
