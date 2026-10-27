@@ -55,8 +55,8 @@ class TestPackageTypeValidation:
         assert result.exit_code == 2
         assert "invalid" in plain.lower()
 
-    def test_package_bundle_with_margo_exits_1(self, mocker: Any) -> None:
-        """Should exit 1 when --type bundle is combined with --type margo."""
+    def test_package_bundle_with_margo_exits_2(self, mocker: Any) -> None:
+        """Should exit 2 when --type bundle is combined with --type margo."""
         mocker.patch("margot.commands.package.package_service.package")
 
         result = runner.invoke(
@@ -68,8 +68,8 @@ class TestPackageTypeValidation:
         assert result.exit_code == 2
         assert "bundle" in plain.lower()
 
-    def test_package_multiple_types_exits_1(self, mocker: Any) -> None:
-        """Should exit 1 when multiple non-bundle types are specified."""
+    def test_package_multiple_types_exits_2(self, mocker: Any) -> None:
+        """Should exit 2 when multiple non-bundle types are specified."""
         mocker.patch("margot.commands.package.package_service.package")
 
         result = runner.invoke(
