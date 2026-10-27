@@ -77,9 +77,11 @@ The descriptor is always the first layer:
 
 Resource layers are discovered in two steps:
 
-1. **Referenced files** — the `app.yaml` fields `icon`, `descriptionFile`, `licenseFile`, and
-   `releaseNotes` (paths relative to the margo build dir, any extension). Each found file is
-   pushed with a semantically typed media type.
+1. **Referenced files** — the `app.yaml` fields `metadata.catalog.application.icon`,
+   `.descriptionFile`, `.licenseFile`, and `.releaseNotes` (paths relative to the margo build dir,
+   any extension, a leading `./` is ignored). Each found file is pushed with a semantically typed
+   media type. A value that is an `http://` or `https://` URL is not a local file: it is left
+   as-is in the descriptor and nothing is pushed or warned for it.
 2. **Extra files** — any other file under `resources/` (including sub-folders) not already pushed
    in step 1, each with `application/octet-stream`.
 

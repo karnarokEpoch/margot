@@ -26,6 +26,7 @@ Layer media types:
 
 `{format}` is derived from the file extension: `jpg`/`jpeg` → `jpeg`; `tif`/`tiff` → `tiff`;
 `md`/`markdown` → `markdown`; no extension → `bin`; any other extension used as-is.
+The four references are read from `metadata.catalog.application` in `app.yaml`.
 Every resource layer carries `org.margo.app.resource: "true"`. See
 [`margot push` — OCI media types](commands/push.md#oci-media-types) for the full reference.
 

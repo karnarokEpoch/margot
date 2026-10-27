@@ -188,8 +188,10 @@ testable, no I/O) that takes the parsed `app.yaml` dict and the margo build dir,
 returns the list of `(Path, media_type, annotation_title)` entries to push:
 
 1. For each of the four fields (`icon`, `descriptionFile`, `licenseFile`,
-   `releaseNotes`) present and non-empty in `app.yaml`'s top-level/`ApplicationMetadata`
-   block: resolve the path relative to the margo build dir. If it exists, add
+   `releaseNotes`) present and non-empty at **`metadata.catalog.application.<field>`** in
+   `app.yaml` (this is where the Margo spec puts them; there is no top-level fallback), skip
+   `http(s)://` values (remote, not a local file, no warning), otherwise resolve the path
+   relative to the margo build dir. If it exists, add
    `(resolved_path, TEMPLATE.format(ext=real_extension), relative_path_str)`. If it does
    not exist, `console.warning(f"'{field}' references '{value}' but the file was not
    found; skipping.")` — caller (an `infra`-layer function) emits the warning since
