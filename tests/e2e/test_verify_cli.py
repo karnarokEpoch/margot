@@ -219,14 +219,15 @@ class TestVerifyCLI:
         assert not (cli_project / "margo" / "app.yaml").exists()
 
     def test_missing_margo_yaml_exits_3(self, tmp_path: Path, monkeypatch: Any) -> None:
-        """Should exit 3 when margo.yaml is absent."""
+        """Should exit 3 when neither margo.yaml nor app.yaml exists (Sprint 12 fallback)."""
         monkeypatch.chdir(tmp_path)
 
         result = runner.invoke(app, ["verify"])
         plain = _output(result)
 
         assert result.exit_code == 3
-        assert "margo.yaml" in plain
+        # With Sprint 12 fallback, error should mention the searched app.yaml paths
+        assert "Searched: app.yaml, margo/app.yaml" in plain
 
     def test_missing_manifest_exits_3(self, cli_project: Path) -> None:
         """Should exit 3 when --manifest points at a missing file."""
@@ -774,7 +775,6 @@ class TestVerifyDefaultOutputIsUnchanged:
         ]
 
 
-
 class TestVerifySeverityColoring:
     """E2E tests for severity-based coloring of findings."""
 
@@ -796,9 +796,7 @@ class TestVerifySeverityColoring:
 
     def test_finding_lines_do_not_contain_doubled_warning_prefix(self, cli_project: Path) -> None:
         """Should not emit 'warning: ERROR' or 'warning: WARNING' — no doubled prefix."""
-        (cli_project / "margo" / "app.yaml").write_text(
-            VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
-        )
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8")
 
         result = runner.invoke(app, ["verify"])
         output = _output(result)
@@ -810,9 +808,7 @@ class TestVerifySeverityColoring:
 
     def test_error_line_renders_in_red(self, cli_project: Path, force_color: None) -> None:
         """Should render ERROR findings with red color code."""
-        (cli_project / "margo" / "app.yaml").write_text(
-            VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
-        )
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8")
 
         result = runner.invoke(app, ["verify"])
         raw_stderr = result.stderr or ""
@@ -917,9 +913,7 @@ class TestVerdictLineColoring:
     def test_schema_a_fail_verdict_renders_red(self, cli_project: Path, force_color: None) -> None:
         """Should render Schema A FAIL verdict with red outcome."""
         # Use a descriptor missing required field so it fails
-        (cli_project / "margo" / "app.yaml").write_text(
-            VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
-        )
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8")
 
         result = runner.invoke(app, ["verify", "--recommend"])
         raw_stdout = result.stdout or ""
@@ -995,9 +989,7 @@ class TestVerdictLineColoring:
     def test_final_verdict_fail_remains_unchanged(self, cli_project: Path) -> None:
         """Should not change final 'verify: FAIL' line color or stream when printed."""
         # Use a descriptor with Schema A errors so _verdict() fails
-        (cli_project / "margo" / "app.yaml").write_text(
-            VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
-        )
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8")
 
         result = runner.invoke(app, ["verify", "--recommend"])
         plain = _output(result)
@@ -1013,9 +1005,7 @@ class TestVerifyJsonFailures:
 
     def test_json_validation_failure_is_result_on_stdout_only(self, cli_project: Path) -> None:
         """Schema failures should retain the full result object and exit with code 3."""
-        (cli_project / "margo" / "app.yaml").write_text(
-            VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
-        )
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8")
 
         result = runner.invoke(app, ["verify", "--json"])
 
