@@ -1,5 +1,6 @@
 """E2E tests for describe command via CLI."""
 
+import json
 from pathlib import Path
 import re
 import tempfile
@@ -127,6 +128,7 @@ class TestDescribeHelp:
         assert "--project-dir" in plain
         assert "--manifest" in plain
         assert "--section" in plain
+        assert "--json" in plain
 
     def test_describe_is_registered_on_root_help(self) -> None:
         """Should appear in the root command list."""
@@ -138,6 +140,77 @@ class TestDescribeHelp:
 
 class TestDescribeCLI:
     """E2E tests for margot describe."""
+
+    def test_json_uses_default_sections_and_display_data(self, cli_project: Path) -> None:
+        """Should serialize the default sections without Rich panel details."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--json"])
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 0
+        assert list(payload) == ["metadata", "profiles", "config-first"]
+        assert payload["metadata"]["identity"]["id"] == "hello-world"
+        assert payload["metadata"]["catalog"]["application"]["tagline"] == "Simple test application"
+        assert payload["profiles"][0]["components"][0]["name"] == "hello-compose"
+        assert payload["config-first"]["sections"][0]["settings"][0]["immutable"] is False
+        assert "Panel" not in result.stdout
+
+    def test_json_no_color_is_plain_and_pretty(self, cli_project: Path) -> None:
+        """Should emit parser-safe, indented JSON when color is disabled."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["--no-color", "describe", "--json"])
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 0
+        assert payload["metadata"]["identity"]["id"] == "hello-world"
+        assert "\x1b[" not in result.stdout
+        assert '\n  "metadata": {' in result.stdout
+        assert "Panel" not in result.stdout
+
+    def test_json_includes_extensions_when_present(self, cli_project: Path) -> None:
+        """Should include the extension section in the default selection when present."""
+        descriptor = VALID_APP_YAML + """
+x-placeholder-extensions:
+  vendor-acme:
+    enabled: true
+"""
+        (cli_project / "margo" / "app.yaml").write_text(descriptor, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--json"])
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 0
+        assert list(payload) == ["metadata", "profiles", "config-first", "extensions"]
+        assert payload["extensions"] == {"vendor-acme": {"enabled": True}}
+
+    def test_json_honors_section_selection_and_canonical_order(self, cli_project: Path) -> None:
+        """Should serialize requested component and orphan sections in canonical order."""
+        (cli_project / "margo" / "app.yaml").write_text(ORPHAN_FIXTURE_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            ["describe", "--json", "--section", "orphans", "--section", "component-first"],
+        )
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 0
+        assert list(payload) == ["component-first", "orphans"]
+        assert payload["component-first"]["components"][0]["name"] == "comp1"
+        assert "orphan_param" in payload["orphans"]["unreferenced_params"]
+        assert "Orphans" not in result.stdout
+
+    def test_default_output_remains_rich_without_json(self, cli_project: Path) -> None:
+        """Should keep the existing Rich output when --json is absent."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe"])
+        plain = _output(result)
+
+        assert result.exit_code == 0
+        assert "application.margo.org/v1alpha1" in plain
+        assert "Configuration" in plain
 
     def test_describe_valid_descriptor_exits_0(self, cli_project: Path) -> None:
         """Should describe the descriptor and exit 0."""
@@ -157,7 +230,7 @@ class TestDescribeCLI:
         result = runner.invoke(app, ["describe"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "margo.yaml" in plain or "Error" in plain
 
     def test_describe_missing_manifest_exits_1(self, cli_project: Path) -> None:
@@ -165,7 +238,7 @@ class TestDescribeCLI:
         result = runner.invoke(app, ["describe", "--manifest", str(cli_project / "margo" / "absent.yaml")])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Error" in plain or "not found" in plain.lower()
 
     def test_describe_wrong_kind_exits_1(self, cli_project: Path) -> None:
@@ -175,7 +248,7 @@ class TestDescribeCLI:
         result = runner.invoke(app, ["describe"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Error" in plain or "kind" in plain.lower()
         # Should mention running verify
         assert "verify" in plain.lower()
@@ -1480,7 +1553,7 @@ class TestDescribeRemote:
         )
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "mutually exclusive" in plain.lower() or "error" in plain.lower()
 
     def test_describe_remote_uri_mutual_exclusion_with_manifest(self) -> None:
@@ -1491,5 +1564,34 @@ class TestDescribeRemote:
         )
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "mutually exclusive" in plain.lower() or "error" in plain.lower()
+
+
+class TestDescribeJsonFailures:
+    """JSON describe failures must use the same stable error envelope."""
+
+    def test_json_semantic_failure_is_error_envelope_on_stderr(self, cli_project: Path) -> None:
+        """A descriptor rejected by the describe pipeline should exit 3 without Rich prose."""
+        (cli_project / "margo" / "app.yaml").write_text(WRONG_KIND_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["describe", "--json"])
+
+        assert result.exit_code == 3
+        assert result.stdout == ""
+        envelope = json.loads(result.stderr)
+        assert envelope["error"] is True
+        assert envelope["code"] == 3
+        assert "verify" in envelope["message"]
+        assert "[red]" not in result.stderr
+
+    def test_json_mutual_exclusion_is_usage_envelope(self, cli_project: Path) -> None:
+        """Remote/local mode mixing should exit 2 and emit no stdout."""
+        result = runner.invoke(
+            app,
+            ["describe", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--json", "--project-dir", "."],
+        )
+
+        assert result.exit_code == 2
+        assert result.stdout == ""
+        assert json.loads(result.stderr)["code"] == 2

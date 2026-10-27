@@ -151,12 +151,12 @@ class TestBuildCLI:
         built_count = plain.count("Built")
         assert built_count == 1, f"Expected 1 'Built' line for simple variant, got {built_count}"
 
-    def test_build_invalid_type_exits_1(self, cli_project: Path) -> None:
-        """Should exit 1 with error message for invalid --type."""
+    def test_build_invalid_type_exits_2(self, cli_project: Path) -> None:
+        """Should exit 2 with error message for invalid --type."""
         result = runner.invoke(app, ["build", "--type", "invalid"])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "invalid --type" in plain
 
     def test_build_no_margo_yaml_exits_1(self, tmp_path: Path, monkeypatch: Any) -> None:
@@ -165,7 +165,7 @@ class TestBuildCLI:
         result = runner.invoke(app, ["build", "--build-dir", str(tmp_path / ".dist")])
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "margo.yaml" in plain.lower()
 
     def test_build_invalid_semver_exits_1(self, cli_project: Path) -> None:
@@ -176,7 +176,7 @@ class TestBuildCLI:
         )
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         # Should contain a semver validation error
         assert "semver" in plain.lower() or "version" in plain.lower()
 
@@ -201,7 +201,7 @@ class TestBuildCLI:
         )
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "nonexistent" in plain or "variant" in plain.lower()
 
     def test_build_default_build_dir(self, cli_project: Path) -> None:
@@ -293,7 +293,7 @@ class TestBuildAllSkipsMissingE2E:
         )
         plain = _strip_ansi(result.stdout + (result.stderr or ""))
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "invalid version format" in plain
 
 

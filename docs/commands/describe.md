@@ -6,6 +6,7 @@ and tables. Read-only, no schema validation.
 ```text
 margot describe [URI] [--project-dir PATH] [--manifest PATH]
                 [--section metadata|profiles|config-first|component-first|extensions|orphans]
+                [--json]
 ```
 
 Pass a tagged OCI URI to inspect a published artifact directly, without a local project:
@@ -22,6 +23,7 @@ margot describe public.ecr.aws/g2n4p2m7/margo:1.0.0
 | `--project-dir` | `.`                        | Directory holding `margo.yaml`. Local mode only.                        |
 | `--manifest`    | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. Local mode only.          |
 | `--section`     | all default sections       | Filter to one or more sections. Multiple `--section` flags are allowed. |
+| `--json`        | off                        | Print selected sections as one JSON object instead of Rich panels and trees. |
 
 ## Local mode vs remote mode
 
@@ -115,9 +117,55 @@ Four categories of dangling or unreferenced descriptor elements:
 - Dangling component references: a `Parameter.targets[].components` entry naming a component absent from all deployment
     profiles.
 
-These are observations only — `describe` always exits 0. Use [`margot verify`](verify.md) for validation gates.
+These are observations only and do not affect the exit code. Descriptor loading and semantic failures still fail the
+command; use [`margot verify`](verify.md) for the full schema validation gate.
 
 Request with `--section orphans`.
+
+## JSON output
+
+Pass `--json` to replace Rich panels and trees with one JSON object on stdout. The object contains the selected
+sections as keys in canonical order. The default keys are `metadata`, `profiles`, and `config-first`; `extensions`
+is included by default when `x-placeholder-extensions` is present. `component-first` and `orphans` remain opt-in
+through `--section`, just as in Rich mode.
+
+The values reuse the pure display data: `metadata` contains `identity` and `catalog`, `profiles` is a list of
+profile objects, `config-first` and `component-first` use their corresponding display-model structures, and
+`orphans` contains its four report lists. `extensions` contains the descriptor's extension mapping. For example:
+
+```json
+{
+  "metadata": {
+    "identity": {
+      "id": "hello-world",
+      "api_version": "application.margo.org/v1alpha1",
+      "kind": "ApplicationDescription",
+      "name": "Hello World",
+      "version": "1.0.0",
+      "description": null,
+      "oci_uri": null
+    },
+    "catalog": null
+  },
+  "profiles": [],
+  "config-first": {
+    "sections": [],
+    "unreferenced": []
+  }
+}
+```
+
+`--section` may be repeated with `--json`; requested sections are still emitted in canonical order.
+
+When descriptor loading or semantic interpretation fails with `--json`, no Rich panels or prose are emitted. The
+command writes an error envelope to stderr and exits with the stable category code:
+
+```json
+{"error": true, "code": 3, "message": "..."}
+```
+
+The envelope uses code `2` for URI/local option conflicts, `3` for descriptor or semantic failures, `4` for remote
+or authentication failures, and `1` for unexpected failures. Successful JSON output is written to stdout.
 
 ## Rendering notes
 
@@ -133,12 +181,15 @@ upstream spec, and the spec's property set is still in flux.
 
 ## Exit codes
 
-| Code | Meaning                                                                                                                                                                   |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Always, even when orphans are found.                                                                                                                                      |
-| 1    | Descriptor cannot be loaded: missing, both `app.yaml` and `app.yaml.jinja` present, unresolved Jinja2 variable, unparseable YAML, or `kind` not `ApplicationDescription`. |
+| Code | Meaning                                                                                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Descriptor loaded and rendered/serialized successfully. Orphan observations do not affect this code.                                                   |
+| 1    | Unexpected or uncategorized failure.                                                                                                                    |
+| 2    | Usage failure, such as combining a remote URI with `--project-dir` or `--manifest`.                                                                    |
+| 3    | Descriptor loading or semantic failure: missing descriptor, both descriptor forms present, unresolved template, invalid YAML, or wrong `kind`.          |
+| 4    | Remote registry or authentication failure.                                                                                                               |
 
-On exit 1, the error message points at `margot verify`.
+On a descriptor failure, the error message points at `margot verify`.
 
 ## Example
 

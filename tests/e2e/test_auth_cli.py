@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from oras.auth import AuthenticationException
 from typer.testing import CliRunner
 
 from margot.domain.auth import AuthStatusResult, TrackedRegistryStatus
@@ -52,26 +53,26 @@ class TestAuthCLI:
         )
         assert "Logged in to public.ecr.aws" in result.stdout
 
-    def test_auth_login_without_password_stdin_exits_1(self) -> None:
-        """Should exit 1 with error about password required."""
+    def test_auth_login_without_password_stdin_exits_2(self) -> None:
+        """Should exit 2 with error about password required."""
         result = runner.invoke(
             app,
             ["auth", "login", "public.ecr.aws", "--username", "AWS"],
         )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         output = result.stdout + (result.stderr or "")
         assert "Password required" in output
 
-    def test_auth_login_without_username_exits_1(self) -> None:
-        """Should exit 1 with error about username required."""
+    def test_auth_login_without_username_exits_2(self) -> None:
+        """Should exit 2 with error about username required."""
         result = runner.invoke(
             app,
             ["auth", "login", "public.ecr.aws", "--password-stdin"],
             input="mytoken\n",
         )
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         output = result.stdout + (result.stderr or "")
         assert "Username required" in output
 
@@ -131,6 +132,22 @@ class TestAuthCLI:
         assert result.exit_code == 1
         output = result.stdout + (result.stderr or "")
         assert "Login failed" in output
+
+    def test_auth_login_authentication_failure_exits_4(self, mocker: Any) -> None:
+        """Should exit 4 for a concrete registry authentication failure."""
+        mocker.patch(
+            "margot.commands.auth.auth_service.login",
+            side_effect=AuthenticationException("401 Unauthorized"),
+        )
+
+        result = runner.invoke(
+            app,
+            ["auth", "login", "public.ecr.aws", "--username", "AWS", "--password-stdin"],
+            input="mytoken\n",
+        )
+
+        assert result.exit_code == 4
+        assert "Login failed" in result.stdout + (result.stderr or "")
 
     def test_auth_login_displays_expiry_when_detected(self, mocker: Any) -> None:
         """Should display time-until-expiry line when service returns an expiry datetime."""

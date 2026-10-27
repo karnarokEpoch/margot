@@ -2,10 +2,14 @@
 
 from typing import Annotated
 
+from oras.auth import AuthenticationException
+from requests.exceptions import RequestException
 from typer import Option
 
 from margot import console
 from margot.domain.models import BuildTarget, PackageType
+from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.oci import OciRegistryError
 from margot.services import push as push_service
 
 
@@ -17,7 +21,7 @@ def _resolve_types(types: list[str] | None) -> tuple[list[str], bool]:
     valid_types = ("margo", "compose", "quadlet", "all")
     for t in types:
         if t not in valid_types:
-            console.fatal(f"invalid --type '{t}'. Must be one of: margo, compose, quadlet, all")
+            console.fatal(f"invalid --type '{t}'. Must be one of: margo, compose, quadlet, all", code=2)
 
     if "all" in types:
         return ["margo", "compose", "quadlet"], True
@@ -112,9 +116,9 @@ def push_cmd(  # noqa: PLR0913
         else:
             console.warning("Nothing was pushed.")
 
-    except PermissionError as e:
-        console.fatal(str(e))
+    except (AuthenticationException, CredentialsExpiredError, OciRegistryError, PermissionError, RequestException) as e:
+        console.fatal(str(e), code=4)
     except ValueError as e:
-        console.fatal(str(e))
+        console.fatal(str(e), code=3)
     except Exception as e:  # noqa: BLE001
-        console.fatal(f"Push failed: {e}")
+        console.fatal(f"Push failed: {e}", code=1)
