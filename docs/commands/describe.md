@@ -49,7 +49,10 @@ Passing both is rejected before any I/O:
 3. Accepts any existing OCI tag — no SemVer requirement for read-only inspection.
 4. Pulls the artifact into a temporary directory (`recursive=False` — component artifacts are not recursively
     downloaded). The pull is non-persistent; nothing is written to your project directory.
-5. Passes the pulled `app.yaml` through the same local descriptor pipeline: YAML parsing, `kind` gate,
+    The descriptor layer is located by `mediaType == application/vnd.margo.app.description.v1+yaml`
+    — not by filename. If multiple layers share that media type, a warning lists them and the first
+    (manifest order) is used.
+5. Passes the pulled descriptor through the same local descriptor pipeline: YAML parsing, `kind` gate,
     configuration joins, orphan observations, and rich rendering.
 6. Removes the temporary directory after rendering, including on error.
 
@@ -60,9 +63,23 @@ The identity panel identifies the remote source:
 
 ## Descriptor resolution (local mode)
 
-Identical to [`margot verify`](verify.md): `--manifest` if given, otherwise `margo.yaml`
-`directory` → `app.yaml.jinja` (rendered to a temp file) or `app.yaml`. Never reads
-`<build_dir>`, never requires a prior `build`.
+1. `--manifest` if given — may point at `app.yaml` or `app.yaml.jinja`.
+2. Otherwise, if `margo.yaml` is present in `--project-dir`: its `directory` field is
+   searched for `app.yaml.jinja` (rendered to a temp file) or `app.yaml`. Never reads
+   `<build_dir>`, never requires a prior `build`.
+3. Otherwise (no `margo.yaml`): fallback search for a static `app.yaml`, directory by directory,
+   `<project-dir>` first, then `<project-dir>/margo`. In each directory, `app.yaml` is used if
+   present; otherwise an `app.yaml.jinja` there is an error and the search stops (it does not
+   continue to the next directory, so a root `app.yaml.jinja` fails even if `margo/app.yaml`
+   exists). No project context is available in this mode — same as `--manifest`.
+   - A `.jinja` file at a candidate location (without `margo.yaml`) fails with exit 3:
+     `Found <path> but no margo.yaml is present. Jinja2 templates require margo.yaml
+     context for rendering — either provide a static app.yaml or add margo.yaml to the directory.`
+   - Neither location has an `app.yaml` (exit 3):
+     `No app.yaml found. Searched: <both paths>`
+
+This fallback makes it possible to run `describe` directly on a directory produced by
+`margot pull`, with no `margo.yaml` required.
 
 ## Sections rendered
 
@@ -186,7 +203,7 @@ upstream spec, and the spec's property set is still in flux.
 | 0    | Descriptor loaded and rendered/serialized successfully. Orphan observations do not affect this code.                                                   |
 | 1    | Unexpected or uncategorized failure.                                                                                                                    |
 | 2    | Usage failure, such as combining a remote URI with `--project-dir` or `--manifest`.                                                                    |
-| 3    | Descriptor loading or semantic failure: missing descriptor, both descriptor forms present, unresolved template, invalid YAML, or wrong `kind`.          |
+| 3    | Descriptor loading or semantic failure: missing descriptor, both descriptor forms present, Jinja2 template found without `margo.yaml`, unresolved template, invalid YAML, or wrong `kind`. |
 | 4    | Remote registry or authentication failure.                                                                                                               |
 
 On a descriptor failure, the error message points at `margot verify`.
@@ -199,6 +216,10 @@ margot describe
 
 # Inspect a published artifact from a registry
 margot describe public.ecr.aws/g2n4p2m7/margo:1.0.0
+
+# Pull an artifact, then inspect locally — no margo.yaml required
+margot pull public.ecr.aws/g2n4p2m7/margo:1.0.0 --output ./out
+margot describe --project-dir ./out
 
 # Remote mode respects all --section filters and ordering
 margot describe public.ecr.aws/g2n4p2m7/margo:1.0.0 --section metadata --section profiles

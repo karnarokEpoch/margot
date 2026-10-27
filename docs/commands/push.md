@@ -65,15 +65,71 @@ Pushed (simple): public.ecr.aws/g2n4p2m7/margo:1.0.0_compose-simple
 
 ### margo artifact
 
-| Layer                        | Media type                                              |
-| ---------------------------- | ------------------------------------------------------- |
-| `app.yaml`                   | `application/vnd.margo.app.description.v1+yaml`         |
-| `resources/icon.png`         | `application/vnd.margo.app.icon.v1+png`                 |
-| `resources/license.txt`      | `application/vnd.margo.app.license.v1+plain`            |
-| `resources/release-notes.md` | `application/vnd.margo.app.releaseNotes.v1+markdown`    |
-| `resources/description.md`   | `application/vnd.margo.app.descriptionFile.v1+markdown` |
-
 Manifest `artifactType`: `application/vnd.margo.app.v1+json`
+
+The descriptor is always the first layer:
+
+| Layer      | Media type                                      |
+| ---------- | ----------------------------------------------- |
+| `app.yaml` | `application/vnd.margo.app.description.v1+yaml` |
+
+#### Resource file discovery
+
+Resource layers are discovered in two steps:
+
+1. **Referenced files** — the `app.yaml` fields `icon`, `descriptionFile`, `licenseFile`, and
+   `releaseNotes` (paths relative to the margo build dir, any extension). Each found file is
+   pushed with a semantically typed media type.
+2. **Extra files** — any other file under `resources/` (including sub-folders) not already pushed
+   in step 1, each with `application/octet-stream`.
+
+A referenced file is pushed exactly once. If a field is set but the file is missing from the
+build output, margot emits a warning to stderr and continues — the push is not blocked:
+
+```text
+'icon' references 'resources/icon.svg' but the file was not found; skipping.
+```
+
+#### Media types for referenced files
+
+| `app.yaml` field  | Media type template                                      |
+| ----------------- | -------------------------------------------------------- |
+| `icon`            | `application/vnd.margo.app.icon.v1+{format}`            |
+| `descriptionFile` | `application/vnd.margo.app.descriptionFile.v1+{format}` |
+| `licenseFile`     | `application/vnd.margo.app.licenseFile.v1+{format}`     |
+| `releaseNotes`    | `application/vnd.margo.app.releaseNotes.v1+{format}`    |
+
+#### `{format}` token
+
+Derived from the file extension, following the Margo spec
+([Application Registry](https://docs.margo.org/specification/applications/application-registry)):
+
+| Extension(s)        | Token                               |
+| ------------------- | ----------------------------------- |
+| `jpg`, `jpeg`       | `jpeg`                              |
+| `tif`, `tiff`       | `tiff`                              |
+| `md`, `markdown`    | `markdown`                          |
+| any other extension | lowercased as-is (`svg`, `png`, …)  |
+| (no extension)      | `bin`                               |
+
+Examples:
+
+| File                         | Field           | Media type                                             |
+| ---------------------------- | --------------- | ------------------------------------------------------ |
+| `resources/icon.svg`         | `icon`          | `application/vnd.margo.app.icon.v1+svg`               |
+| `resources/photo.JPG`        | `icon`          | `application/vnd.margo.app.icon.v1+jpeg`              |
+| `resources/release-notes.md` | `releaseNotes`  | `application/vnd.margo.app.releaseNotes.v1+markdown`  |
+| `resources/license.txt`      | `licenseFile`   | `application/vnd.margo.app.licenseFile.v1+txt`        |
+
+#### Layer annotations
+
+Every resource layer (referenced and extra) carries both annotations.
+The descriptor layer (`app.yaml`) does not carry `org.margo.app.resource`.
+
+| Annotation                       | Value                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------- |
+| `org.opencontainers.image.title` | path relative to the margo build dir, e.g. `resources/screenshots/a.png` |
+| `org.margo.app.resource`         | `"true"`                                                                  |
 
 ### compose / quadlet artifact
 

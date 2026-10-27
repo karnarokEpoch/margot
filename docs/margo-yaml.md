@@ -1,15 +1,13 @@
 # margo.yaml
 
 `margo.yaml` is the project descriptor file for a Margo application.
-It ancors the project root.
+It anchors the project root.
 
-If `margo.yaml` is absent from the current directory, margot fails with:
-
-```text
-margo.yaml not found in current directory. Create it manually.
-```
-
-Use `--project-dir` to point at a different directory.
+`build` and `push` require `margo.yaml` to be present in the project directory.
+`describe` and `verify` fall back silently when `margo.yaml` is absent — they search for
+`app.yaml` at `<project-dir>/app.yaml` and `<project-dir>/margo/app.yaml`. This makes it
+possible to run them directly on a directory produced by `margot pull`. Use `--project-dir`
+to point at a different directory.
 
 ## Example
 
