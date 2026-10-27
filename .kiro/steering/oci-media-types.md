@@ -40,20 +40,37 @@ description: >
 |---|---|
 | `application/vnd.margo.app.v1+json` | `artifactType` for Margo app artifacts |
 | `application/vnd.margo.app.description.v1+yaml` | Layer: `app.yaml` application descriptor. Descriptor-layer lookup (remote `describe`/`verify`, `pull --recursive`) matches this `mediaType`, never the layer filename |
-| `application/vnd.margo.app.icon.v1+{ext}` | Layer: file referenced by the `icon` field |
-| `application/vnd.margo.app.license.v1+{ext}` | Layer: file referenced by the `licenseFile` field |
-| `application/vnd.margo.app.releaseNotes.v1+{ext}` | Layer: file referenced by the `releaseNotes` field |
-| `application/vnd.margo.app.descriptionFile.v1+{ext}` | Layer: file referenced by the `descriptionFile` field |
+| `application/vnd.margo.app.icon.v1+{format}` | Layer: file referenced by the `icon` field |
+| `application/vnd.margo.app.licenseFile.v1+{format}` | Layer: file referenced by the `licenseFile` field (spec name is `licenseFile`, not `license`) |
+| `application/vnd.margo.app.releaseNotes.v1+{format}` | Layer: file referenced by the `releaseNotes` field |
+| `application/vnd.margo.app.descriptionFile.v1+{format}` | Layer: file referenced by the `descriptionFile` field |
 | `application/octet-stream` | Layer: any other file under `resources/` not referenced by one of the four fields above |
 
 Templated types are built from the constants in `src/margot/domain/layers.py`
-(`MARGO_*_MEDIA_TYPE_TEMPLATE`, `MARGO_RESOURCE_FALLBACK_MEDIA_TYPE`):
+(`MARGO_*_MEDIA_TYPE_TEMPLATE`, `MARGO_RESOURCE_FALLBACK_MEDIA_TYPE`). `{format}` is the
+spec's `{file format}` token, derived from the file's extension (lowercased, no dot) through
+an explicit table:
 
-- `{ext}` is the referenced file's extension, lowercased, without the dot (`icon.SVG` →
-  `application/vnd.margo.app.icon.v1+svg`). There is no allow-list; any extension passes through.
-- A file with no extension uses `bin` (`…icon.v1+bin`).
-- Each resource layer carries an `org.opencontainers.image.title` annotation holding its path
-  relative to the margo build directory (e.g. `resources/icon.svg`).
+| Extension | `{format}` |
+|---|---|
+| `jpg`, `jpeg` | `jpeg` |
+| `tif`, `tiff` | `tiff` |
+| `md`, `markdown` | `markdown` |
+| any other (`png`, `svg`, `txt`, `bmp`, …) | the extension itself (`icon.SVG` → `…icon.v1+svg`, `license.txt` → `…licenseFile.v1+txt`) |
+| none | `bin` |
+
+Do not use the `mimetypes` module for this; it depends on host files and yields values such as
+`svg+xml`. Source: [Margo Application Registry
+spec](https://docs.margo.org/specification/applications/application-registry).
+
+Resource layer annotations:
+
+- `org.opencontainers.image.title` — path relative to the margo build directory, sub-folders
+  included (e.g. `resources/screenshots/a.png`).
+- `org.margo.app.resource` = `"true"` — required by the Margo spec on every layer that
+  references an application resource (referenced files and generic extras). Not set on the
+  descriptor, compose or quadlet layers. The spec does not define the value; margot uses
+  `"true"`.
 - Use the `MARGO_*` constants in code and tests; do not retype these strings.
 
 ## Notes
