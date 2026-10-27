@@ -2,10 +2,14 @@
 
 from typing import Annotated
 
+from oras.auth import AuthenticationException
+from requests.exceptions import RequestException
 from typer import Argument, Option
 
 from margot import console
 from margot.domain.models import PackageType
+from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.oci import OciRegistryError
 from margot.services import pull as pull_service
 
 _VALID_FORCE_TYPES = ("margo", "compose", "quadlet")
@@ -36,7 +40,7 @@ def pull(
 
     if force_type is not None:
         if force_type not in _VALID_FORCE_TYPES:
-            console.fatal(f"invalid --force-type '{force_type}'. Must be one of: {', '.join(_VALID_FORCE_TYPES)}")
+            console.fatal(f"invalid --force-type '{force_type}'. Must be one of: {', '.join(_VALID_FORCE_TYPES)}", code=2)
         resolved_force_type = PackageType(force_type)
 
     if resolved_force_type is not None and not force:
@@ -57,7 +61,9 @@ def pull(
             console.success(f"Pulled: {path}")
         if not paths:
             console.warning("No layers pulled.")
+    except (AuthenticationException, CredentialsExpiredError, OciRegistryError, PermissionError, RequestException) as e:
+        console.fatal(str(e), code=4)
     except ValueError as e:
-        console.fatal(str(e))
+        console.fatal(str(e), code=3)
     except Exception as e:  # noqa: BLE001
-        console.fatal(f"Error pulling artifact: {e}")
+        console.fatal(f"Error pulling artifact: {e}", code=1)

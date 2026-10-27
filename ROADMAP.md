@@ -13,15 +13,6 @@ The authority model:
 
 ## Planned Sprints
 
-### Sprint 10 — `--json` output and stable error codes
-
-Makes margot's output and failure modes machine-consumable for scripts/agents: `--json`
-on `describe` and `verify` (their display/result dataclasses already have zero `rich`
-coupling), a stable, closed exit-code taxonomy replacing today's single `Exit(1)`
-catch-all across 22 call sites, a structured `--json` error envelope on stderr, and
-explicit `--no-color`/`NO_COLOR` support. No change to default rich rendering. Full plan
-at [`.kiro/sprints/sprint-10.md`](.kiro/sprints/sprint-10.md).
-
 ### Sprint 11 — Margo resource media types driven by `app.yaml`
 
 Fixes two correctness bugs found in manual testing: `margot push` dropping any resource
@@ -144,3 +135,4 @@ Unordered within groups; sequencing decided at sprint planning.
 | Sprint 7 | `margot describe` — read-only visual view of the Margo application description with rich panels and trees organizing the raw descriptor for human review. Identity+catalog panel with apiVersion title, deployment profiles with per-profile components and properties, and configuration-first join tree (section → setting → schema/parameter → pointer → components). Renders `type` verbatim (supports `quadlet` ahead of upstream spec), shows per-pointer component ratios against deduplicated component index, unreferenced-parameters subtree, scalar values in literal form (quoted strings, bare numbers, empty string as `""`, absent as `—`). No validation, no `linkml` import, exit 0 always except unloadable descriptor (exit 1). | [0.7.0](https://github.com/karnarokEpoch/margot/releases/tag/0.7.0) |
 | Sprint 8 | `describe` component-first view (`--section component-first`, mirroring Sprint 7's section-first walk) and `--section config` renamed to `--section config-first` (no alias); read-only orphan/dead-end detection (`--section orphans`: unreferenced parameters, unresolved schema references, unused schemas, dangling component pointers); documented shell completion setup (`README.md`, `docs/index.md`). No validation exit paths added — stays inside `describe`'s existing read-only contract. | [0.8.0](https://github.com/karnarokEpoch/margot/releases/tag/0.8.0) |
 | Sprint 9 | Remote OCI inspection for `describe` and `verify` (optional positional URI, shared fetch/pull path); `margot package` offline bundle command with OCI image inclusion (`--no-images`, `--runtime`, `--platform`); Docker Hub normalization (`docker.io` → `registry-1.docker.io`, `library/` prefix for official images); attestation manifest filtering for multi-arch indexes. | [0.9.0](https://github.com/karnarokEpoch/margot/releases/tag/0.9.0) |
+| Sprint 10 | `--json` output for `describe` and `verify`, stable exit-code taxonomy, structured JSON error envelopes, and explicit `--no-color` / `NO_COLOR` controls; default Rich rendering preserved. | [0.10.0](https://github.com/karnarokEpoch/margot/releases/tag/0.10.0) |

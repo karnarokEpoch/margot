@@ -5,8 +5,11 @@ domain model are passed through Text objects, never interpolated into markup str
 All descriptor-derived values are escaped before rendering.
 """
 
+from dataclasses import asdict, replace
 from typing import Annotated, Any
 
+from oras.auth import AuthenticationException
+from requests.exceptions import RequestException
 from rich.console import Group
 from rich.markup import escape
 from rich.panel import Panel
@@ -34,6 +37,8 @@ from margot.domain.describe import (
     build_orphan_report,
     component_index,
 )
+from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.oci import OciRegistryError
 from margot.services import describe as describe_service
 from margot.services import remote as remote_service
 
@@ -612,6 +617,41 @@ def build_orphans_panel(orphan_report: OrphanReport) -> Panel:  # noqa: PLR0912,
     return Panel(Group(*interleaved), title=title)
 
 
+def _serialize_sections(  # noqa: PLR0913
+    sections: list[str],
+    identity: Identity,
+    catalog: Catalog | None,
+    profiles: list[DeploymentProfile],
+    index: list[str],
+    config: Configuration,
+    descriptor_dict: dict,
+    is_remote: bool = False,
+    remote_uri: str | None = None,
+) -> dict[str, object]:
+    """Serialize selected display data without exposing Rich rendering details."""
+    if is_remote and remote_uri:
+        identity = replace(identity, oci_uri=remote_uri)
+
+    serialized: dict[str, object] = {}
+    for section_name in sections:
+        if section_name == "metadata":
+            serialized[section_name] = {
+                "identity": asdict(identity),
+                "catalog": asdict(catalog) if catalog is not None else None,
+            }
+        elif section_name == "profiles":
+            serialized[section_name] = [asdict(profile) for profile in profiles]
+        elif section_name == "config-first":
+            serialized[section_name] = asdict(config)
+        elif section_name == "component-first":
+            serialized[section_name] = asdict(build_component_first(config, index))
+        elif section_name == "extensions":
+            serialized[section_name] = descriptor_dict.get("x-placeholder-extensions") or {}
+        elif section_name == "orphans":
+            serialized[section_name] = asdict(build_orphan_report(config, index, descriptor_dict))
+    return serialized
+
+
 def _render_section(  # noqa: PLR0913
     section_name: str,
     identity: Identity,
@@ -672,6 +712,7 @@ def describe_cmd(
             "(metadata|profiles|config-first|component-first|extensions|orphans). Repeatable.",
         ),
     ] = None,
+    json: bool = Option(False, "--json", help="Print the selected sections as JSON."),
 ) -> None:
     """Describe a Margo application description in rich, structured output.
 
@@ -681,11 +722,14 @@ def describe_cmd(
     Provide either a remote OCI reference as the first argument, or describe a local project
     via --project-dir or --manifest. They are mutually exclusive.
     """
+    console.set_json(json)
+
     # Mutual exclusion: URI vs local-mode flags
     if uri is not None and (project_dir is not None or manifest is not None):
         console.fatal(
             "URI and --project-dir/--manifest are mutually exclusive "
-            "— describe or verify either a remote artifact or a local project, not both."
+            "— describe or verify either a remote artifact or a local project, not both.",
+            code=2,
         )
 
     try:
@@ -714,8 +758,12 @@ def describe_cmd(
             rendered = loaded.rendered
             source_metadata = None  # Local mode uses default behavior
             is_remote = False
+    except (AuthenticationException, CredentialsExpiredError, OciRegistryError, PermissionError, RequestException) as e:
+        console.fatal(str(e), code=4 if uri is not None else 1)
     except (ValueError, TypeError) as e:
-        console.fatal(f"{e!s} Run 'margot verify' to debug.")
+        console.fatal(f"{e!s} Run 'margot verify' to debug.", code=3)
+    except Exception as e:  # noqa: BLE001
+        console.fatal(f"Describe failed: {e}", code=1)
 
     # Build display model from dict, threading meta into build_identity for OCI URI
     identity = build_identity(descriptor_dict, meta)
@@ -735,6 +783,22 @@ def describe_cmd(
     # Canonical order, regardless of flag order
     canonical_order = ["metadata", "profiles", "config-first", "component-first", "extensions", "orphans"]
     sections_to_render = [s for s in canonical_order if s in requested_sections]
+
+    if json:
+        console.print_json(
+            _serialize_sections(
+                sections_to_render,
+                identity,
+                catalog,
+                profiles,
+                index,
+                config,
+                descriptor_dict,
+                is_remote,
+                source_metadata,
+            )
+        )
+        return
 
     # Render sections
     for section_name in sections_to_render:

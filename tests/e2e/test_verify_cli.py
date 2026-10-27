@@ -1,5 +1,6 @@
 """E2E tests for verify command via CLI."""
 
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -131,6 +132,7 @@ class TestVerifyHelp:
         assert "--schema" in plain
         assert "--recommend" in plain
         assert "--recommended-schema" in plain
+        assert "--json" in plain
 
     def test_verify_help_lists_the_schema_b_gate_flags(self) -> None:
         """Should advertise --strict and --only-recommend: Schema B can gate a run now."""
@@ -151,6 +153,37 @@ class TestVerifyHelp:
 class TestVerifyCLI:
     """E2E tests for margot verify."""
 
+    def test_json_serializes_the_verify_result(self, cli_project: Path) -> None:
+        """Should emit only the existing VerifyResult fields as parseable JSON."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--json"])
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 0
+        assert payload == {
+            "passed": True,
+            "schema_a_version": "45f4359d129c1f04532d17b358d6f50eaa3ca62f",
+            "schema_a_results": [],
+            "schema_b_results": [],
+        }
+        assert "Schema A" not in result.stdout
+
+    def test_json_serializes_severity_and_preserves_validation_status(self, cli_project: Path) -> None:
+        """Should emit enum severities as strings and retain a failing exit status."""
+        descriptor = VALID_APP_YAML.replace("  version: 1.0.0\n", "")
+        (cli_project / "margo" / "app.yaml").write_text(descriptor, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--json"])
+        payload = json.loads(result.stdout)
+
+        assert result.exit_code == 3
+        assert payload["passed"] is False
+        assert payload["schema_b_results"] == []
+        assert payload["schema_a_results"]
+        assert all(finding["severity"] in {"ERROR", "WARNING", "INFO"} for finding in payload["schema_a_results"])
+        assert "Schema A" not in result.stdout
+
     def test_valid_descriptor_exits_0(self, cli_project: Path) -> None:
         """Should pass and print the draft-spec commit line."""
         (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
@@ -169,7 +202,7 @@ class TestVerifyCLI:
         result = runner.invoke(app, ["verify"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Validated against Margo spec (draft, commit 45f4359)" in plain
         assert "FAIL" in plain
         assert "'version' is a required property" in plain
@@ -192,7 +225,7 @@ class TestVerifyCLI:
         result = runner.invoke(app, ["verify"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "margo.yaml" in plain
 
     def test_missing_manifest_exits_1(self, cli_project: Path) -> None:
@@ -200,7 +233,7 @@ class TestVerifyCLI:
         result = runner.invoke(app, ["verify", "--manifest", str(cli_project / "margo" / "absent.yaml")])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Application description not found" in plain
 
     def test_no_descriptor_exits_1(self, cli_project: Path) -> None:
@@ -208,7 +241,7 @@ class TestVerifyCLI:
         result = runner.invoke(app, ["verify"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "No app.yaml or app.yaml.jinja found" in plain
 
     def test_both_descriptor_forms_exits_1(self, cli_project: Path) -> None:
@@ -219,7 +252,7 @@ class TestVerifyCLI:
         result = runner.invoke(app, ["verify"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Both app.yaml.jinja and app.yaml found" in plain
 
     def test_unresolved_placeholder_exits_1(self, cli_project: Path) -> None:
@@ -231,7 +264,7 @@ class TestVerifyCLI:
         result = runner.invoke(app, ["verify"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Unresolved Jinja2 variable in app.yaml.jinja" in plain
 
     def test_malformed_descriptor_exits_1(self, cli_project: Path) -> None:
@@ -241,7 +274,7 @@ class TestVerifyCLI:
         result = runner.invoke(app, ["verify"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "is not valid YAML" in plain
 
     def test_explicit_manifest_and_project_dir(self, tmp_path: Path, monkeypatch: Any) -> None:
@@ -276,7 +309,7 @@ class TestVerifyCLI:
         result = runner.invoke(app, ["verify"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "[a-z0-9-]" in plain
 
 
@@ -432,7 +465,7 @@ class TestVerifyRecommend:
         result = runner.invoke(app, ["verify", "--recommend"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert SCHEMA_A_SECTION in plain
         assert SCHEMA_B_SECTION in plain
         assert f"Schema B (recommended): 1 error — {ADVISORY_NOTE}" in plain
@@ -444,7 +477,7 @@ class TestVerifyRecommend:
         result = runner.invoke(app, ["verify", "--recommend"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert SCHEMA_A_SECTION in plain
         assert SCHEMA_B_SECTION in plain
         assert "verify: FAIL" in plain
@@ -504,7 +537,7 @@ class TestVerifyStrict:
         result = runner.invoke(app, ["verify", "--strict"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert STRICT_WITHOUT_SCHEMA_B_WARNING in plain
         assert "Schema A (Margo spec): FAIL" in plain
 
@@ -515,7 +548,7 @@ class TestVerifyStrict:
         result = runner.invoke(app, ["verify", "--recommend", "--strict"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "Schema A (Margo spec): PASS" in plain
         assert "is recommended" in plain
         assert "verify: FAIL" in plain
@@ -538,7 +571,7 @@ class TestVerifyStrict:
         result = runner.invoke(app, ["verify", "--recommend", "--strict"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "should be non-empty" in plain
         assert "verify: FAIL" in plain
 
@@ -609,7 +642,7 @@ class TestVerifyOnlyRecommend:
         result = runner.invoke(app, ["verify", "--only-recommend", "--strict"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert ADVISORY_NOTE not in plain
         assert "Schema B (recommended): FAIL" in plain
         assert "verify: FAIL" in plain
@@ -643,7 +676,7 @@ class TestVerifyOnlyRecommend:
         result = runner.invoke(app, ["verify", "--recommend", "--only-recommend"])
         plain = _output(result)
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2
         assert "--recommend and --only-recommend are mutually exclusive" in plain
         assert "PASS" not in plain
 
@@ -732,7 +765,7 @@ class TestVerifyDefaultOutputIsUnchanged:
 
         result = runner.invoke(app, ["verify"])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert _lines(result) == [
             "Validated against Margo spec (draft, commit 45f4359)",
             "Error: ERROR /metadata: 'version' is a required property",
@@ -830,7 +863,7 @@ classes:
         assert "array" in plain or "pattern" in plain
         # Most importantly: the line should not vanish silently (which would happen if not escaped)
         assert plain  # output is not empty
-        assert result.exit_code == 1
+        assert result.exit_code == 3
 
 
 class TestVerifySectionColoring:
@@ -971,4 +1004,70 @@ class TestVerdictLineColoring:
         # Final verdict should be present and fail (with Error: prefix on stderr)
         # The plain output combines stdout and stderr
         assert "verify: FAIL" in plain or "Error:" in plain
-        assert result.exit_code == 1
+        assert result.exit_code == 3
+
+
+class TestVerifyJsonFailures:
+    """JSON failure output must be machine-readable and stream-safe."""
+
+    def test_json_validation_failure_is_result_on_stdout_only(self, cli_project: Path) -> None:
+        """Schema failures should retain the full result object and exit with code 3."""
+        (cli_project / "margo" / "app.yaml").write_text(
+            VALID_APP_YAML.replace("  version: 1.0.0\n", ""), encoding="utf-8"
+        )
+
+        result = runner.invoke(app, ["verify", "--json"])
+
+        assert result.exit_code == 3
+        assert json.loads(result.stdout)["passed"] is False
+        assert result.stderr == ""
+
+    def test_json_descriptor_failure_is_error_envelope_on_stderr(self, cli_project: Path) -> None:
+        """Descriptor resolution failures should not mix prose with the JSON envelope."""
+        result = runner.invoke(app, ["verify", "--json"])
+
+        assert result.exit_code == 3
+        assert result.stdout == ""
+        assert json.loads(result.stderr) == {
+            "error": True,
+            "code": 3,
+            "message": "No app.yaml or app.yaml.jinja found in margo source directory.",
+        }
+
+    def test_json_usage_failure_is_error_envelope_on_stderr(self, cli_project: Path) -> None:
+        """Mutually exclusive validation flags should use the usage code and envelope."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["verify", "--json", "--recommend", "--only-recommend"])
+
+        assert result.exit_code == 2
+        assert result.stdout == ""
+        envelope = json.loads(result.stderr)
+        assert envelope["error"] is True
+        assert envelope["code"] == 2
+        assert "mutually exclusive" in envelope["message"]
+
+
+class TestVerifyGlobalOutputControls:
+    """E2E coverage for global color controls alongside command execution."""
+
+    def test_no_color_flag_disables_color_for_command(self, cli_project: Path) -> None:
+        """The global flag should be accepted before a subcommand and disable Rich color."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+
+        result = runner.invoke(app, ["--no-color", "verify"])
+
+        assert result.exit_code == 0
+        assert "\x1b[" not in result.stdout
+        assert "\x1b[" not in (result.stderr or "")
+
+    def test_no_color_environment_uses_presence_not_value(self, cli_project: Path, monkeypatch: Any) -> None:
+        """An empty NO_COLOR variable should disable color for the whole invocation."""
+        (cli_project / "margo" / "app.yaml").write_text(VALID_APP_YAML, encoding="utf-8")
+        monkeypatch.setenv("NO_COLOR", "")
+
+        result = runner.invoke(app, ["verify"])
+
+        assert result.exit_code == 0
+        assert "\x1b[" not in result.stdout
+        assert "\x1b[" not in (result.stderr or "")
