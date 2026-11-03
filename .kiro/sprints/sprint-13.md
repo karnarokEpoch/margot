@@ -869,15 +869,90 @@ names and SHA-256 sums match the snapshot taken before the work.
 
 ### Step 3 — final checks
 
-- [ ] Tests first, then the pure helpers (search-path listing, collision detection over path
+- [x] Tests first, then the pure helpers (search-path listing, collision detection over path
   lists) and the guards: collision with a hand-written unit, with a sibling margot application and
   inside the application's own directory (allowed); the collision error appears in `--dry-run`;
   generator dry-run (found → pass, found → fail with exit 3 and nothing written, not found →
   warning and continue; drop-ins are part of the tree it validates); post-reload verification
   (service known → ok; missing → exit 1 with the hint). All with the mocked wrapper.
-- [ ] Real-host verification: a second application shipping an existing unit name is refused with
+- [x] Real-host verification: a second application shipping an existing unit name is refused with
   both paths named; an invalid unit file is caught by the dry-run before anything is written; the
   happy path of Steps 1–2 still passes end to end.
+
+#### Step 3 status
+
+Commits on `feat/add-install-cmd`: `42c6dd8` (the three guards, with tests), `63e8812` (generator
+judged by its exit status, found on the host). `make check`: lint clean; 1726 passed, 3 skipped, 1
+failed (the known `TestResolveAllPlatformsRealSocket`); coverage 94.12%.
+
+Implementation: `domain/install.py` (`search_path_roots`, `is_unit_candidate`, `find_unit_conflicts`);
+`infra/install_store.py` (`search_path_roots`, `scan_unit_files`, `write_tree`); `infra/systemd.py`
+(`quadlet_binary`, `check_units`, `unit_is_known`); `services/install.py` (`_guard_unit_names` and
+`_guard_generator` in `_assemble`, `_verify_services` after the reload). Guards 1 and 2 run in
+`prepare_install`, so `--dry-run` runs them too.
+
+### Checkpoint C — Step 3 real-host verification (reference host, Podman 5.8.2, systemd 258, Linger=yes)
+
+Scratch apps were built from a copy of the owner's Mosquitto source in `/tmp/install-verify/apps/`,
+each with a unique application id. The owner's Quadlet directory and `systemd-zot` were checked before
+and after: names and sha256 identical, zot still on its original start time, `healthy`.
+
+- (1) Collision with an owner unit. `com-margot-verify-collide` ships `zot.container`. The owner's
+  `com-belden-mosquitto/` is not on the host now (see deviation 5), so the owner's live `zot.container` is
+  the real unit used. `--dry-run` and `--yes` both exit 3, with no `systemctl` call in `--debug` output:
+  `Error: /home/louis/.config/containers/systemd/com-margot-verify-collide/zot.container clashes with
+  /home/louis/.config/containers/systemd/zot.container (same file name zot.container).`
+  `margot never renames or shadows a unit. Remove or rename the other file, then run install again.`
+- (2) Service-name collision. With the happy app installed, `com-margot-verify-svc` ships `verify-mqtt.kube`.
+  Both `--dry-run` and `--yes` exit 3: `… verify-mqtt.kube clashes with
+  …/com-margot-verify-mqtt/verify-mqtt.container (same service name verify-mqtt.service; both units generate it).`
+  The `.kube` app was never written.
+- (3) Invalid unit. `verify-bad.container` with `NoSuchKey=1`. Exit 3 from the generator dry-run:
+  `The Quadlet generator rejected the unit files. Nothing was written to the host.` followed by the generator
+  line `converting "verify-bad.container": unsupported key 'NoSuchKey' in group 'Container'`. The directory was
+  not created. The raw generator gives the same text and exit 1.
+- (4) Upgrade. The happy app was installed twice more with `--yes --set mqttPort=18831`. Both exit 0, no false
+  collision. The `--debug` exec lines were `quadlet -dryrun -user`, `show-environment`, `daemon-reload` and
+  `cat verify-mqtt.service`. The container's `StartedAt` did not change.
+- (5) Happy path. `--dry-run` printed the plan and the parameter table, wrote nothing and made no `systemctl`
+  call (only the generator). `--yes --set mqttPort=18831` exit 0; the post-reload check passed. Drop-in
+  `50-margot-parameters.conf` (mode 0600) holds `MQTT_PORT=18831` and the scratch `QUADLET_DIR`.
+  `systemctl --user show` reports both variables. `start` by hand: `systemd-verify-mqtt` healthy,
+  `0.0.0.0:18831->1883/tcp`, bind source `com-margot-verify-mqtt/mosquitto.conf`. A publish on host port
+  18831 reached the subscriber, and an in-container publish/subscribe on 1883 also round-tripped.
+- (6) Post-reload negative case: not reproduced on the host. The generator and the post-reload check see the
+  same units, and no real unit was found that the generator accepts in dry-run but systemd does not list.
+  Covered by the mocked tests only.
+- (7) Cleanup: scratch service stopped, scratch directory removed, `daemon-reload` run, scratch containers
+  gone. The two anonymous volumes were already removed by Quadlet on stop. The scratch apps and logs under
+  `/tmp/install-verify` were deleted after the checks.
+
+Deviations and findings (for the owner's decision):
+
+1. **Generator judged by exit status (`63e8812`).** The sprint text says "non-zero exit or error output". On
+   the host Quadlet writes `Loading source unit file …` progress lines on stderr for a valid tree (exit 0, about
+   100 bytes), so treating any stderr as an error rejected every valid install. Failure is now a non-zero exit;
+   the failure detail keeps only the error lines.
+2. **Limitation: references to units outside the staged tree.** The dry run sees only the staged tree
+   (`QUADLET_UNIT_DIRS` replaces the search path). A unit with `Network=owner.network` whose network lives in the
+   Quadlet search path is refused with `requested Quadlet unit owner.network was not found`, although it would start
+   on the host. This is a false refusal, not a silent one. Options: (a) keep it, as designed; (b) add the existing
+   search roots after the tree in `QUADLET_UNIT_DIRS` for the dry run only. Recommendation: (b). Not changed.
+3. **`console.fatal(..., verbatim=True)`.** Long paths in install errors were folded at 120 columns, which broke
+   the copyable path and the wording. A keyword-only option was added to `fatal` and used for the install errors
+   that carry paths. Other commands are unchanged. Not in the design.
+4. **Generator warning carried in `PreparedInstall.warnings`.** The service returns the warning, and the command
+   prints it (layering: `commands/` prints). Same single warning as designed.
+5. **The owner's `com-belden-mosquitto/` is not on the host.** The snapshot at the start of this checkpoint has no
+   such directory, and `mosquitto.service` existed only as stale generator output (`FragmentPath` in
+   `/run/user/1000/systemd/generator/`, source "changed on disk"). The `daemon-reload` in this checkpoint removed that
+   stale unit. Nothing was recreated. The owner should check whether the directory was removed by hand.
+6. **Not verified on the host:** the `/etc` and `/usr/share` roots (absent here, tested with redirected directories),
+   the post-reload negative case (see (6)), and boot-time start (no reboot; the `WantedBy` line was only
+   checked as printed text).
+
+Not started: no `start`, `enable`, `restart` or `stop` is issued by `install`. The argv seen on the host is the
+generator dry run, `show-environment`, `daemon-reload` and `cat`.
 
 ### Docs (docs-writer) and close-out
 
