@@ -13,22 +13,6 @@ The authority model:
 
 ## Planned Sprints
 
-### Sprint 11 — Margo resource media types driven by `app.yaml`
-
-Fixes two correctness bugs found in manual testing: `margot push` dropping any resource
-file that isn't exactly one of four hardcoded filenames (e.g. an `icon.svg` instead of
-`icon.png` was silently never shipped), and `describe`/`verify`/`pull --recursive`
-locating the descriptor layer by the literal filename `app.yaml` instead of its OCI
-`mediaType`, which fails on valid artifacts produced by tooling other than margot. Resource
-discovery becomes driven by `app.yaml`'s own fields (`icon`, `descriptionFile`,
-`licenseFile`, `releaseNotes`), typed by the file's format per the Margo spec (`.jpg` →
-`+jpeg`, `.md` → `+markdown`, any other extension passed through, e.g. `+svg`, `+txt`);
-the license type is the spec's `licenseFile` name and every resource layer carries the
-`org.margo.app.resource` annotation. Any other file under `resources/` ships with
-an `application/octet-stream` fallback type. Descriptor-layer lookup becomes
-`mediaType`-based with a warning (first match wins) if more than one candidate layer is
-present. Full plan at [`.kiro/sprints/sprint-11.md`](.kiro/sprints/sprint-11.md).
-
 ### Sprint 12 — Local descriptor fallback resolution (no `margo.yaml` required)
 
 Lets `margot describe` and `margot verify` run directly against a directory holding a
@@ -216,3 +200,4 @@ Known, accepted limitations of the first version — documented in `docs/command
 | Sprint 8 | `describe` component-first view (`--section component-first`, mirroring Sprint 7's section-first walk) and `--section config` renamed to `--section config-first` (no alias); read-only orphan/dead-end detection (`--section orphans`: unreferenced parameters, unresolved schema references, unused schemas, dangling component pointers); documented shell completion setup (`README.md`, `docs/index.md`). No validation exit paths added — stays inside `describe`'s existing read-only contract. | [0.8.0](https://github.com/karnarokEpoch/margot/releases/tag/0.8.0) |
 | Sprint 9 | Remote OCI inspection for `describe` and `verify` (optional positional URI, shared fetch/pull path); `margot package` offline bundle command with OCI image inclusion (`--no-images`, `--runtime`, `--platform`); Docker Hub normalization (`docker.io` → `registry-1.docker.io`, `library/` prefix for official images); attestation manifest filtering for multi-arch indexes. | [0.9.0](https://github.com/karnarokEpoch/margot/releases/tag/0.9.0) |
 | Sprint 10 | `--json` output for `describe` and `verify`, stable exit-code taxonomy, structured JSON error envelopes, and explicit `--no-color` / `NO_COLOR` controls; default Rich rendering preserved. | [0.10.0](https://github.com/karnarokEpoch/margot/releases/tag/0.10.0) |
+| Sprint 11 | Resource discovery driven by `app.yaml` fields (`icon`, `descriptionFile`, `licenseFile`, `releaseNotes`, any extension): `push` ships each referenced file with its spec media type (`licenseFile` name, `{file format}` tokens `jpeg` / `tiff` / `markdown`, other extensions as-is, no extension `bin`), sets `org.margo.app.resource` on every resource layer, warns on missing referenced files, and titles nested files with their sub-folder. Other files under `resources/` ship as `application/octet-stream`. `describe`, `verify` and `pull --recursive` locate the descriptor layer by `mediaType` (not the name `app.yaml`), warning with every match and using the first when several match. | [0.11.0](https://github.com/karnarokEpoch/margot/releases/tag/0.11.0) |
