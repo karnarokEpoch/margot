@@ -17,12 +17,12 @@ Layer media types:
 
 | Layer / source                    | Media type                                              |
 | --------------------------------- | ------------------------------------------------------- |
-| `app.yaml` (descriptor)           | `application/vnd.margo.app.description.v1+yaml`        |
-| `icon` field reference            | `application/vnd.margo.app.icon.v1+{format}`           |
+| `app.yaml` (descriptor)           | `application/vnd.margo.app.description.v1+yaml`         |
+| `icon` field reference            | `application/vnd.margo.app.icon.v1+{format}`            |
 | `descriptionFile` field reference | `application/vnd.margo.app.descriptionFile.v1+{format}` |
-| `licenseFile` field reference     | `application/vnd.margo.app.licenseFile.v1+{format}`    |
-| `releaseNotes` field reference    | `application/vnd.margo.app.releaseNotes.v1+{format}`   |
-| any other file under `resources/` | `application/octet-stream`                             |
+| `licenseFile` field reference     | `application/vnd.margo.app.licenseFile.v1+{format}`     |
+| `releaseNotes` field reference    | `application/vnd.margo.app.releaseNotes.v1+{format}`    |
+| any other file under `resources/` | `application/octet-stream`                              |
 
 `{format}` is derived from the file extension: `jpg`/`jpeg` → `jpeg`; `tif`/`tiff` → `tiff`;
 `md`/`markdown` → `markdown`; no extension → `bin`; any other extension used as-is.
@@ -150,3 +150,11 @@ to that dir only.
 
 SemVer validation applies to `build` and `push` only. `pull` and `fetch` retrieve arbitrary
 existing artifacts and do not validate the tag format.
+
+## Local install
+
+[`margot install`](commands/install.md) installs one quadlet deployment profile of a Margo
+application on the local host. It places the unit files and bundled resources into
+`~/.config/containers/systemd/<application-id>/`, writes parameter values as systemd drop-ins,
+and reloads systemd. Only `quadlet` profiles are installable; compose and Helm require a
+separate apply step.
