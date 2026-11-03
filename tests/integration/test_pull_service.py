@@ -10,6 +10,7 @@ from margot import console
 from margot.domain.layers import MARGO_DESCRIPTION_MEDIA_TYPE
 from margot.domain.models import PackageType
 from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.oci import OrasClient
 from margot.services import pull as pull_service
 from margot.services.pull import _available_layer_types
 
@@ -1163,3 +1164,55 @@ class TestPullDescriptorByMediaType:
         message = warning_mock.call_args[0][0]
         assert "app.yaml (digest: sha256:aaaa" in message
         assert "manifest.yaml (digest: sha256:bbbb" in message
+
+
+class TestOrasPullPathOrder:
+    """Guards the manifest-index to pulled-path mapping used by remote.py and pull.py.
+
+    Both services find the descriptor layer by its index in manifest["layers"], then read the
+    pulled path at that same index. That is only correct because oras-py's Registry.pull appends
+    exactly one path per layer, in manifest order (overwrite=True is the default). This test runs
+    the real OrasClient.pull loop and fakes only the registry calls (get_manifest and
+    download_blob), so a change to that ordering in oras-py or in the margot override fails here.
+    """
+
+    def test_pull_returns_one_path_per_layer_in_manifest_order(self, mocker: Any, tmp_path: Any) -> None:
+        """Should return exactly one path per manifest layer, 1:1 and in manifest layer order."""
+        layers = [
+            {
+                "mediaType": "application/vnd.margo.app.icon.v1+png",
+                "digest": "sha256:icon",
+                "annotations": {"org.opencontainers.image.title": "resources/icon.png"},
+            },
+            _descriptor_layer("manifest.yaml", "sha256:descriptor"),
+            {
+                "mediaType": "application/octet-stream",
+                "digest": "sha256:extra",
+                "annotations": {"org.opencontainers.image.title": "resources/screenshots/a.png"},
+            },
+        ]
+        manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json", layers=layers)
+        downloaded_digests: list[str] = []
+
+        def download_blob_side_effect(_container: Any, digest: str, outfile: str) -> str:
+            downloaded_digests.append(digest)
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(digest.encode())
+            return outfile
+
+        mocker.patch.object(OrasClient, "auth", MagicMock(), create=True)
+        mocker.patch.object(OrasClient, "get_manifest", return_value=manifest)
+        mocker.patch.object(OrasClient, "download_blob", side_effect=download_blob_side_effect)
+
+        client = OrasClient()
+        paths = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", str(tmp_path))
+
+        resolved_root = tmp_path.resolve()
+        # Services map a manifest layer index to paths[index]; this list only holds if oras-py keeps layer order.
+        assert [Path(path).resolve().relative_to(resolved_root).as_posix() for path in paths] == [
+            "resources/icon.png",
+            "manifest.yaml",
+            "resources/screenshots/a.png",
+        ]
+        assert downloaded_digests == [layer["digest"] for layer in layers]
+        assert len(paths) == len(layers)
