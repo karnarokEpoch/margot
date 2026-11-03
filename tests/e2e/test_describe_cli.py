@@ -6,10 +6,12 @@ import re
 import tempfile
 from tempfile import TemporaryDirectory
 from typing import Any
+from unittest.mock import MagicMock
 
 from pytest import fixture
 from typer.testing import CliRunner
 
+from margot.domain.layers import MARGO_DESCRIPTION_MEDIA_TYPE, MARGO_ICON_MEDIA_TYPE_TEMPLATE
 from margot.main import app
 from margot.services.remote import ResolvedRemoteDescriptor
 
@@ -1595,3 +1597,58 @@ class TestDescribeJsonFailures:
         assert result.exit_code == 2
         assert result.stdout == ""
         assert json.loads(result.stderr)["code"] == 2
+
+
+class TestDescribeRemoteDescriptorLayer:
+    """describe <uri> finds the descriptor layer by mediaType, even when it is not named app.yaml."""
+
+    def test_describe_remote_descriptor_named_manifest_yaml_exits_0(self, mocker: Any) -> None:
+        """Should describe a remote artifact whose descriptor layer is titled manifest.yaml, exit 0.
+
+        Only the registry client is faked (manifest fetch and blob pull). Prepare, pull, descriptor
+        lookup, and describe all run for real.
+        """
+        manifest = {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "artifactType": "application/vnd.margo.app.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.empty.v1+json",
+                "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "size": 2,
+            },
+            "layers": [
+                {
+                    "mediaType": MARGO_ICON_MEDIA_TYPE_TEMPLATE.format(ext="png"),
+                    "digest": "sha256:icon",
+                    "annotations": {"org.opencontainers.image.title": "resources/icon.png"},
+                },
+                {
+                    "mediaType": MARGO_DESCRIPTION_MEDIA_TYPE,
+                    "digest": "sha256:descriptor",
+                    "annotations": {"org.opencontainers.image.title": "manifest.yaml"},
+                },
+            ],
+        }
+
+        def pull_side_effect(uri: str, outdir: str) -> list[str]:  # noqa: ARG001
+            Path(outdir).mkdir(parents=True, exist_ok=True)
+            icon = Path(outdir) / "resources" / "icon.png"
+            icon.parent.mkdir(parents=True, exist_ok=True)
+            icon.write_bytes(b"png")
+            descriptor = Path(outdir) / "manifest.yaml"
+            descriptor.write_text(VALID_APP_YAML, encoding="utf-8")
+            return [str(icon), str(descriptor)]
+
+        mock_client = MagicMock()
+        mock_client.get_manifest.return_value = manifest
+        mock_client.pull.side_effect = pull_side_effect
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
+
+        result = runner.invoke(app, ["describe", "public.ecr.aws/g2n4p2m7/hello-world:1.0.0"])
+        plain = _output(result)
+
+        assert result.exit_code == 0, f"Command failed with: {plain}"
+        assert "(remote)" in plain
+        assert "hello-world" in plain or "Hello World" in plain

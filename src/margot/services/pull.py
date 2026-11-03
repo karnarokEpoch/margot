@@ -225,8 +225,16 @@ def _find_descriptor_layer_index_in_manifest(manifest: dict[str, Any]) -> int | 
         return None
 
     if len(matching_indices) > 1:
+        # Name every match so the user can see which layers collided, then use the first
+        layer_descriptions: list[str] = []
+        for idx in matching_indices:
+            layer = layers[idx]
+            annotations = layer.get("annotations") or {}
+            digest = layer.get("digest", "unknown")
+            title = annotations.get("org.opencontainers.image.title", digest[:12])
+            layer_descriptions.append(f"  - {title} (digest: {digest[:12]})")
         console.warning(
-            f"Multiple app.yaml (descriptor) layers found in manifest ({len(matching_indices)} matches); using first."
+            "Multiple descriptor layers found in manifest; using first match:\n" + "\n".join(layer_descriptions)
         )
 
     return matching_indices[0]

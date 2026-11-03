@@ -569,3 +569,91 @@ class TestPullCLIRecursive:
         pull_artifact_mock.assert_called_once()
         call_kwargs = pull_artifact_mock.call_args[1]
         assert call_kwargs.get("recursive") is False
+
+
+class TestPullCLIDescriptorLayer:
+    """pull --recursive finds the descriptor layer by mediaType, even when it is not named app.yaml."""
+
+    def test_pull_recursive_descriptor_named_manifest_yaml_recurses_exits_0(self, mocker: Any, tmp_path: Any) -> None:
+        """Should exit 0 and pull the declared component when the descriptor layer is titled manifest.yaml.
+
+        Only the registry client is faked. The component is pulled through the real recursive path,
+        so the component manifest must be fetched and its blob written under the component directory.
+        """
+        root_manifest = {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "artifactType": "application/vnd.margo.app.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.empty.v1+json",
+                "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                "size": 2,
+            },
+            "layers": [
+                {
+                    "mediaType": "application/vnd.margo.app.description.v1+yaml",
+                    "digest": "sha256:descriptor",
+                    "annotations": {"org.opencontainers.image.title": "manifest.yaml"},
+                }
+            ],
+        }
+        component_manifest = {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "artifactType": "application/vnd.org.margo.component.compose+json",
+            "config": root_manifest["config"],
+            "layers": [
+                {
+                    "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+                    "digest": "sha256:postgres",
+                    "annotations": {"org.opencontainers.image.title": "postgres-14.0.0.tgz"},
+                }
+            ],
+        }
+        descriptor_text = (
+            "apiVersion: v1\n"
+            "kind: ApplicationDescription\n"
+            "id: test-app\n"
+            "metadata:\n"
+            "  name: Test App\n"
+            "  version: 1.0.0\n"
+            "deploymentProfiles:\n"
+            "  - type: helm\n"
+            "    id: default\n"
+            "    components:\n"
+            "      - name: database\n"
+            "        properties:\n"
+            "          repository: oci://quay.io/charts/postgres\n"
+            "          revision: 14.0.0\n"
+        )
+
+        def pull_side_effect(uri: str, outdir: str) -> list[str]:  # noqa: ARG001
+            Path(outdir).mkdir(parents=True, exist_ok=True)
+            descriptor = Path(outdir) / "manifest.yaml"
+            descriptor.write_text(descriptor_text, encoding="utf-8")
+            return [str(descriptor)]
+
+        def get_manifest_side_effect(uri: str) -> dict[str, Any]:
+            return component_manifest if "postgres" in uri else root_manifest
+
+        def download_blob_side_effect(_uri: str, _digest: str, outfile: str) -> None:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake archive")
+
+        mock_client = MagicMock()
+        mock_client.get_manifest.side_effect = get_manifest_side_effect
+        mock_client.pull.side_effect = pull_side_effect
+        mock_client.download_blob.side_effect = download_blob_side_effect
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
+
+        result = runner.invoke(
+            app,
+            ["pull", "public.ecr.aws/g2n4p2m7/margo:1.0.0", "--recursive", "--output", str(tmp_path)],
+        )
+
+        assert result.exit_code == 0, _strip_ansi(result.stdout + (result.stderr or ""))
+        assert any("postgres" in str(call.args[0]) for call in mock_client.get_manifest.call_args_list)
+        mock_client.download_blob.assert_called_once()
+        component_file = mock_client.download_blob.call_args.args[2]
+        assert component_file.startswith(str(tmp_path / "database"))
