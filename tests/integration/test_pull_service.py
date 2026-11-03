@@ -1018,3 +1018,148 @@ deploymentProfiles:
         assert any("good" in path for path in result)
         # Should have warned about bad-comp
         assert any("bad-comp" in str(call) for call in warning_mock.call_args_list)
+
+
+_ROOT_APP_YAML_WITH_COMPONENT = """\
+apiVersion: v1
+kind: ApplicationDescription
+id: test-app
+metadata:
+  name: Test App
+  version: 1.0.0
+deploymentProfiles:
+  - type: helm
+    id: default
+    components:
+      - name: database
+        properties:
+          repository: oci://quay.io/charts/postgres
+          revision: 14.0.0
+"""
+
+_POSTGRES_COMPOSE_LAYERS = [
+    {
+        "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+        "digest": "sha256:postgres",
+        "annotations": {"org.opencontainers.image.title": "postgres-14.0.0.tgz"},
+    }
+]
+
+
+def _descriptor_layer(title: str, digest: str) -> dict[str, Any]:
+    """Build a descriptor-mediaType layer with the given title annotation."""
+    return {
+        "mediaType": MARGO_DESCRIPTION_MEDIA_TYPE,
+        "digest": digest,
+        "annotations": {"org.opencontainers.image.title": title},
+    }
+
+
+class TestPullDescriptorByMediaType:
+    """Recursive pull locates the descriptor layer by mediaType, not by the name app.yaml."""
+
+    def test_recursive_pull_recurses_when_descriptor_layer_is_named_manifest_yaml(
+        self, mocker: Any, tmp_path: Any
+    ) -> None:
+        """Should pull declared components when the descriptor layer is titled manifest.yaml and is not first."""
+        icon_layer = {
+            "mediaType": "application/vnd.margo.app.icon.v1+png",
+            "digest": "sha256:icon",
+            "annotations": {"org.opencontainers.image.title": "resources/icon.png"},
+        }
+        root_manifest = _make_manifest(
+            artifact_type="application/vnd.margo.app.v1+json",
+            layers=[icon_layer, _descriptor_layer("manifest.yaml", "sha256:descriptor")],
+        )
+        component_manifest = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=_POSTGRES_COMPOSE_LAYERS,
+        )
+
+        mock_client = MagicMock()
+        mock_client.get_manifest.side_effect = lambda uri: component_manifest if "postgres" in uri else root_manifest
+
+        def download_blob_side_effect(_uri: str, _digest: str, outfile: str) -> None:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake archive")
+
+        mock_client.download_blob.side_effect = download_blob_side_effect
+
+        def pull_side_effect(uri: str, outdir: str) -> list[str]:
+            if uri != "public.ecr.aws/g2n4p2m7/margo:1.0.0":
+                return []
+            icon = Path(outdir) / "resources" / "icon.png"
+            icon.parent.mkdir(parents=True, exist_ok=True)
+            icon.write_bytes(b"png")
+            descriptor = Path(outdir) / "manifest.yaml"
+            descriptor.write_text(_ROOT_APP_YAML_WITH_COMPONENT)
+            return [str(icon), str(descriptor)]
+
+        mock_client.pull.side_effect = pull_side_effect
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            recursive=True,
+        )
+
+        # Root paths (icon, descriptor) followed by the one component file.
+        assert len(result) == 3
+        assert result[1] == str(tmp_path / "manifest.yaml")
+        assert result[2].startswith(str(tmp_path / "database"))
+        assert any("postgres" in str(call.args[0]) for call in mock_client.get_manifest.call_args_list)
+
+    def test_two_descriptor_layers_warn_naming_both_and_recurse_into_first(
+        self, mocker: Any, tmp_path: Any
+    ) -> None:
+        """Should warn with every descriptor layer title and use the first layer, in manifest order, for recursion."""
+        root_manifest = _make_manifest(
+            artifact_type="application/vnd.margo.app.v1+json",
+            layers=[
+                _descriptor_layer("app.yaml", "sha256:aaaaaaaaaaaaaaaaaa"),
+                _descriptor_layer("manifest.yaml", "sha256:bbbbbbbbbbbbbbbbbb"),
+            ],
+        )
+        component_manifest = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=_POSTGRES_COMPOSE_LAYERS,
+        )
+
+        mock_client = MagicMock()
+        mock_client.get_manifest.side_effect = lambda uri: component_manifest if "postgres" in uri else root_manifest
+
+        def download_blob_side_effect(_uri: str, _digest: str, outfile: str) -> None:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake archive")
+
+        mock_client.download_blob.side_effect = download_blob_side_effect
+
+        def pull_side_effect(uri: str, outdir: str) -> list[str]:
+            if uri != "public.ecr.aws/g2n4p2m7/margo:1.0.0":
+                return []
+            first = Path(outdir) / "app.yaml"
+            first.write_text(_ROOT_APP_YAML_WITH_COMPONENT)
+            second = Path(outdir) / "manifest.yaml"
+            second.write_text("kind: SomethingElse\n")
+            return [str(first), str(second)]
+
+        mock_client.pull.side_effect = pull_side_effect
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
+        warning_mock = mocker.patch("margot.services.pull.console.warning")
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            recursive=True,
+        )
+
+        # The first descriptor (app.yaml) declares the component, so recursion pulls it.
+        assert len(result) == 3
+        assert result[2].startswith(str(tmp_path / "database"))
+        warning_mock.assert_called_once()
+        message = warning_mock.call_args[0][0]
+        assert "app.yaml (digest: sha256:aaaa" in message
+        assert "manifest.yaml (digest: sha256:bbbb" in message
