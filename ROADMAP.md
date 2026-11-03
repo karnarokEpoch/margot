@@ -103,9 +103,21 @@ and `margot package` can bundle built helm archives. No `helm` binary needed. Im
 only inside a chart are not bundled (documented limitation). Depends on Sprint 15. Full plan at
 [`.kiro/sprints/sprint-16.md`](.kiro/sprints/sprint-16.md).
 
+### Sprint 17 — OS trust store and per-registry CA trust from `certs.d`
+
+margot verifies registry certificates against the operating-system trust store (stdlib
+`ssl` default context) instead of the bundled `certifi` file, and additionally reads the same
+per-registry CA directories as Podman, Buildah and Skopeo (`containers-certs.d(5)`:
+`~/.config/containers/certs.d`, `/etc/containers/certs.d`, and the other documented roots), so a
+private registry that works with `podman pull` also works with margot's registry commands. Per
+host, the `*.crt` files are added to the trust for that registry's connections only, through an
+in-memory `SSLContext` on a small `requests` adapter (no temp bundle file, no `httpx` migration).
+Automatic only: no flag, env var or setting. Client certificates are deferred (see Backlog).
+Independent of Sprints 11–16. Full plan at [`.kiro/sprints/sprint-17.md`](.kiro/sprints/sprint-17.md).
+
 ---
 
-## Backlog / Stack (Sprint 17+)
+## Backlog / Stack (Sprint 18+)
 
 Unordered within groups; sequencing decided at sprint planning.
 
@@ -145,6 +157,22 @@ Unordered within groups; sequencing decided at sprint planning.
   and rename the internal `MargoYaml` / `load_margo_yaml` identifiers to match `margot.yaml`.
 - Scheduled in Sprint 14 (no longer backlog): `pull --recursive` component-name
   sanitisation (Item 1, may ship as an earlier patch) and per-variant `repository` (Item 3).
+
+### Registry TLS follow-ups (after Sprint 17)
+
+- **Client certificates (mTLS).** Honour `*.cert` / `*.key` pairs in `certs.d` (matched by file
+  basename). Deferred from Sprint 17.
+- **OS trust store on non-Linux.** Sprint 17 relies on the stdlib default context, which is
+  enough on Linux. Revisit with `truststore` for macOS / Windows system stores if needed.
+- **Registry transport.** Replace oras-py's `requests`-based HTTP layer (`provider.py`, `auth/*`)
+  with `httpx`, either through a margot-owned OCI Distribution client or a fork. Large: manifests,
+  chunked blob upload, token/basic/ECR auth, retry, Docker Hub quirks, Docker credential loading,
+  and the tests that mock the HTTP layer. `requests` stays installed regardless (`docker`,
+  `podman`, `linkml` need it), and httpx 0.28 still defaults to `certifi`, so this buys no trust-store
+  benefit that Sprint 17 does not already deliver. Needs a spike and an owner decision (it
+  revisits the oras-py choice recorded in `tech.md`) before any sprint.
+- **Helm.** Pass the discovered CA to the host `helm` (`--ca-file`) once `infra/helm.py` exists
+  (Sprint 15); Sprint 17's `infra/tls.py` is built to be reused for this.
 
 ### `margot install` follow-ups (after Sprint 13)
 
