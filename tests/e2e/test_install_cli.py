@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 from margot.domain.install import MARKER_FILENAME
 from margot.domain.models import PackageType
 from margot.infra.credentials import CredentialsExpiredError
-from margot.infra.systemd import GeneratorCheck
+from margot.infra.systemd import GeneratorRun
 from margot.main import app
 from tests.integration._install_helpers import (
     REPOSITORY,
@@ -575,9 +575,7 @@ class TestQuadletDirPlan:
 class TestGuards:
     """Step 3 through the CLI: collision (exit 3, also in --dry-run), generator (exit 3), post-reload (exit 1)."""
 
-    def test_collision_in_dry_run_exits_3_and_names_both_paths(
-        self, tmp_path: Path, systemctl: Any, xdg: Path
-    ) -> None:
+    def test_collision_in_dry_run_exits_3_and_names_both_paths(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should refuse a unit already present elsewhere, even for --dry-run, naming both paths."""
         existing = xdg / "handmade" / "mosquitto.container"
         existing.parent.mkdir(parents=True)
@@ -612,8 +610,10 @@ class TestGuards:
         self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
     ) -> None:
         """Should exit 3 with the trimmed generator message before the host is touched."""
-        install_host.generator.return_value = GeneratorCheck(
-            passed=False, detail="mosquitto.container: unknown key 'Imag'"
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1,
+            stderr="quadlet-generator[1]: converting \"mosquitto.container\": unknown key 'Imag'\n"
+            "quadlet-generator[1]: processing encountered some errors",
         )
         args, _ = _project_args(tmp_path)
 
@@ -626,7 +626,7 @@ class TestGuards:
 
     def test_generator_output_stays_out_of_stdout(self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any) -> None:
         """Should not print the generator's service blocks on stdout, valid tree or not."""
-        install_host.generator.side_effect = lambda *_: GeneratorCheck(passed=True, detail="")
+        install_host.generator.side_effect = lambda *_: GeneratorRun(returncode=0, stderr="")
         args, _ = _project_args(tmp_path)
 
         result = runner.invoke(app, ["install", *args, "--dry-run"])
@@ -666,3 +666,98 @@ class TestGuards:
         assert str(xdg / "com-belden-mosquitto" / "mosquitto.container") in result.output
         assert "journalctl --user -b -t quadlet-generator" in result.output
         assert "nothing was rolled back" in result.output.lower()
+
+
+def _unresolved_stderr(*references: tuple[str, str], errors: tuple[str, ...] = ()) -> str:
+    """Generator stderr as the host prints it when units refer to units outside the staged tree."""
+    lines = ["quadlet-generator[1]: Loading source unit file /staging/mosquitto.container"]
+    lines.extend(
+        f'quadlet-generator[1]: converting "{unit}": requested Quadlet unit {name} was not found' for unit, name in references
+    )
+    lines.extend(errors)
+    lines.append("quadlet-generator[1]: processing encountered some errors")
+    return "\n".join(lines)
+
+
+WARNING_START = "mosquitto.container references owner.network, which is not installed on this host."
+
+
+def _flat(output: str) -> str:
+    """Collapse rich line wrapping so a long warning can be matched as one sentence."""
+    return " ".join(output.split())
+
+
+class TestUnresolvedReferences:
+    """A unit may refer to a unit that is not in the application (sprint-13 §3.10, guard 2)."""
+
+    def test_missing_reference_prints_one_warning_and_exits_0(
+        self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
+    ) -> None:
+        """Should install with exit 0 and print the warning exactly once, naming the unit and the missing network."""
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1, stderr=_unresolved_stderr(("mosquitto.container", "owner.network"))
+        )
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 0
+        text = _flat(result.output)
+        assert text.count(WARNING_START) == 1
+        assert "mosquitto.service is generated once owner.network is installed" in text
+        assert (xdg / "com-belden-mosquitto" / "mosquitto.container").is_file()
+        assert not any(call.args[0][2:4] == ["cat", "mosquitto.service"] for call in systemctl.call_args_list)
+
+    def test_missing_reference_dry_run_warns_and_writes_nothing(
+        self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
+    ) -> None:
+        """Should show the same warning under --dry-run and change nothing on the host."""
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1, stderr=_unresolved_stderr(("mosquitto.container", "owner.network"))
+        )
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--dry-run"])
+
+        assert result.exit_code == 0
+        assert _flat(result.output).count(WARNING_START) == 1
+        assert not (xdg / "com-belden-mosquitto").exists()
+        systemctl.assert_not_called()
+
+    def test_reference_to_an_installed_unit_prints_no_warning(
+        self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
+    ) -> None:
+        """Should stay silent when the referenced network is already on the host."""
+        existing = xdg / "handmade" / "owner.network"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("[Network]\n", encoding="utf-8")
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1, stderr=_unresolved_stderr(("mosquitto.container", "owner.network"))
+        )
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 0
+        assert "not installed on this host" not in _flat(result.output)
+
+    def test_real_error_beside_a_reference_exits_3_and_shows_only_the_error(
+        self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
+    ) -> None:
+        """Should exit 3 with the real error line and leave out the reference that is merely unresolved."""
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1,
+            stderr=_unresolved_stderr(
+                ("mosquitto.container", "owner.network"),
+                errors=("quadlet-generator[1]: converting \"other.container\": unsupported key 'NoSuchKey'",),
+            ),
+        )
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 3
+        assert "NoSuchKey" in result.output
+        assert "owner.network was not found" not in result.output
+        assert not (xdg / "com-belden-mosquitto").exists()
+        systemctl.assert_not_called()

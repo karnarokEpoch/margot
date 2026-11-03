@@ -59,13 +59,13 @@ def search_path_roots(environ: Mapping[str, str] | None = None, uid: int | None 
     return tuple(roots)
 
 
-def scan_unit_files(roots: Iterable[Path], exclude_dir: Path) -> list[str]:
+def scan_unit_files(roots: Iterable[Path], exclude_dir: Path | None = None) -> list[str]:
     """List every regular file under the roots, as absolute path strings.
 
-    Hidden directories and ``<unit>.d`` drop-in directories are not entered, and the application's own
-    directory (``exclude_dir``, compared by resolved path) is skipped. Names are filtered later by the domain.
+    Hidden directories and ``<unit>.d`` drop-in directories are not entered. When ``exclude_dir`` is given
+    (compared by resolved path) that directory is skipped. Names are filtered later by the domain.
     """
-    excluded = exclude_dir.resolve()
+    excluded = None if exclude_dir is None else exclude_dir.resolve()
     found: list[str] = []
     for root in roots:
         for dirpath, dirnames, filenames in os.walk(root):
@@ -73,7 +73,9 @@ def scan_unit_files(roots: Iterable[Path], exclude_dir: Path) -> list[str]:
             dirnames[:] = [
                 name
                 for name in dirnames
-                if not name.startswith(".") and not name.endswith(".d") and (current / name).resolve() != excluded
+                if not name.startswith(".")
+                and not name.endswith(".d")
+                and (excluded is None or (current / name).resolve() != excluded)
             ]
             found.extend(str(current / name) for name in filenames if (current / name).is_file())
     console.debug(f"Scanned {len(found)} file(s) in the Quadlet search path")

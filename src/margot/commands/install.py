@@ -188,7 +188,7 @@ def _component_tree(plan: InstallPlan) -> Tree:
 
 
 def _report(result: InstallResult) -> None:
-    console.success(f"Installed {len(result.services)} unit(s) into:")
+    console.success(f"Installed {len(result.unit_files)} unit(s) into:")
     console.print_line(str(result.app_dir))
     console.print_renderable(Group(*_next_steps(result)))
 

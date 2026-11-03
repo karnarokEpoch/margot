@@ -125,7 +125,7 @@ def install_host(tmp_path: Path, monkeypatch: Any, mocker: Any) -> SimpleNamespa
     binary = mocker.patch("margot.infra.systemd.quadlet_binary", return_value="/usr/libexec/podman/quadlet")
     generator = mocker.patch(
         "margot.infra.systemd.check_units",
-        return_value=systemd.GeneratorCheck(passed=True, detail=""),
+        return_value=systemd.GeneratorRun(returncode=0, stderr=""),
     )
     return SimpleNamespace(root=xdg / "containers" / "systemd", system=system, binary=binary, generator=generator)
 

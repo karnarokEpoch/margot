@@ -142,66 +142,37 @@ class TestQuadletBinary:
 ENVIRON = {"PATH": "/usr/bin:/bin", "HOME": "/home/u", "XDG_RUNTIME_DIR": "/run/user/1000", "KEEP": "yes"}
 
 
-class TestGeneratorCheck:
+class TestGeneratorRun:
     """`quadlet -dryrun -user` with QUADLET_UNIT_DIRS pointing at the staged tree; nothing is written."""
 
+    def test_exit_status_and_stderr_are_returned_unchanged(self, mocker: Any, tmp_path: Path) -> None:
+        """Should return the exit status and the raw stderr; the domain layer reads them (sprint-13 §3.10)."""
+        stderr = 'quadlet-generator[1]: converting "web.container": requested Quadlet unit x.network was not found'
+        mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "", stderr))
 
-    def test_valid_tree_passes(self, mocker: Any, tmp_path: Path) -> None:
-        """Should pass when the generator exits 0 with no error output."""
-        mocker.patch("margot.infra.systemd.run", return_value=_completed(0, "---web.service---\n[Service]\n"))
+        run = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
 
-        check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
+        assert run == systemd.GeneratorRun(returncode=1, stderr=stderr)
 
-        assert check.passed is True
-        assert check.detail == ""
-
-    def test_invalid_tree_fails_with_the_generator_message(self, mocker: Any, tmp_path: Path) -> None:
-        """Should fail and carry the generator's error text when it exits non-zero."""
-        mocker.patch(
-            "margot.infra.systemd.run",
-            return_value=_completed(1, "", "web.container: unknown key 'Imag'\nprocessing encountered some errors"),
-        )
-
-        check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
-
-        assert check.passed is False
-        assert "unknown key 'Imag'" in check.detail
-
-    def test_generator_stdout_is_never_part_of_the_detail(self, mocker: Any, tmp_path: Path) -> None:
-        """Should keep the generated service blocks out of the message (they are not an error)."""
-        mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "---SECRET=1---", "bad unit"))
-
-        check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
-
-        assert "SECRET" not in check.detail
-
-    def test_zero_exit_passes_even_when_quadlet_logs_progress_on_stderr(self, mocker: Any, tmp_path: Path) -> None:
-        """Should pass on exit 0: quadlet logs 'Loading source ...' lines on stderr for every valid tree (host check)."""
+    def test_zero_exit_with_progress_lines_is_returned_as_is(self, mocker: Any, tmp_path: Path) -> None:
+        """Should return exit 0 and the 'Loading source' progress lines, which quadlet logs for every valid tree."""
         progress = "quadlet-generator[1]: Loading source unit file /x/verify-mqtt.container"
         mocker.patch("margot.infra.systemd.run", return_value=_completed(0, "", progress))
 
-        check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
+        run = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
 
-        assert check.passed is True
+        assert run.returncode == 0
+        assert run.stderr == progress
 
-    def test_failure_detail_leaves_out_the_progress_lines(self, mocker: Any, tmp_path: Path) -> None:
-        """Should keep only the error lines of a failed run, not the 'Loading source' progress lines."""
-        stderr = (
-            "quadlet-generator[1]: Loading source unit file /x/verify-bad.container\n"
-            "quadlet-generator[1]: converting \"verify-bad.container\": unsupported key 'NoSuchKey'\n"
-            "quadlet-generator[1]: processing encountered some errors"
-        )
-        mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "", stderr))
+    def test_generator_stdout_is_not_kept(self, mocker: Any, tmp_path: Path) -> None:
+        """Should drop the generated service blocks on stdout: they are not needed to judge the tree."""
+        mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "---SECRET=1---", "bad unit"))
 
-        check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
+        run = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
 
-        assert check.passed is False
-        assert "unsupported key 'NoSuchKey'" in check.detail
-        assert "Loading source" not in check.detail
+        assert "SECRET" not in repr(run)
 
-    def test_argv_is_the_dry_run_user_command_and_environment_keeps_the_user_env(
-        self, mocker: Any, tmp_path: Path
-    ) -> None:
+    def test_argv_is_the_dry_run_user_command_and_environment_keeps_the_user_env(self, mocker: Any, tmp_path: Path) -> None:
         """Should run `<binary> -dryrun -user` with the user's environment plus QUADLET_UNIT_DIRS only."""
         run = mocker.patch("margot.infra.systemd.run", return_value=_completed(0))
 

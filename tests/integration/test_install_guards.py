@@ -13,9 +13,9 @@ from typing import Any
 from pytest import mark, raises
 
 from margot.domain.install import MARKER_FILENAME
-from margot.infra.systemd import GeneratorCheck, SystemdError
+from margot.infra.systemd import GeneratorRun, SystemdError
 from margot.services import install as install_service
-from tests.integration._install_helpers import build_project
+from tests.integration._install_helpers import build_project, quadlet_payload
 
 pytestmark = mark.usefixtures("install_host")
 
@@ -164,11 +164,11 @@ class TestGeneratorValidation:
         """Should hand the generator the full merged tree: units, bundled files and the drop-in with QUADLET_DIR."""
         seen: dict[str, Any] = {}
 
-        def capture(unit_dir: Path, binary: str, _environ: Any) -> GeneratorCheck:
+        def capture(unit_dir: Path, binary: str, _environ: Any) -> GeneratorRun:
             seen["files"] = _tree(unit_dir)
             seen["dropin"] = (unit_dir / "mosquitto.container.d" / "50-margot-parameters.conf").read_text(encoding="utf-8")
             seen["binary"] = binary
-            return GeneratorCheck(passed=True, detail="")
+            return GeneratorRun(returncode=0, stderr="")
 
         install_host.generator.side_effect = capture
 
@@ -182,15 +182,20 @@ class TestGeneratorValidation:
 
     def test_a_failing_generator_is_exit_3_and_nothing_is_written(self, tmp_path: Path, install_host: Any, mocker: Any) -> None:
         """Should refuse with the trimmed generator output and never touch the host."""
-        install_host.generator.return_value = GeneratorCheck(
-            passed=False, detail="mosquitto.container: unknown key 'Imag'\nprocessing encountered some errors"
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1,
+            stderr=(
+                "quadlet-generator[1]: converting \"mosquitto.container\": unsupported key 'Imag' in group 'Container'\n"
+                "quadlet-generator[1]: processing encountered some errors"
+            ),
         )
         run = _systemctl(mocker)
 
-        with raises(ValueError, match=r"unknown key 'Imag'") as info:
+        with raises(ValueError, match=r"unsupported key 'Imag'") as info:
             _prepare(tmp_path)
 
         assert "nothing was written" in str(info.value).lower()
+        assert "processing encountered" not in str(info.value)
         assert not install_host.root.exists()
         run.assert_not_called()
 
@@ -219,6 +224,169 @@ class TestGeneratorValidation:
             assert prepared.warnings == ()
         finally:
             prepared.cleanup()
+
+
+NETWORK_UNIT = b"[Container]\nImage=docker.io/library/eclipse-mosquitto:2\nNetwork=owner.network\n"
+VOLUME_UNIT = b"[Container]\nImage=docker.io/library/eclipse-mosquitto:2\nVolume=owner.volume:/data\n"
+PAYLOAD_DIR = "mosquitto-1.0.2_mosquitto-quadlet"
+
+
+def _members(units: dict[str, bytes]) -> dict[str, bytes]:
+    """The quadlet payload with extra or replaced unit files (file name -> content)."""
+    members = quadlet_payload()
+    for name, data in units.items():
+        members[f"{PAYLOAD_DIR}/{name}"] = data
+    return members
+
+
+def _generator_lines(*references: tuple[str, str], errors: tuple[str, ...] = ()) -> str:
+    """Generator stderr as the host prints it: progress lines, one line per reference, then real errors."""
+    lines = ["quadlet-generator[1]: Loading source unit file /staging/mosquitto.container"]
+    lines.extend(
+        f'quadlet-generator[1]: converting "{unit}": requested Quadlet unit {name} was not found' for unit, name in references
+    )
+    lines.extend(errors)
+    lines.append("quadlet-generator[1]: processing encountered some errors")
+    return "\n".join(lines)
+
+
+def _prepare_members(tmp_path: Path, members: dict[str, bytes]) -> Any:
+    project, build = build_project(tmp_path, archive_members=members)
+    return install_service.prepare_install(uri=None, project_dir=str(project), build_dir=str(build), profile_id=None)
+
+
+class TestUnresolvedReferences:
+    """A unit may refer to another unit that is not in the application (sprint-13 §3.10, principle).
+
+    The generator sees only the staged tree, so such a reference is reported as unresolved. The
+    install checks the host: a unit already installed is silent; a missing one is one warning and its
+    service is not required to exist yet (guard 3).
+    """
+
+    def test_reference_to_a_unit_on_the_host_is_silent_and_the_service_is_checked(
+        self, tmp_path: Path, install_host: Any, mocker: Any
+    ) -> None:
+        """Should install with no warning when the referenced network already exists elsewhere in the search path."""
+        _unit(install_host.root, "handmade", "owner.network", "[Network]\n")
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1, stderr=_generator_lines(("mosquitto.container", "owner.network"))
+        )
+        run = _systemctl(mocker)
+        prepared = _prepare_members(tmp_path, _members({"mosquitto.container": NETWORK_UNIT}))
+        try:
+            install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        assert prepared.warnings == ()
+        assert prepared.deferred == ()
+        assert (install_host.root / APP / "mosquitto.container").is_file()
+        assert ["cat", "mosquitto.service"] in [call.args[0][2:] for call in run.call_args_list]
+
+    def test_reference_to_a_unit_of_the_own_directory_is_silent(self, tmp_path: Path, install_host: Any) -> None:
+        """Should accept a reference to a unit the application already has in its own directory (an upgrade)."""
+        _unit(install_host.root, APP, "owner.network", "[Network]\n")
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1, stderr=_generator_lines(("mosquitto.container", "owner.network"))
+        )
+
+        prepared = _prepare_members(tmp_path, _members({"mosquitto.container": NETWORK_UNIT}))
+        try:
+            assert prepared.warnings == ()
+            assert prepared.deferred == ()
+        finally:
+            prepared.cleanup()
+
+    def test_reference_to_a_missing_unit_warns_once_and_defers_its_service(
+        self, tmp_path: Path, install_host: Any, mocker: Any
+    ) -> None:
+        """Should add one warning naming the unit file and the missing unit, and defer that service."""
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1, stderr=_generator_lines(("mosquitto.container", "owner.network"))
+        )
+
+        prepared = _prepare_members(tmp_path, _members({"mosquitto.container": NETWORK_UNIT}))
+        try:
+            assert prepared.warnings == (
+                "mosquitto.container references owner.network, which is not installed on this host. "
+                "mosquitto.service is generated once owner.network is installed and systemd is reloaded.",
+            )
+            assert prepared.deferred == ("mosquitto.service",)
+        finally:
+            prepared.cleanup()
+
+    def test_deferred_service_is_not_checked_after_reload(self, tmp_path: Path, install_host: Any, mocker: Any) -> None:
+        """Should not require the deferred service to be known, and never call systemctl cat for it."""
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1, stderr=_generator_lines(("mosquitto.container", "owner.network"))
+        )
+        run = _systemctl(mocker, missing=frozenset({"mosquitto.service"}))
+        prepared = _prepare_members(tmp_path, _members({"mosquitto.container": NETWORK_UNIT}))
+        try:
+            result = install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        assert result.services == ()
+        assert result.start_services == ()
+        assert [call.args[0][2:] for call in run.call_args_list] == [["show-environment"], ["daemon-reload"]]
+        assert (install_host.root / APP / "mosquitto.container").is_file()
+
+    def test_each_missing_reference_is_one_warning_in_unit_order(self, tmp_path: Path, install_host: Any) -> None:
+        """Should warn once per unit and missing unit, in the order the units are installed."""
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1,
+            stderr=_generator_lines(("mosquitto.container", "owner.network"), ("other.container", "owner.volume")),
+        )
+        members = _members({"mosquitto.container": NETWORK_UNIT, "other.container": VOLUME_UNIT})
+
+        prepared = _prepare_members(tmp_path, members)
+        try:
+            assert [message.split(",")[0] for message in prepared.warnings] == [
+                "mosquitto.container references owner.network",
+                "other.container references owner.volume",
+            ]
+            assert prepared.deferred == ("mosquitto.service", "other.service")
+        finally:
+            prepared.cleanup()
+
+    def test_a_real_error_next_to_a_reference_fails_and_lists_only_the_error(self, tmp_path: Path, install_host: Any) -> None:
+        """Should refuse with exit 3 and show only the real error line, not the reference."""
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1,
+            stderr=_generator_lines(
+                ("mosquitto.container", "owner.network"),
+                errors=("quadlet-generator[1]: converting \"other.container\": unsupported key 'NoSuchKey'",),
+            ),
+        )
+
+        with raises(ValueError, match=r"NoSuchKey") as info:
+            _prepare_members(tmp_path, _members({"mosquitto.container": NETWORK_UNIT}))
+
+        message = str(info.value)
+        assert "owner.network was not found" not in message
+        assert "Loading source" not in message
+        assert not install_host.root.exists()
+
+    def test_a_unit_may_reference_an_existing_external_network(self, tmp_path: Path, install_host: Any) -> None:
+        """Contrast with guard 1: a unit that references an external network installs fine."""
+        _unit(install_host.root, "handmade", "owner.network", "[Network]\n")
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1, stderr=_generator_lines(("mosquitto.container", "owner.network"))
+        )
+
+        prepared = _prepare_members(tmp_path, _members({"mosquitto.container": NETWORK_UNIT}))
+        try:
+            assert prepared.warnings == ()
+        finally:
+            prepared.cleanup()
+
+    def test_a_unit_that_ships_an_existing_network_name_is_refused(self, tmp_path: Path, install_host: Any) -> None:
+        """Contrast with the reference case: shipping a file named owner.network shadows it, so it is refused."""
+        _unit(install_host.root, "handmade", "owner.network", "[Network]\n")
+
+        with raises(ValueError, match=r"same file name owner\.network"):
+            _prepare_members(tmp_path, _members({"owner.network": b"[Network]\nSubnet=10.9.0.0/24\n"}))
 
 
 class TestPostReloadVerification:
@@ -268,3 +436,27 @@ class TestPostReloadVerification:
 
         run.assert_not_called()
         assert not install_host.root.exists()
+
+
+class TestDeferredVerification:
+    """Guard 3 keeps checking every service that is not deferred by an unresolved reference."""
+
+    def test_a_missing_service_that_is_not_deferred_is_still_an_error(
+        self, tmp_path: Path, install_host: Any, mocker: Any
+    ) -> None:
+        """Should fail with the service name when a non-deferred service is unknown after reload (exit 1)."""
+        install_host.generator.return_value = GeneratorRun(
+            returncode=1, stderr=_generator_lines(("mosquitto.container", "owner.network"))
+        )
+        _systemctl(mocker, missing=frozenset({"other.service"}))
+        members = _members({"mosquitto.container": NETWORK_UNIT, "other.container": b"[Container]\nImage=x\n"})
+        prepared = _prepare_members(tmp_path, members)
+        try:
+            with raises(SystemdError) as info:
+                install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        message = str(info.value)
+        assert "other.service" in message
+        assert "mosquitto.service" not in message

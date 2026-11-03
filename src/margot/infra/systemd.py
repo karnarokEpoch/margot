@@ -25,11 +25,14 @@ class SystemdError(Exception):
 
 
 @dataclass(frozen=True)
-class GeneratorCheck:
-    """Outcome of a Quadlet generator dry-run. ``detail`` is the trimmed error text when it failed."""
+class GeneratorRun:
+    """Exit status and stderr of a Quadlet generator dry-run. The generated services on stdout are not kept.
 
-    passed: bool
-    detail: str
+    The domain layer decides what the stderr means (``domain.install.judge_generator``).
+    """
+
+    returncode: int
+    stderr: str
 
 
 def user_argv(*args: str) -> list[str]:
@@ -104,23 +107,16 @@ def quadlet_binary() -> str | None:
     return which("quadlet")
 
 
-def check_units(unit_dir: Path, binary: str, environ: Mapping[str, str]) -> GeneratorCheck:
+def check_units(unit_dir: Path, binary: str, environ: Mapping[str, str]) -> GeneratorRun:
     """Run `<binary> -dryrun -user` with ``QUADLET_UNIT_DIRS`` pointing at the staged tree (sprint-13 §3.10).
 
-    The generator replaces the default search path with ``unit_dir``. Its generated services stay on
-    stdout and are not shown. The environment is the caller's, plus ``QUADLET_UNIT_DIRS``.
-
-    The exit status decides. Quadlet also logs progress (``Loading source unit file ...``) on stderr for
-    a valid tree (spike S1 on the host), so stderr alone is not an error. The failure detail keeps only the
-    error lines; if there are none, the whole stderr is used.
+    The generator replaces the default search path with ``unit_dir``, so the dry run sees only the staged
+    files. Its generated services stay on stdout and are not returned. The environment is the caller's,
+    plus ``QUADLET_UNIT_DIRS``. The exit status and the raw stderr are returned; the domain layer judges them.
     """
     result = run([binary, "-dryrun", "-user"], env={**environ, "QUADLET_UNIT_DIRS": str(unit_dir)})
-    if result.returncode == 0:
-        console.debug("Quadlet generator accepted the staged units.")
-        return GeneratorCheck(passed=True, detail="")
-    errors = [line for line in result.stderr.splitlines() if line.strip() and "Loading source" not in line]
-    detail = _trim("\n".join(errors) or result.stderr) or f"generator exited with status {result.returncode}"
-    return GeneratorCheck(passed=False, detail=detail)
+    console.debug(f"Quadlet generator dry run exited with status {result.returncode}.")
+    return GeneratorRun(returncode=result.returncode, stderr=result.stderr)
 
 
 def unit_is_known(service: str) -> bool:
