@@ -839,6 +839,34 @@ and sha256 checked before and after: identical; `systemd-zot` still healthy.
 - `make check`: lint clean; 1636 passed, 3 skipped, 1 failed (the known
   `TestResolveAllPlatformsRealSocket` case). Coverage 93.96%.
 
+#### Follow-up after owner trial (2026-11-03)
+
+The owner tried Step 2 and asked for two changes. Both are done. Step 3 has not started.
+
+- `df488e4` `feat(install): set QUADLET_DIR in every unit drop-in`. Every unit of a selected component gets
+  `Environment="QUADLET_DIR=<application directory>"` in its `50-margot-parameters.conf`, with or without
+  parameters. A descriptor pointer `QUADLET_DIR` is refused (exit 3, "reserved by margot"). The plan states the
+  variable once, outside the parameter table. The marker `parameters[]` still lists descriptor names only.
+- `6bcc82c` `refactor(install): remove three tips from the install result`. The restart line, the 90 s timeout tip
+  and the parameter visibility tip are gone. `InstallResult` drops the `upgraded` and `parameters` fields.
+
+Verification on the reference host, with scratch applications `com-belden-mosquitto-verify` (a copy of the owner's
+Mosquitto source with a renamed unit, port parameter kept) and `com-margot-verify-probe` (no parameters). Both were
+removed afterwards. The owner's `com-belden-mosquitto`, `mosquitto.service` and the zot units were not touched; their
+names and SHA-256 sums match the snapshot taken before the work.
+
+1. `install --dry-run` prints the `QUADLET_DIR` line; nothing written.
+2. `install --yes` without overrides: `systemctl --user cat` shows the drop-in `QUADLET_DIR` after the unit default; the
+   container is healthy; the bind source is the application directory; publish/subscribe round trip works.
+3. `--set mqttPort=18831`: drop-in and unit show `MQTT_PORT=18831`; host port round trip works.
+4. A hand-written `90-local.conf` with another `QUADLET_DIR` wins after a restart and survives a re-install.
+5. The probe unit's drop-in holds only `QUADLET_DIR` (mode 0600), and the merged unit shows it.
+6. The three removed tips appear in no saved output. The WantedBy sentence appears for the Mosquitto unit only.
+7. Scratch services stopped, directories removed, `daemon-reload` run; no verify containers or volumes left.
+
+`make check`: lint clean; 1651 passed, 3 skipped, 1 failed (the known `TestResolveAllPlatformsRealSocket`); coverage
+93.93%.
+
 ### Step 3 — final checks
 
 - [ ] Tests first, then the pure helpers (search-path listing, collision detection over path
