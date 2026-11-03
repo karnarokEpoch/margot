@@ -3,6 +3,7 @@
 import re
 from typing import Any
 
+from oras.auth import AuthenticationException
 from typer.testing import CliRunner
 
 from margot.domain.models import BuildTarget, PackageType
@@ -175,6 +176,21 @@ class TestPushCLI:
 
         assert result.exit_code == 4
         assert "No write access to registry" in _strip_ansi(result.stdout + (result.stderr or ""))
+
+    def test_push_basic_auth_without_credentials_exits_4(self, mocker: Any) -> None:
+        """Should exit 4 with a login hint when a Basic-protected registry has no stored credentials."""
+        mocker.patch(
+            "margot.commands.push.push_service.push",
+            side_effect=AuthenticationException(
+                "Registry zot.example requires authentication. Run `margot auth login zot.example`."
+            ),
+        )
+
+        result = runner.invoke(app, ["push", "--type", "margo"])
+        plain = _strip_ansi(result.stdout + (result.stderr or ""))
+
+        assert result.exit_code == 4
+        assert "margot auth login zot.example" in plain
 
     def test_push_service_value_error_exits_3(self, mocker: Any) -> None:
         """Should exit 3 with error message when service raises ValueError."""
