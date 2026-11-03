@@ -1,7 +1,9 @@
 """Shared test fixtures."""
 
 from io import StringIO
+from pathlib import Path
 import sys
+import tempfile
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -24,6 +26,21 @@ def _pin_terminal_width(monkeypatch: Any) -> None:
     fixture takes effect globally across the test suite without requiring code changes.
     """
     monkeypatch.setenv("COLUMNS", "120")
+
+
+@fixture
+def isolated_tempdir(tmp_path: Path, monkeypatch: Any) -> Path:
+    """Route ``tempfile`` into a per-test directory and return it.
+
+    xdist workers share the system temp directory, so a test that snapshots
+    ``margot-*.yaml`` there also sees files created by other workers. Setting
+    ``tempfile.tempdir`` makes ``mkstemp`` default to this folder instead. The
+    monkeypatch restores the original value at teardown.
+    """
+    temp_dir = tmp_path / "tmp"
+    temp_dir.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_dir))
+    return temp_dir
 
 
 @fixture

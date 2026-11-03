@@ -3,7 +3,6 @@
 import json
 from pathlib import Path
 import re
-import tempfile
 from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import MagicMock
@@ -13,6 +12,7 @@ from typer.testing import CliRunner
 
 from margot.domain.layers import MARGO_DESCRIPTION_MEDIA_TYPE, MARGO_ICON_MEDIA_TYPE_TEMPLATE
 from margot.main import app
+from margot.services import verify as verify_service
 from margot.services.remote import ResolvedRemoteDescriptor
 
 runner = CliRunner()
@@ -1460,7 +1460,9 @@ class TestDescribeRenderedMarker:
         # Should show the static file path
         assert "app.yaml" in plain
 
-    def test_describe_templated_no_temp_file_leak(self, cli_project: Path) -> None:
+    def test_describe_templated_no_temp_file_leak(
+        self, cli_project: Path, isolated_tempdir: Path, mocker: Any
+    ) -> None:
         """Should not leave temp files on disk after describing a .jinja template.
 
         This test verifies that:
@@ -1468,26 +1470,16 @@ class TestDescribeRenderedMarker:
         2. The temp file is cleaned up after parsing
         """
         (cli_project / "margo" / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
+        write_spy = mocker.spy(verify_service, "write_temp_text")
 
-        # Get temp directory and count margot temp files BEFORE running describe
-        temp_dir = Path(tempfile.gettempdir())
-        margot_temp_files_before = set(temp_dir.glob("*margot*.yaml"))
-
-        # Run describe
         result = runner.invoke(app, ["describe"])
         plain = _output(result)
 
         assert result.exit_code == 0
         assert "(rendered)" in plain
-
-        # Count margot temp files AFTER running describe
-        margot_temp_files_after = set(temp_dir.glob("*margot*.yaml"))
-
-        # Find any NEW temp files created by this test (not pre-existing)
-        new_temp_files = margot_temp_files_after - margot_temp_files_before
-
-        # Should have no NEW leftover margot temp files (they should be cleaned up)
-        assert len(new_temp_files) == 0, f"Temp file leak detected: {new_temp_files}"
+        assert write_spy.call_count == 1
+        assert not Path(write_spy.spy_return).exists()
+        assert sorted(isolated_tempdir.glob("margot-*.yaml")) == []
 
 
 class TestDescribeRemote:
