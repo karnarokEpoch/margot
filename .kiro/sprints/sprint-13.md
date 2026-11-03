@@ -100,7 +100,9 @@ systemctl --user start nginx.service                        # printed by install
     `systemd-run -p` test bypasses specifier parsing).
   - Service names come from the **file name**, not the directory: `web.container` → `web.service`,
     `data.volume` → `data-volume.service`. Two applications shipping a same-named unit collide;
-    with two copies in one search tree only one service is generated, silently (§3.10).
+    with two copies in one search tree the first directory in search order wins, silently (§3.10).
+    Suffix → service table, verified by S1: §4 "Spike results". Note `<name>.kube` → `<name>.service`
+    (no suffix), so it collides with `<name>.container` of the same name inside one application.
   - Quadlet search path for the user: `$XDG_RUNTIME_DIR/containers/systemd`,
     `$XDG_CONFIG_HOME/containers/systemd` (default `~/.config/containers/systemd`),
     `/etc/containers/systemd/users/$UID`, `/etc/containers/systemd/users`,
@@ -313,10 +315,12 @@ systemctl --user status nginx.service
 ```
 
 The hint also mentions: a first start may pull images and exceed systemd's 90 s default
-(`TimeoutStartSec`); units with `[Install] WantedBy=default.target` are enabled by the generator
-itself and start at the next login/boot (lingering for boot-time start) — said only if it can be
-read from the unit file. In Step 2, if parameters were applied, the hint states that the values are
-visible through `systemctl --user show` / `cat`.
+(`TimeoutStartSec`). It prints the start command only for `.container`, `.kube` and `.pod` services
+(S1: volumes, networks, images and builds are started by their dependents). **It does not promise
+start at login or boot:** S1 found that generated units are not enabled, `systemctl --user enable`
+refuses them, and no `default.target.wants` link is created. Boot start was not tested. In Step 2,
+if parameters were applied, the hint states that the values are visible through
+`systemctl --user show` / `cat`.
 
 Commands are argument lists, `shell=False`, captured output (text), never `check=True`,
 `console.debug` per call (infra rule). The wrapper lives in `infra/systemd.py`; all of it is
@@ -369,7 +373,9 @@ Exec=nginx -g "daemon off;" --x ${GREETING}
 ```
 
 Use `${NAME}` (braces): it is substituted as a single argument; `$NAME` is word-split by systemd.
-A parameter that no unit file references has no effect.
+A parameter that no unit file references has no effect. The reverse case is silent on the host: a
+`${NAME}` that no value supplies expands to the empty string and the unit still starts (S2d). Margot
+cannot warn about it without parsing unit files; see the decision note in §4 "Spike results".
 
 **Which parameters.** A parameter is *applicable* when at least one of its `targets[].components`
 names a component of the selected profile; other targets are ignored (they belong to other
@@ -403,7 +409,8 @@ One `Environment=` line per variable, sorted by name (deterministic output). The
 (`domain/install_parameters.py::encode_environment`, pure) produces the double-quoted assignment so
 that systemd stores the value **unchanged**: it escapes `\` and `"`, doubles `%` (unit-file
 specifier), and always quotes. Values containing a newline, CR or NUL are refused (exit 3). Exact
-rules and the vector table come from spike S2 and are verified end to end on the real host.
+rules and the vector table: S2 in §4 "Spike results" (19 vectors, byte-exact on the real host;
+`$` needs no escaping in `Environment=`). Newline, CR and NUL were not tested and stay refused.
 
 On upgrade, a previously written parameters drop-in that the new run no longer produces is deleted
 (it is listed in the previous marker). Drop-ins margot did not write are never touched. A
@@ -425,6 +432,10 @@ built last so they can be exercised against the complete flow (units + drop-ins)
    applications installed by margot and hand-written units. The error names both paths. margot never
    renames a unit (that would break `Network=foo.network`-style references) and never shadows
    someone else's. The check also runs in `--dry-run` so the plan reports it.
+   *Derived from S1:* the check is on **generated service names** as well as file names, because
+   `<name>.kube` and `<name>.container` both produce `<name>.service` (and the file-name check misses
+   that). Same-named files in two roots are silent in Quadlet (first root wins, the later one is never
+   loaded), so the guard must catch them before the host is changed.
 2. **Generator dry-run validation (host untouched, exit 3).** Run `quadlet -dryrun -user` with
    `QUADLET_UNIT_DIRS=<staging merge tree, drop-ins included>`. A non-zero exit or error output
    fails the install **before** the host is touched, with the trimmed generator output. Binary
@@ -487,7 +498,7 @@ or more conventional commits. **The dev agent stops at Checkpoint A (after Step 
 
 ### Spikes (first; results written into §2 / §3.7 / §3.9 / §3.10 of this file and reported to the planner)
 
-- [ ] **S1 — quadlet layout on the real rootless session.** `podman --version`. Place a small
+- [x] **S1 — quadlet layout on the real rootless session.** `podman --version`. Place a small
   multi-unit fixture (container + network + volume, and a pod variant) under
   `…/containers/systemd/<app>/`, `systemctl --user daemon-reload`, and determine: generated service
   name per unit type (table for §3.7/§3.10); suffix list as accepted by this Podman (incl. `.image`,
@@ -503,7 +514,7 @@ or more conventional commits. **The dev agent stops at Checkpoint A (after Step 
   content), whether `podman quadlet list` / `rm` misbehave on margot's per-application layout, and
   record whether margot's `.margot-install.json` should also be recognisable by Podman or just
   coexist with it.
-- [ ] **S2 — parameters as unit environment (needed before Step 2 code).** On real Quadlet units
+- [x] **S2 — parameters as unit environment (needed before Step 2 code).** On real Quadlet units
   with a `[Service]` drop-in, establish and record: (a) the encoding of `Environment="NAME=…"` so
   the value is stored by systemd byte-for-byte (check `systemctl --user show -p Environment <svc>`
   after `daemon-reload`) — inputs: empty, leading/trailing spaces, inner spaces, `"`, `'`, `\`, `%`,
@@ -515,6 +526,106 @@ or more conventional commits. **The dev agent stops at Checkpoint A (after Step 
   (empty expansion — does the start fail in a readable way?). Deliver: the encoding rules and the
   table of vectors (input → drop-in line → value seen) that becomes the unit-test fixture, and the
   exact snippet recommended to quadlet authors in the docs.
+
+#### Spike results (recorded 2026-11-03 on the reference host: Podman 5.8.2, systemd 258, rootless user session)
+
+**S1 — layout, generator, search path.**
+
+- Generated service names (the file name decides; `<name>` = file base name):
+
+| Unit file | Generated service | Start needed? |
+| --- | --- | --- |
+| `<name>.container` | `<name>.service` | yes, the workload |
+| `<name>.kube` | `<name>.service` (no suffix) | yes. **Collides with `<name>.container` of the same base name.** |
+| `<name>.pod` | `<name>-pod.service` | no; started by a member container (`Wants=` / `BindsTo=`) |
+| `<name>.volume` | `<name>-volume.service` | no; pulled in by `Requires=` of a unit that uses it |
+| `<name>.network` | `<name>-network.service` | no; same as volume |
+| `<name>.image` | `<name>-image.service` | oneshot pull; started manually in the test (dependency case not tested) |
+| `<name>.build` | `<name>-build.service` | oneshot; without `File=` or `SetWorkingDirectory=` the generator rejects the unit |
+| `<name>.artifact` | `<name>-artifact.service` | oneshot `podman artifact pull`; generated, not started |
+
+- Accepted suffixes: `container volume network pod image build kube artifact`. An unknown key is an error.
+- A `Network=` or `Volume=` reference uses the **unit file name** (`Network=net.network`), not the
+  `NetworkName=`. The generator reports `requested Quadlet unit … was not found` otherwise.
+- Starting one `.container` also starts the `.network` and `.volume` it requires. Starting a pod
+  member starts the pod. So the next-step lines need only the workload units.
+- Generator: `/usr/libexec/podman/quadlet` is the only binary (`/usr/lib/podman/quadlet` absent,
+  not on `PATH`). `quadlet -dryrun -user` with `QUADLET_UNIT_DIRS=<tree>` replaces the default search
+  path (it does not extend it). Valid tree: exit 0, one `---<service>.service---` block per unit on
+  stdout. One invalid unit: its error goes to stderr, the other units are still printed, the last
+  line is `processing encountered some errors`, exit **1**.
+- Drop-ins `<unit>.<suffix>.d/*.conf` beside a unit are merged into the generated `[Service]`.
+  Sub-directories are scanned recursively (`sub/deep/x.container` → `x.service`).
+- Duplicate unit names: the **first** search directory wins, silently. The later copy is not loaded
+  and not logged. Tested on the real session: `$XDG_RUNTIME_DIR/containers/systemd` beats
+  `~/.config/containers/systemd`. The `/etc/containers/systemd/users*` and
+  `/usr/share/containers/systemd/users*` roots are **not verified** (absent here, no root).
+- `[Install] WantedBy=default.target`: generated units report `WantedBy=default.target`, but
+  `systemctl --user is-enabled` says `generated`, `systemctl --user enable` fails with
+  `Unit … is transient or generated`, and no `default.target.wants` link appears. **This contradicts
+  the §3.7 hint about login/boot start; see the decision note below.** Boot start was not tested
+  (no reboot).
+- `systemctl --user stop` on a container whose main process ignores SIGTERM (`sleep` as PID 1 in the
+  test) waits 10 s, SIGKILLs it, and leaves the unit `failed` (status 137). Images must handle SIGTERM.
+- `podman quadlet install <dir>` (5.8.2): copies **flat** files only. A sub-directory is an error
+  (`… is not a file`) and its files are not installed. It writes a hidden `.<dir>.app` file: a plain
+  newline list of the installed file names. Decision stays: manual copy, because margot needs the
+  per-application directory and drop-ins.
+- `podman quadlet list`, `print`, `rm` do recurse into sub-directories. `rm` removes only the unit
+  file and leaves the directory and `.margot-install.json` in place. Margot apps show an empty
+  APPLICATION column. The two layouts coexist.
+
+**S2 — parameters as unit environment.**
+
+- Encoding rule (verified): write `Environment="NAME=<value>"` always double-quoted, after escaping
+  `\` → `\\`, `"` → `\"`, `%` → `%%`. Nothing else needs escaping: `$HOME`, `${HOME}` and `$$` are
+  stored literally. An unescaped `%b` in a drop-in was expanded by systemd to the boot ID (a
+  specifier), which is why `%` must be doubled.
+- Vector test: each row below was written as a drop-in line; the container then received the value
+  through `podman inspect` (`Config.Env`) and matched the input **byte for byte** (19 of 19).
+
+| # | Input | Drop-in line | Seen by the container |
+| --- | --- | --- | --- |
+| 00 | (empty) | `Environment="S2V00="` | empty |
+| 01 | ` lead` | `Environment="S2V01= lead"` | ` lead` |
+| 02 | `trail ` | `Environment="S2V02=trail "` | `trail ` |
+| 03 | `a  b` | `Environment="S2V03=a  b"` | `a  b` |
+| 04 | `say "hi"` | `Environment="S2V04=say \"hi\""` | `say "hi"` |
+| 05 | `it's` | `Environment="S2V05=it's"` | `it's` |
+| 06 | `back\slash` | `Environment="S2V06=back\\slash"` | `back\slash` |
+| 07 | `50%` | `Environment="S2V07=50%%"` | `50%` |
+| 08 | `100%%` | `Environment="S2V08=100%%%%"` | `100%%` |
+| 09 | `$HOME` | `Environment="S2V09=$HOME"` | `$HOME` |
+| 10 | `${HOME}` | `Environment="S2V10=${HOME}"` | `${HOME}` |
+| 11 | `$$` | `Environment="S2V11=$$"` | `$$` |
+| 12 | `#not comment` | `Environment="S2V12=#not comment"` | `#not comment` |
+| 13 | `a;b` | `Environment="S2V13=a;b"` | `a;b` |
+| 14 | `k=v=w` | `Environment="S2V14=k=v=w"` | `k=v=w` |
+| 15 | `tab⇥here` (TAB) | `Environment="S2V15=tab⇥here"` | `tab⇥here` |
+| 16 | `é ü 中` | `Environment="S2V16=é ü 中"` | `é ü 中` |
+| 17 | `end\` | `Environment="S2V17=end\\"` | `end\` |
+| 18 | 1024 bytes | `Environment="S2V18=abcdef…"` | identical 1024 bytes |
+
+  Not tested: newline, CR, NUL. The design refuses them.
+
+- Consumption (verified in the running container): `PublishPort=${S2_PORT}:8080`, `Exec=… ${S2_GREET}`
+  (value with a space stays **one** argument), `Exec=… $S2_SPLIT` (word-split into two arguments),
+  `Label=k=${S2_LABEL}` (one label with a space), `Volume=${S2_VOL}:/data`, `Image=…:${S2_TAG}`,
+  `Environment=S2_ENVREF=${S2_GREET}`. A value that contains `$HOME` is not expanded a second time.
+- A bare `Environment=NAME` inside `[Container]` passes the unit's value into the container.
+- **Unset variable (not a readable failure).** `${S2_NOT_SET}` expands to an empty argument and the
+  service starts. `PublishPort=${S2_NOPORT}:8082` starts too and publishes a random host port. No
+  message is printed. Margot cannot see this in the unit file. Decision note below.
+
+**Decision notes for the planner (not applied to the design by the dev agent):**
+
+1. `WantedBy`: the §3.7 hint must not promise login or boot start. Options: drop the claim; or a
+   separate follow-up for enabling generated units. Boot start is unverified.
+2. Start targets: print `start` only for `.container`, `.kube` and `.pod` services. Volumes,
+   networks, images, builds and artifacts are started by their dependents.
+3. Unset `${NAME}`: an unset variable starts silently. Options: accept as documented limitation, or
+   parse `${…}` references from the unit files at install time and warn when a referenced name has no
+   value. The second is more work and not in the design yet.
 
 ### Step 1 — files
 
