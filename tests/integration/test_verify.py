@@ -346,7 +346,7 @@ class TestDescriptorResolution:
 
     def test_missing_margo_yaml_and_no_fallback_match_raises(self, tmp_path: Path) -> None:
         """Should raise with both fallback paths tried when neither descriptor exists."""
-        with raises(ValueError, match=r"No app.yaml found. Searched:"):
+        with raises(ValueError, match=r"No app.yaml found. Searched: .*app\.yaml, .*margo[/\\]app\.yaml$"):
             resolve_descriptor(str(tmp_path))
 
     def test_root_jinja_wins_over_margo_subdir_static_is_rejected(self, tmp_path: Path) -> None:
