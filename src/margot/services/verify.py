@@ -187,12 +187,13 @@ def _find_descriptor(source_dir: Path) -> Path:
 def _find_descriptor_without_margo_yaml(project_dir: Path) -> Path:
     """Locate a static app.yaml when no margo.yaml is present.
 
-    Tries, in order:
-    1. <project_dir>/app.yaml
-    2. <project_dir>/margo/app.yaml
+    Candidate directories are tried in order: <project_dir>, then <project_dir>/margo.
+    Within each directory, in order:
+    1. app.yaml exists there -> returned immediately.
+    2. app.yaml.jinja exists there -> ValueError immediately; the next directory is not
+       searched. Rendering requires margo.yaml's context, which is not available here.
 
-    Static only — a .jinja descriptor found at either path is an error, since rendering
-    requires margo.yaml's context, which by definition is not available here.
+    If neither directory contains either file, raises naming both static candidate paths.
 
     Args:
         project_dir: Directory to search in.
@@ -201,35 +202,22 @@ def _find_descriptor_without_margo_yaml(project_dir: Path) -> Path:
         Path to the located app.yaml.
 
     Raises:
-        ValueError: If a .jinja descriptor is found instead of a static one, or if
-            neither candidate path exists.
+        ValueError: If a candidate directory holds only a .jinja descriptor, or if
+            neither candidate directory holds a descriptor.
     """
-    # Candidate paths in search order
-    candidates = [
-        project_dir / STATIC_DESCRIPTOR,
-        project_dir / "margo" / STATIC_DESCRIPTOR,
-    ]
+    candidate_dirs = [project_dir, project_dir / "margo"]
 
-    jinja_candidates = [
-        project_dir / JINJA_DESCRIPTOR,
-        project_dir / "margo" / JINJA_DESCRIPTOR,
-    ]
-
-    # First, check if a static descriptor exists at any candidate
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-
-    # No static descriptor found — check if a .jinja descriptor exists
-    # If so, raise an actionable error rather than falling through to "not found"
-    for jinja_candidate in jinja_candidates:
-        if jinja_candidate.is_file():
+    for directory in candidate_dirs:
+        static_file = directory / STATIC_DESCRIPTOR
+        if static_file.is_file():
+            return static_file
+        jinja_file = directory / JINJA_DESCRIPTOR
+        if jinja_file.is_file():
             raise ValueError(
-                f"Found {jinja_candidate} but no margo.yaml is present. "
+                f"Found {jinja_file} but no margo.yaml is present. "
                 "Jinja2 templates require margo.yaml context for rendering — "
                 "either provide a static app.yaml or add margo.yaml to the directory."
             )
 
-    # Neither static nor Jinja exists — raise with both paths tried
-    paths_tried = ", ".join(str(c) for c in candidates)
+    paths_tried = ", ".join(str(directory / STATIC_DESCRIPTOR) for directory in candidate_dirs)
     raise ValueError(f"No app.yaml found. Searched: {paths_tried}")

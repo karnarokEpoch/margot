@@ -64,7 +64,10 @@ their local semantics and mutual-exclusion checks in remote mode.
     (`application/vnd.margo.app.v1+json`). Compose, quadlet, and unknown artifact types are rejected.
 3. Accepts any existing OCI tag — no SemVer requirement for read-only inspection.
 4. Pulls the artifact into a temporary directory (`recursive=False`). The pull is non-persistent.
-5. Validates the pulled `app.yaml` through the existing schema pipeline: Schema A/B, findings, strictness, and
+    The descriptor layer is located by `mediaType == application/vnd.margo.app.description.v1+yaml`
+    — not by filename. If multiple layers share that media type, a warning lists them and the first
+    (manifest order) is used.
+5. Validates the pulled descriptor through the existing schema pipeline: Schema A/B, findings, strictness, and
     exit rules all behave identically to local mode.
 6. Removes the temporary directory after validation, including on error.
 
@@ -73,11 +76,24 @@ their local semantics and mutual-exclusion checks in remote mode.
 `verify` never reads `<build_dir>` and never requires a prior `build`.
 
 1. `--manifest` if given — may point at `app.yaml` or `app.yaml.jinja`.
-2. Otherwise, `margo.yaml` is loaded from `--project-dir` and its `directory` field is
+2. Otherwise, if `margo.yaml` is present in `--project-dir`: its `directory` field is
     searched for `app.yaml.jinja` (first), then `app.yaml`. Both present is an error;
     neither is an error.
-3. A `.jinja` descriptor is rendered to a temporary file with Jinja2 `StrictUndefined`.
-    The rendered file is what gets validated.
+3. Otherwise (no `margo.yaml`): fallback search for a static `app.yaml`, directory by directory,
+    `<project-dir>` first, then `<project-dir>/margo`. In each directory, `app.yaml` is used if
+    present; otherwise an `app.yaml.jinja` there is an error and the search stops (it does not
+    continue to the next directory, so a root `app.yaml.jinja` fails even if `margo/app.yaml`
+    exists). No project context is available in this mode — same as `--manifest`.
+    - A `.jinja` file at a candidate location (without `margo.yaml`) fails with exit 3:
+      `Found <path> but no margo.yaml is present. Jinja2 templates require margo.yaml
+      context for rendering — either provide a static app.yaml or add margo.yaml to the directory.`
+    - Neither location has an `app.yaml` (exit 3):
+      `No app.yaml found. Searched: <both paths>`
+4. A `.jinja` descriptor (step 2, with `margo.yaml` present) is rendered to a temporary file
+    with Jinja2 `StrictUndefined`. The rendered file is what gets validated.
+
+This fallback makes it possible to run `verify` directly on a directory produced by
+`margot pull`, with no `margo.yaml` required.
 
 Both schema passes validate the same resolved file — the descriptor is never re-rendered.
 
@@ -170,7 +186,7 @@ successful result or validation result; errors are emitted only on stderr.
 | 0    | Validation passed.                                                                                            |
 | 1    | Unexpected or uncategorized failure.                                                                         |
 | 2    | Usage failure, such as `--recommend` and `--only-recommend` together.                                        |
-| 3    | Descriptor resolution, schema, or semantic validation failure.                                              |
+| 3    | Descriptor resolution, schema, or semantic validation failure. Includes: `app.yaml` not found (local or fallback), Jinja2 template found without `margo.yaml`, schema errors, or unrecognized `kind`. |
 | 4    | Remote registry or authentication failure.                                                                   |
 
 ## Example
@@ -181,6 +197,10 @@ margot verify
 
 # Validate a published artifact from a registry
 margot verify public.ecr.aws/g2n4p2m7/margo:1.0.0
+
+# Pull an artifact, then validate locally — no margo.yaml required
+margot pull public.ecr.aws/g2n4p2m7/margo:1.0.0 --output ./out
+margot verify --project-dir ./out
 
 # Remote validation with the recommended schema as an advisory second pass
 margot verify public.ecr.aws/g2n4p2m7/margo:1.0.0 --recommend
