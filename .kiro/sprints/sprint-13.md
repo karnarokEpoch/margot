@@ -316,10 +316,16 @@ systemctl --user status nginx.service
 
 The hint also mentions: a first start may pull images and exceed systemd's 90 s default
 (`TimeoutStartSec`). It prints the start command only for `.container`, `.kube` and `.pod` services
-(S1: volumes, networks, images and builds are started by their dependents). **It does not promise
-start at login or boot:** S1 found that generated units are not enabled, `systemctl --user enable`
-refuses them, and no `default.target.wants` link is created. Boot start was not tested. In Step 2,
-if parameters were applied, the hint states that the values are visible through
+(S1: volumes, networks, images and builds are started by their dependents). **Start at login/boot
+(corrected by the planner after S1):** a Quadlet unit whose `[Install]` section has
+`WantedBy=default.target` is enabled **by the generator itself** (it creates
+`$XDG_RUNTIME_DIR/systemd/generator/default.target.wants/<service> -> ../<service>`; verified on the
+owner's `zot.service`). `systemctl --user is-enabled` therefore reports `generated` and
+`systemctl --user enable` is neither needed nor allowed; S1 misread this. The hint says "starts at the next
+login/boot (at boot without a login only if lingering is on: `loginctl enable-linger`)" **only for a
+service whose unit file declares `WantedBy=default.target`** (read from the unit file, pure helper in
+`domain/install.py`), and says nothing otherwise. `install` itself still never starts or enables
+anything. In Step 2, if parameters were applied, the hint states that the values are visible through
 `systemctl --user show` / `cat`.
 
 Commands are argument lists, `shell=False`, captured output (text), never `check=True`,
@@ -560,11 +566,14 @@ or more conventional commits. **The dev agent stops at Checkpoint A (after Step 
   and not logged. Tested on the real session: `$XDG_RUNTIME_DIR/containers/systemd` beats
   `~/.config/containers/systemd`. The `/etc/containers/systemd/users*` and
   `/usr/share/containers/systemd/users*` roots are **not verified** (absent here, no root).
-- `[Install] WantedBy=default.target`: generated units report `WantedBy=default.target`, but
-  `systemctl --user is-enabled` says `generated`, `systemctl --user enable` fails with
-  `Unit … is transient or generated`, and no `default.target.wants` link appears. **This contradicts
-  the §3.7 hint about login/boot start; see the decision note below.** Boot start was not tested
-  (no reboot).
+- `[Install] WantedBy=default.target`: generated units report `WantedBy=default.target`, and
+  `systemctl --user is-enabled` says `generated`; `systemctl --user enable` fails with
+  `Unit … is transient or generated`. S1 concluded that no `default.target.wants` link appears; **the
+  planner's check on the owner's `zot.service` contradicts this** (the generator links it under
+  `$XDG_RUNTIME_DIR/systemd/generator/default.target.wants/`). `generated` is the normal state and
+  `enable` is not needed. §3.7 is corrected; the link for a unit in margot's per-application
+  sub-directory is re-verified with the Mosquitto app (see Checkpoint A addendum). Boot start itself
+  was not tested (no reboot).
 - `systemctl --user stop` on a container whose main process ignores SIGTERM (`sleep` as PID 1 in the
   test) waits 10 s, SIGKILLs it, and leaves the unit `failed` (status 137). Images must handle SIGTERM.
 - `podman quadlet install <dir>` (5.8.2): copies **flat** files only. A sub-directory is an error
@@ -617,15 +626,15 @@ or more conventional commits. **The dev agent stops at Checkpoint A (after Step 
   service starts. `PublishPort=${S2_NOPORT}:8082` starts too and publishes a random host port. No
   message is printed. Margot cannot see this in the unit file. Decision note below.
 
-**Decision notes for the planner (not applied to the design by the dev agent):**
+**Decision notes (resolved by the owner and planner after Checkpoint A):**
 
-1. `WantedBy`: the §3.7 hint must not promise login or boot start. Options: drop the claim; or a
-   separate follow-up for enabling generated units. Boot start is unverified.
-2. Start targets: print `start` only for `.container`, `.kube` and `.pod` services. Volumes,
+1. `WantedBy`: resolved. The §3.7 hint reads `WantedBy=default.target` in the unit file and, only when
+   present, says the service starts at the next login/boot (lingering for boot without a login). The
+   earlier "no promise" wording is dropped.
+2. Start targets: print `start` only for `.container`, `.kube` and `.pod` services (owner: yes). Volumes,
    networks, images, builds and artifacts are started by their dependents.
-3. Unset `${NAME}`: an unset variable starts silently. Options: accept as documented limitation, or
-   parse `${…}` references from the unit files at install time and warn when a referenced name has no
-   value. The second is more work and not in the design yet.
+3. Unset `${NAME}`: resolved. An unset variable starts silently; this stays a **documented limitation**.
+   No `${…}` parsing and no warning will be built (owner: forget it).
 
 ### Step 1 — files
 
@@ -711,8 +720,8 @@ Findings from Checkpoint A (for the planner; the design was not changed):
    `429 Too Many Requests`). The shared remote path then maps it to exit 3, not exit 4. `describe` and `verify`
    behave the same way. This predates install and needs a shared fix in `infra/oci.py`, which this sprint does
    not change.
-4. **`WantedBy=default.target` is not honoured by install.** Generated units are not enabled (see §3.7 and
-   spike S1). The hint says so and makes no boot-start promise.
+4. **`WantedBy=default.target` hint.** Step 1 shipped without the login/boot sentence. Follow-up in
+   Step 2's delegation: read `WantedBy=default.target` from the unit file and add the sentence (§3.7).
 
 Not verified on the host: boot or login start; the `/etc` and `/usr/share` Quadlet roots (absent and no root);
 the collision and generator guards (Step 3); a registry rate-limit retry beyond one manual retry.
