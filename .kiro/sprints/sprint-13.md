@@ -259,7 +259,8 @@ host? [y/N]` through `console.confirm()`; **declined → "Aborted: nothing was i
 (documented in `docs/exit-codes.md`). No TTY without `--yes`/`--dry-run` → exit 2.
 
 Declared parameters that are not applied (Step 1: all of them; Step 2: those without a value):
-`domain/install.py::unapplied_parameters(doc, component_names)` returns their names; one
+`domain/install_parameters.py::resolve_parameters(doc, component_names, overrides)` returns the
+bindings and the names of the applicable parameters without a value (`unapplied`); one
 `console.warning` lists them.
 
 ### 3.6 `console.confirm`
@@ -398,8 +399,8 @@ receives all of that component's variables (documented; per-unit targeting is a 
 | --- | --- |
 | `--set NAME=VALUE` | wins over the descriptor; `NAME` must be an applicable parameter (else exit 3, listing the applicable names); the value is used as given |
 | descriptor `value` | used when no `--set`; rendered as: string as is, integer/double decimal, boolean `true`/`false` |
-| neither | not applied, listed by `unapplied_parameters` |
-| array data types (descriptor value is a list) | refused for quadlet when applicable (exit 3, names the parameter) — no invented separator |
+| neither | not applied, listed by `resolve_parameters` as `unapplied` |
+| array data types (descriptor value is a list) | refused for quadlet when the descriptor value would be applied (no `--set`): exit 3, names the parameter. A `--set` value replaces the list and is not refused. No invented separator |
 
 **Drop-in file.** For each unit `U.<suffix>` of the component:
 `U.<suffix>.d/50-margot-parameters.conf`, mode `0600`:
@@ -486,7 +487,7 @@ component-name sanitisation (it sanitises by itself, §3.3).
 | --- | --- |
 | `commands/install.py` | Typer parsing, usage checks, plan rendering, confirmation, `try/finally` cleanup, exit codes; registered in `main.py` |
 | `services/install.py` | `prepare_install`, `apply_install`; source resolution (reusing `resolve_remote_descriptor`, `prepare_oci_retrieval`, `pull_prepared_context`, Sprint 12 resolution); Step 3 guards; `console.info` per step |
-| `domain/install.py` | profile selection, component specs, payload and merge validation, unit → service derivation, collision detection (pure, over path lists), `unapplied_parameters`, plan and record dataclasses |
+| `domain/install.py` | profile selection, component specs, payload and merge validation, unit → service derivation, collision detection (pure, over path lists), WantedBy detection, plan and record dataclasses |
 | `domain/install_parameters.py` (Step 2) | applicable parameters, value resolution, drop-in text rendering, `encode_environment` — pure |
 | `infra/systemd.py` | `systemctl --user` calls, quadlet generator lookup and dry-run |
 | `infra/install_store.py` | marker read/write, XDG paths, search-path listing, file placement and stale-file removal |
@@ -735,28 +736,87 @@ entries of `podman images`, and on this host both are the same image ID (`localh
 
 ### Step 2 — parameters
 
-- [ ] Tests first, then `domain/install_parameters.py`: applicable-parameter selection by
+- [x] Tests first, then `domain/install_parameters.py`: applicable-parameter selection by
   component, conflicts (same pointer twice), pointer validity, value resolution (`--set` over
   descriptor value; none → unapplied; bool/number rendering), array refusal, drop-in text rendering
   (deterministic order, header, `[Service]`), `encode_environment` against **every vector from S2**,
   newline/CR/NUL refusal.
-- [ ] `--set` option on `commands/install.py` (usage error without `=`; repeated names: last wins,
+- [x] `--set` option on `commands/install.py` (usage error without `=`; repeated names: last wins,
   announced; unknown name → exit 3); parameter table in the plan (values containing `[`…`]` render
   intact).
-- [ ] `apply_install`: a drop-in written beside **every** unit of the target component, mode
+- [x] `apply_install`: a drop-in written beside **every** unit of the target component, mode
   `0600`; stale margot drop-ins removed on upgrade; user-named drop-ins untouched; marker
   `parameters[]` holds names only and `files[]` lists the drop-ins.
 - [ ] Update `docs/examples/full.md` / `docs/templating.md` quadlet samples so the unit files
-  reference `${NGINX_PORT}` (docs-writer, with the install page).
+  reference `${NGINX_PORT}` (docs-writer, with the install page). **Open: docs-writer at close-out.
+  Not done in Step 2 (`docs/` untouched).**
+
+#### Step 2 status
+
+Done on `feat/add-install-cmd`, one commit per task (`git log`: WantedBy hint, parameter rules,
+parameters through drop-ins). Tests: `tests/unit/test_domain_install_parameters.py` (all S2
+vectors and the refusals), `tests/integration/test_install_parameters.py` (drop-ins, marker,
+upgrade cleanup, refusals), `tests/e2e/test_install_cli.py` (`TestParameters`, `TestResultReport`),
+`tests/unit/test_console.py` (`print_line`).
+
+Deviations from the text above (for the planner to confirm):
+
+- `unapplied_parameters(doc, component_names)` is replaced by `resolve_parameters(doc,
+  component_names, overrides)`, which returns the bindings and the `unapplied` names together.
+- The array refusal applies only when the descriptor list would be used. A `--set` value replaces it.
+- A unit that two components ship receives the variables of both. One variable with two different
+  values for that unit is exit 3.
+- `console.print_line` was added to `console.py` (not in the design) so the installed directory
+  prints on its own line without wrapping or cropping.
+- The result also prints a line on how to see parameter values (`systemctl --user show` / `cat`), and
+  the upgrade restart hint (from the Checkpoint A decision list).
 
 ### Checkpoint B — Step 2 real-host verification and review (required — not CI)
 
-- [ ] Install with defaults and with `--set` (a value with spaces, `%`, `$` and `"`); start the
+- [x] Install with defaults and with `--set` (a value with spaces, `%`, `$` and `"`); start the
   unit with the printed command; confirm with
   `systemctl --user show -p Environment`, `podman inspect` / `podman exec … printenv` and
   `podman ps` (published port) that the unit and the container see each value exactly;
   `systemctl --user cat` shows the merged unit; a hand-written `90-local.conf` overrides and
   survives a re-install. Paste outcomes. `make check` passes. **Stop and report.**
+
+#### Checkpoint B result (reference host, Podman 5.8.2, systemd 258, Linger=yes)
+
+Scratch copy of the owner's Mosquitto app (`margo build -t all` in the copy). Zot units, containers
+and sha256 checked before and after: identical; `systemd-zot` still healthy.
+
+- (a) Defaults: `install --yes` wrote `mosquitto.container.d/50-margot-parameters.conf` (mode 0600,
+  `MQTT_PORT=1883`). `systemctl --user start` failed with
+  `statfs /home/louis/.config/containers/systemd/mosquitto.conf: no such file or directory`, as
+  predicted in Checkpoint A. `Restart=always` ended in "Start request repeated too quickly".
+- (b) Hand-written `90-local.conf` with `Environment=QUADLET_DIR=%E/containers/systemd/com-belden-mosquitto`,
+  `daemon-reload`, start: healthy, bind source `com-belden-mosquitto/mosquitto.conf`, publish and
+  subscribe inside the container round trip OK.
+- (c) `--set mqttPort=1884`: drop-in `MQTT_PORT=1884`; `systemctl --user show -p Environment` showed
+  `MQTT_PORT=1884` and the local `QUADLET_DIR`; `90-local.conf` survived and wins. Restart published
+  `0.0.0.0:1884->1883`; a throwaway client container on the host network round-tripped a message on
+  1884.
+- (d) Re-install without `--set`: drop-in back to `MQTT_PORT=1883`; restart published 1883 again.
+- (e) `--dry-run` shows the parameter table (parameter · value · source · variable · units).
+- Exotic values (throwaway `margot-b-check`, unit uses `Exec=sleep ${EX_SLEEP}`,
+  `PublishPort=${EX_PORT}:8080`, `Label=owner=${EX_LABEL}`, bare `Environment=` for 11 variables, base
+  image already local). Byte-exact for every variable, both in the unit and in the container: the
+  unit side was read with `busctl --user --json=short … Environment | jq -r '.data[]'` (the raw value,
+  not the quoted `systemctl show` display). Descriptor defaults: spaces, `%%`, `$`, `"` and `'`, `\`,
+  `=`, UTF-8, TAB, 1024 bytes, bool, float. `--set` values: lead and trail spaces, `%`, `$$ ${PATH}
+  $(id)` (not executed), `"`, `\`, `=`, `ßπ→漢字 😀`, TAB, 1024 bytes. The `Exec` (`sleep 3601`),
+  published port (`18081`) and label with quotes and `=` also resolved.
+- Refusals: `--set` with a newline → exit 3 (drop-in unchanged); a descriptor value with NUL and a
+  value with CR → exit 3 on `--dry-run`; unknown `--set` name → exit 3 with the applicable names; `--set`
+  without `=` → exit 2.
+- WantedBy hint: Mosquitto (`WantedBy=default.target`) prints "starts at the next login/boot …
+  lingering". The exotic unit (no `[Install]`) prints nothing about it.
+- Generator: a `[Service]` drop-in beside a `.network` unit is merged into `net-network.service`
+  (`quadlet -dryrun -user`).
+- Cleanup: both services stopped and removed, both margot directories removed, `daemon-reload`, scratch
+  deleted, no mosquitto or exotic containers or unit files left. Images were not removed.
+- `make check`: lint clean; 1636 passed, 3 skipped, 1 failed (the known
+  `TestResolveAllPlatformsRealSocket` case). Coverage 93.96%.
 
 ### Step 3 — final checks
 
