@@ -315,8 +315,7 @@ systemctl --user start nginx.service
 systemctl --user status nginx.service
 ```
 
-The hint also mentions: a first start may pull images and exceed systemd's 90 s default
-(`TimeoutStartSec`). It prints the start command only for `.container`, `.kube` and `.pod` services
+The hint prints the start command only for `.container`, `.kube` and `.pod` services
 (S1: volumes, networks, images and builds are started by their dependents). **Start at login/boot
 (corrected by the planner after S1):** a Quadlet unit whose `[Install]` section has
 `WantedBy=default.target` is enabled **by the generator itself** (it creates
@@ -326,8 +325,13 @@ owner's `zot.service`). `systemctl --user is-enabled` therefore reports `generat
 login/boot (at boot without a login only if lingering is on: `loginctl enable-linger`)" **only for a
 service whose unit file declares `WantedBy=default.target`** (read from the unit file, pure helper in
 `domain/install.py`), and says nothing otherwise. `install` itself still never starts or enables
-anything. In Step 2, if parameters were applied, the hint states that the values are visible through
-`systemctl --user show` / `cat`.
+anything.
+
+**Output stays concise (owner, after trying Step 2).** The result prints only: the installed directory,
+the generated services, the `start`/`status` commands and the `WantedBy=default.target` line above. It
+does **not** print the first-start timeout tip, the "running services keep the old unit until restarted"
+tip, or the "parameter values are visible through systemctl" tip. Those belong in the docs, not in the
+command output.
 
 Commands are argument lists, `shell=False`, captured output (text), never `check=True`,
 `console.debug` per call (infra rule). The wrapper lives in `infra/systemd.py`; all of it is
@@ -422,6 +426,23 @@ rules and the vector table: S2 in §4 "Spike results" (19 vectors, byte-exact on
 On upgrade, a previously written parameters drop-in that the new run no longer produces is deleted
 (it is listed in the previous marker). Drop-ins margot did not write are never touched. A
 later-sorting user drop-in overrides margot's — by design (`systemctl --user edit` also works).
+
+**Reserved variable `QUADLET_DIR` (owner decision after trying Step 2).** Quadlet files that mount bundled
+files (e.g. `Volume=${QUADLET_DIR}/mosquitto.conf:…`) need the directory the files were placed in. A unit
+authored for a flat `podman quadlet install` sets `QUADLET_DIR=%E/containers/systemd`, which is wrong
+under margot's `<application-id>/` directory. Therefore **margot always writes
+`Environment="QUADLET_DIR=<absolute application directory>"` into the drop-in of every unit of every
+selected component**, with or without descriptor parameters (so the drop-in `50-margot-parameters.conf`
+exists for every unit). The path is the installed directory of §3.7 (XDG-aware), encoded with
+`encode_environment`. It sorts with the other variables, is listed in the marker `files[]` like every
+drop-in, and appears in the plan (one line naming the variable and the path, not repeated per unit).
+`QUADLET_DIR` is **reserved**: a descriptor parameter whose pointer is `QUADLET_DIR` on a selected
+component is refused (exit 3, names parameter and component), and `--set` cannot reach it. A user
+drop-in sorting later (e.g. `90-local.conf`) can still override it. The `QUADLET_DIR` default in the
+unit file is overridden because the drop-in is merged after the unit's own `[Service]` lines (proved for
+`MQTT_PORT` at Checkpoint A/B and visible in `systemctl --user cat`). Drop-ins are merged by Quadlet
+into the generated service, so `systemctl --user cat <service>` shows the `Environment=` lines inside
+the generated unit, not as a separate drop-in block.
 
 **Plan and storage.** The plan shows a table: parameter · value · source (`descriptor` / `--set`)
 · variable · units. Values appear in clear text on screen. The drop-in is `0600`, but the value is
