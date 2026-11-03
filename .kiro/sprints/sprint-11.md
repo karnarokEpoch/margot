@@ -264,62 +264,62 @@ paths.
 
 ## 4. Checkable Steps
 
-- [ ] Add `MARGO_DESCRIPTION_MEDIA_TYPE` and the four `*_TEMPLATE` constants +
+- [x] Add `MARGO_DESCRIPTION_MEDIA_TYPE` and the four `*_TEMPLATE` constants +
   `MARGO_RESOURCE_FALLBACK_MEDIA_TYPE` to `domain/layers.py`.
-- [ ] Implement a pure resource-resolution function (new, in `domain/` or `infra/` per the
+- [x] Implement a pure resource-resolution function (new, in `domain/` or `infra/` per the
   purity precedent check above) that computes the push file-entry list from a parsed
   `app.yaml` dict + margo build dir path, per the algorithm in section 3.
-- [ ] Rewrite `infra/oci.py::push_margo` to use the new resolution function instead of the
+- [x] Rewrite `infra/oci.py::push_margo` to use the new resolution function instead of the
   hardcoded `optional` tuple list; thread through the missing-file warnings.
-- [ ] Unit tests: icon as `.svg`, icon as no-extension file (`bin` fallback), an extra
+- [x] Unit tests: icon as `.svg`, icon as no-extension file (`bin` fallback), an extra
   unreferenced `resources/` file (fallback media type + title annotation), a field
   pointing at a missing file (warning emitted, push continues without that file), and a
   regression test for the four original filenames: `icon.png` → `icon.v1+png`, `license.txt` →
   `licenseFile.v1+txt`, `release-notes.md` → `releaseNotes.v1+markdown`, `description.md` →
   `descriptionFile.v1+markdown`.
-- [ ] Rename the license template to `MARGO_LICENSE_FILE_MEDIA_TYPE_TEMPLATE` /
+- [x] Rename the license template to `MARGO_LICENSE_FILE_MEDIA_TYPE_TEMPLATE` /
   `…licenseFile.v1+{ext}`; update the two existing assertions that expect `license.v1+txt`.
-- [ ] Implement the extension → token table (`jpg`/`jpeg` → `jpeg`, `tif`/`tiff` → `tiff`,
+- [x] Implement the extension → token table (`jpg`/`jpeg` → `jpeg`, `tif`/`tiff` → `tiff`,
   `md`/`markdown` → `markdown`, else pass-through; `txt` NOT mapped); unit-test each row, an
   uppercase extension, an unmapped extension, and no extension (`bin`).
-- [ ] Fix the duplicate resource layer: unit test with a **relative** `margo_dir` (chdir into
+- [x] Fix the duplicate resource layer: unit test with a **relative** `margo_dir` (chdir into
   `tmp_path`) asserting a referenced icon appears exactly once; also a symlinked build dir.
-- [ ] Fix nested titles: unit test with `resources/screenshots/a.png` and
+- [x] Fix nested titles: unit test with `resources/screenshots/a.png` and
   `resources/other/a.png` asserting distinct titles with their sub-folder.
-- [ ] Add `MARGO_RESOURCE_ANNOTATION` / `MARGO_RESOURCE_ANNOTATION_VALUE`; extend
+- [x] Add `MARGO_RESOURCE_ANNOTATION` / `MARGO_RESOURCE_ANNOTATION_VALUE`; extend
   `_push_artifact` to write extra per-layer annotations; tests assert the annotation is on every
   resource layer (referenced and generic) and absent on the descriptor, compose and quadlet layers.
-- [ ] Fix `services/remote.py::resolve_remote_descriptor` to key off
+- [x] Fix `services/remote.py::resolve_remote_descriptor` to key off
   `MARGO_DESCRIPTION_MEDIA_TYPE` instead of filename; add the duplicate-layer warning
   path.
-- [ ] Fix `services/pull.py::_pull_recursive_components` (and its caller chain) the same
+- [x] Fix `services/pull.py::_pull_recursive_components` (and its caller chain) the same
   way.
-- [ ] Unit/integration tests: a fixture manifest whose descriptor layer is titled
+- [x] Unit/integration tests: a fixture manifest whose descriptor layer is titled
   something other than `app.yaml` (e.g. `manifest.yaml`) resolves correctly in both
   `describe`'s remote path and `pull --recursive`; a fixture manifest with two
   description-media-type layers triggers the warning and picks the first.
-- [ ] Update `.kiro/steering/oci-media-types.md` — already has the templated types and the
+- [x] Update `.kiro/steering/oci-media-types.md` — already has the templated types and the
   `application/octet-stream` fallback; correct `license` → `licenseFile`, add the token table
   and the `org.margo.app.resource` annotation.
-- [ ] Update `docs/` (`commands/push.md`, `concepts.md`) to document: resource files are
+- [x] Update `docs/` (`commands/push.md`, `concepts.md`) to document: resource files are
   discovered from `app.yaml` fields plus any extra file under `resources/`; the `{file format}`
   token table (replacing the old fixed `+plain` / `+markdown` rows); `licenseFile` naming; the
   `org.margo.app.resource` annotation; missing referenced files warn rather than fail push.
-- [ ] `make docs-check` passes.
-- [ ] Each task committed as one or more commits (conventional-commit messages, e.g. `fix(push): ship resource files by app.yaml reference, not fixed filename`, `fix(describe): resolve descriptor layer by mediaType`).
+- [x] `make docs-check` passes.
+- [x] Each task committed as one or more commits (conventional-commit messages, e.g. `fix(push): ship resource files by app.yaml reference, not fixed filename`, `fix(describe): resolve descriptor layer by mediaType`).
 
 ---
 
 ## 5. Definition of Done
 
-- [ ] All checkable steps completed.
+- [x] All checkable steps completed.
 - [ ] `make check` passes (lint + unit + integration tests).
-- [ ] E2E test covering the originally reported SVG-icon case and the sensor-dashboard-style
+- [x] E2E test covering the originally reported SVG-icon case and the sensor-dashboard-style
   non-`app.yaml`-named descriptor case.
-- [ ] Docs updated and `make docs-check` passes.
+- [x] Docs updated and `make docs-check` passes.
 - [ ] No TODOs left (or explicitly deferred with a `# TODO(kiro): ...` comment and a
   ROADMAP backlog entry).
-- [ ] Each task committed as one or more commits on the feature branch — no bulk
+- [x] Each task committed as one or more commits on the feature branch — no bulk
   end-of-sprint commit.
 - [ ] Handed back for review (Gate 2). After approval the planner pushes; the owner opens
   the PR onto the release branch and merges. The agent does not push, open PRs, or manage
