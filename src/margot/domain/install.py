@@ -8,6 +8,7 @@ no rich imports.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+import re
 from typing import Any
 
 from margot.domain.install_parameters import Binding
@@ -392,6 +393,86 @@ def find_unit_conflicts(targets: Sequence[str], found: Sequence[str], own_dir: s
             elif unit_service_name(other.name) == target_service:
                 conflicts.append(UnitConflict(str(target_path), str(other), "service name", target_service))
     return conflicts
+
+
+_GENERATOR_PROGRESS = "Loading source unit file "
+_GENERATOR_SUMMARY = "processing encountered some errors"
+# The host prints these wordings (Podman 5.8.2, sprint-13 Checkpoint C). Each names the file that was
+# converted and the unit file it could not find. A pod reference uses its own sentence.
+_UNRESOLVED_REFERENCE = re.compile(
+    r'converting "(?P<unit>[^"]+)": requested Quadlet (?:unit|source|image) (?P<name>\S+) was not found$'
+)
+_UNRESOLVED_POD = re.compile(r'converting "(?P<unit>[^"]+)": quadlet pod unit (?P<name>\S+) does not exist$')
+
+
+@dataclass(frozen=True)
+class UnresolvedReference:
+    """A unit file that refers to another unit file which the staged tree does not contain.
+
+    ``unit`` is the unit file name as the generator prints it (a base name); ``name`` is the referenced
+    unit file name (for example ``owner.network``).
+    """
+
+    unit: str
+    name: str
+
+
+@dataclass(frozen=True)
+class GeneratorReport:
+    """Lines of generator stderr sorted into unresolved references and every other error line."""
+
+    unresolved: tuple[UnresolvedReference, ...]
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GeneratorVerdict:
+    """Whether the staged tree passes the generator dry-run, and what to report.
+
+    ``errors`` are the lines that fail the install. ``unresolved`` are references to units outside the
+    staged tree; the service layer checks them against the host.
+    """
+
+    passed: bool
+    errors: tuple[str, ...]
+    unresolved: tuple[UnresolvedReference, ...]
+
+
+def parse_generator_stderr(text: str) -> GeneratorReport:
+    """Sort the stderr of ``quadlet -dryrun -user`` into unresolved references and other error lines.
+
+    Progress lines (``Loading source unit file …``) and the closing summary are neither. A reference the
+    generator could not find in the staged tree is an unresolved reference; every other non-empty line
+    is an error.
+    """
+    unresolved: list[UnresolvedReference] = []
+    errors: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or _GENERATOR_PROGRESS in line or line.endswith(_GENERATOR_SUMMARY):
+            continue
+        found = _UNRESOLVED_REFERENCE.search(line) or _UNRESOLVED_POD.search(line)
+        if found is None:
+            errors.append(line)
+        else:
+            unresolved.append(UnresolvedReference(unit=found.group("unit"), name=found.group("name")))
+    return GeneratorReport(unresolved=tuple(unresolved), errors=tuple(errors))
+
+
+def judge_generator(returncode: int, report: GeneratorReport) -> GeneratorVerdict:
+    """Decide the dry-run from the exit status and the sorted output (sprint-13 §3.10).
+
+    A zero exit passes. A failing run passes only when its sole problems are unresolved references; any
+    other error line fails it, and then only those error lines are reported. A failing run that printed
+    no recognised line fails with its exit status.
+    """
+    if returncode == 0:
+        return GeneratorVerdict(passed=True, errors=(), unresolved=())
+    if report.errors:
+        return GeneratorVerdict(passed=False, errors=report.errors, unresolved=report.unresolved)
+    if report.unresolved:
+        return GeneratorVerdict(passed=True, errors=(), unresolved=report.unresolved)
+    return GeneratorVerdict(passed=False, errors=(f"quadlet generator exited with status {returncode}",), unresolved=())
 
 
 def check_payload(component_name: str, relpaths: list[str]) -> None:
