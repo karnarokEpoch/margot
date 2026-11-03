@@ -221,9 +221,8 @@ When stdin is not a terminal, pass `--yes` (CI) or `--dry-run`; without either, 
 
 ## Safety checks
 
-Three guards run as part of an install. Guards 1 and 2 run during `prepare_install`
-(before any file is written, including during `--dry-run`). Guard 3 runs after the
-`daemon-reload`.
+Three guards run as part of an install. Guards 1 and 2 run before any file is written
+(including during `--dry-run`). Guard 3 runs after the `daemon-reload`.
 
 ### Guard 1 — unit-name collision
 
