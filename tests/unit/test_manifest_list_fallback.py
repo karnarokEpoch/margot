@@ -12,6 +12,7 @@ from tarfile import TarInfo
 from tarfile import open as tar_open
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, Mock, patch
+from uuid import uuid4
 
 from pytest import mark, raises, skip
 
@@ -458,119 +459,112 @@ class TestResolveAllPlatformsRealSocket:
 
     @staticmethod
     def _is_podman_available() -> bool:
-        """Check if podman binary and socket are available."""
+        """Check if the podman binary is on PATH."""
         from shutil import which  # noqa: PLC0415
+
         return which("podman") is not None
 
     @staticmethod
-    def _get_real_image_digest(image_ref: str) -> str | None:
-        """Get the digest of a real local image via 'podman images --format'.
-
-        Returns the full digest (sha256:...) or None if image not found.
-        """
-        result = subprocess.run(  # noqa: S603
-            [  # noqa: S607
-                "podman", "images",
-                "--filter", f"reference={image_ref}",
-                "--format", "{{.Digest}}",
-            ],
+    def _run_podman(*args: str, timeout: int = 30, check: bool = False) -> subprocess.CompletedProcess[str]:
+        """Run a podman subcommand and capture its output."""
+        return subprocess.run(  # noqa: S603
+            ["podman", *args],  # noqa: S607
             capture_output=True,
             text=True,
-            timeout=10,
-            check=False,
+            timeout=timeout,
+            check=check,
         )
-        if result.returncode == 0:
-            digest = result.stdout.strip()
-            if digest and digest.startswith("sha256:"):
-                return digest
-        return None
+
+    @staticmethod
+    def _write_single_file_tar(tar_path: Path, content: bytes) -> None:
+        """Write a rootfs-style tar archive that holds one file with the given content."""
+        with tar_open(tar_path, "w") as tar:
+            info = TarInfo(name="margot-test-file")
+            info.size = len(content)
+            tar.addfile(info, BytesIO(content))
+
+    @classmethod
+    def _remove_test_artifacts(cls, manifest_list: str | None, images: list[str]) -> None:
+        """Remove the manifest list and the images that one test run created.
+
+        Never raises, so a cleanup problem cannot hide the test's own result.
+        Each artifact that cannot be removed is reported as a warning.
+        """
+        commands: list[tuple[str, list[str]]] = []
+        if manifest_list is not None:
+            commands.append((manifest_list, ["manifest", "rm", manifest_list]))
+        commands.extend((ref, ["rmi", ref]) for ref in images)
+
+        for label, args in commands:
+            try:
+                removed = cls._run_podman(*args, timeout=30)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                console.warning(f"Could not remove test artifact {label}: {e}")
+                continue
+            if removed.returncode != 0:
+                console.warning(f"Could not remove test artifact {label}: {removed.stderr.strip()}")
 
     def test_resolve_manifest_list_children_via_images_list_real_socket(self):
         """Real test: resolve manifest-list child digests using images.list().
 
         This test:
-        1. Creates a real local manifest list with podman manifest create/add
-        2. Calls _resolve_all_platforms_from_manifest_list against real socket
-        3. Verifies all platforms are successfully resolved (not None)
+        1. Imports two tiny, distinct images under names unique to this run
+        2. Creates a uniquely named manifest list and adds them as linux/amd64 and linux/arm64
+        3. Calls _resolve_all_platforms_from_manifest_list against the real socket
+        4. Verifies both platforms are resolved (not None) and exported
 
-        Requires podman and two real local images with distinct digests.
+        It needs no pre-existing local images and no network. It removes only the
+        manifest list and the two images it created, including when an assertion fails.
+        Skips when the podman binary, the podman SDK or the podman socket is unavailable,
+        or when podman cannot import the test images.
         """
         if not self._is_podman_available():
-            skip("podman not available")
+            skip("podman binary not available")
 
         if PodmanClient is None:
             skip("PodmanClient SDK not available")
 
-        # Find two real local images to add to the manifest list
-        result = subprocess.run(
-            ["podman", "images", "--format", "{{.Repository}}:{{.Tag}}"],  # noqa: S607
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+        socket_uri = package_service._resolve_podman_socket_uri()
+        try:
+            PodmanClient(base_url=socket_uri).close()
+        except Exception as e:  # noqa: BLE001
+            skip(f"Podman socket not reachable at {socket_uri}: {e}")
 
-        if result.returncode != 0 or not result.stdout.strip():
-            skip("No local images available to create test manifest list")
-
-        images = [line.strip() for line in result.stdout.split("\n") if line.strip()]
-        if len(images) < 2:
-            skip("Need at least 2 local images to test manifest-list resolution")
-
-        # Use first two available images
-        image1 = images[0]
-        image2 = images[1]
-        test_manifest_name = "test-multiplatform-resolve"
+        suffix = uuid4().hex[:12]
+        image_amd64 = f"localhost/margot-test-{suffix}-a:1"
+        image_arm64 = f"localhost/margot-test-{suffix}-b:1"
+        manifest_list = f"localhost/margot-test-{suffix}-list"
+        created_images: list[str] = []
+        manifest_created = False
 
         try:
-            # Create a fresh manifest list
-            subprocess.run(  # noqa: S603
-                ["podman", "manifest", "rm", test_manifest_name],  # noqa: S607
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )  # Clean up if it exists
+            with TemporaryDirectory() as build_dir:
+                for ref, tar_name, content in (
+                    (image_amd64, "a.tar", b"amd64"),
+                    (image_arm64, "b.tar", b"arm64"),
+                ):
+                    tar_path = Path(build_dir) / tar_name
+                    self._write_single_file_tar(tar_path, content)
+                    imported = self._run_podman("import", str(tar_path), ref)
+                    if imported.returncode != 0:
+                        skip(f"podman import of {ref} failed: {imported.stderr.strip()}")
+                    created_images.append(ref)
+                    console.info(f"Imported test image {ref}")
 
-            subprocess.run(  # noqa: S603
-                ["podman", "manifest", "create", test_manifest_name],  # noqa: S607
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=True,
-            )
-            console.info(f"Created manifest list: {test_manifest_name}")
+            self._run_podman("manifest", "create", manifest_list, check=True)
+            manifest_created = True
+            console.info(f"Created manifest list: {manifest_list}")
 
-            # Add two images to the manifest list with synthetic platform annotations
-            subprocess.run(  # noqa: S603
-                [  # noqa: S607
-                    "podman", "manifest", "add",
-                    test_manifest_name, image1,
-                    "--os", "linux",
-                    "--arch", "amd64",
-                ],
-                capture_output=True,
-                timeout=10,
-                check=True,
-            )
-            console.info(f"Added {image1} to manifest as linux/amd64")
+            self._run_podman("manifest", "add", manifest_list, image_amd64, "--os", "linux", "--arch", "amd64", check=True)
+            console.info(f"Added {image_amd64} to manifest as linux/amd64")
 
-            subprocess.run(  # noqa: S603
-                [  # noqa: S607
-                    "podman", "manifest", "add",
-                    test_manifest_name, image2,
-                    "--os", "linux",
-                    "--arch", "arm64",
-                ],
-                capture_output=True,
-                timeout=10,
-                check=True,
-            )
-            console.info(f"Added {image2} to manifest as linux/arm64")
+            self._run_podman("manifest", "add", manifest_list, image_arm64, "--os", "linux", "--arch", "arm64", check=True)
+            console.info(f"Added {image_arm64} to manifest as linux/arm64")
 
             # Now call the real function against the real socket
             with TemporaryDirectory() as tmpdir:
                 result = package_service._resolve_all_platforms_from_manifest_list(
-                    test_manifest_name,
+                    manifest_list,
                     tmpdir,
                 )
 
@@ -594,14 +588,7 @@ class TestResolveAllPlatformsRealSocket:
                 console.info(f"  linux/arm64: {arm64_path}")
 
         finally:
-            # Clean up the test manifest list
-            with contextlib.suppress(Exception):
-                subprocess.run(  # noqa: S603
-                    ["podman", "manifest", "rm", test_manifest_name],  # noqa: S607
-                    capture_output=True,
-                    timeout=10,
-                    check=False,
-                )
+            self._remove_test_artifacts(manifest_list if manifest_created else None, created_images)
 
 
 class TestCreateOciImageLayoutTarAnnotations:
