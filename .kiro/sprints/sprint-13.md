@@ -1,9 +1,9 @@
 # Sprint 13 — `margot install` (Quadlet)
 
-**Status:** design settled (quadlet-only, three steps) — awaiting Gate 1 (branch/worktree split)
+**Status:** design settled (quadlet-only, three steps) — Gate 1 approved; implementing on `feat/add-install-cmd` (`.wk-install/`)
 **Type:** feature
 **Owner:** python-dev (docs: docs-writer)
-**Release:** planned for `release/X.Y.Z` (TBD, after Sprints 11 and 12)
+**Release:** `release/0.12.0` (after Sprints 11 and 12, shipped in 0.11.0)
 
 ---
 
