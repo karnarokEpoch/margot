@@ -6,7 +6,7 @@ function that writes to the host: it checks the systemd user session and ownersh
 files, maintains the marker and reloads systemd. It never starts, enables or stops a unit.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -77,7 +77,9 @@ class InstallResult:
     app_dir: Path
     services: tuple[str, ...]
     start_services: tuple[str, ...]
+    wanted_services: tuple[str, ...]
     files: tuple[str, ...]
+    upgraded: bool
 
 
 def detect_source(uri: str | None, project_dir: str | None) -> str:
@@ -154,7 +156,9 @@ def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
         app_dir=app_dir,
         services=plan.services,
         start_services=tuple(domain.start_targets(plan.units)),
+        wanted_services=tuple(unit.service for unit in plan.units if unit.default_target),
         files=plan.files,
+        upgraded=existing is not None,
     )
 
 
@@ -318,6 +322,10 @@ def _assemble(
 
     key_by_name = {ref.spec.name: ref.key for ref in refs}
     file_sources = {relpath: staged[key_by_name[owner]].extracted / relpath for relpath, owner in layout.owners.items()}
+    units = tuple(
+        replace(unit, default_target=domain.declares_default_target(_read_text(file_sources[unit.relpath])))
+        for unit in layout.units
+    )
     metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
     app_id = str(doc.get("id") or "")
 
@@ -329,7 +337,11 @@ def _assemble(
         source=source,
         target_dir=str(quadlet_root() / domain.application_dir_name(app_id)),
         components=tuple(plan_components),
-        units=layout.units,
+        units=units,
         unapplied=tuple(domain.unapplied_parameters(doc)),
     )
     return PreparedInstall(plan=plan, files=file_sources, temp_dir=temp_dir)
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")

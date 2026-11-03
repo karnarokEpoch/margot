@@ -60,10 +60,15 @@ class ComponentFiles:
 
 @dataclass(frozen=True)
 class UnitFile:
-    """A quadlet unit file in the merged install tree and the service systemd derives from it."""
+    """A quadlet unit file in the merged install tree and the service systemd derives from it.
+
+    ``default_target`` is True when the unit file's [Install] section has WantedBy=default.target;
+    the Quadlet generator then links the service into the user's default target (sprint-13 §3.7).
+    """
 
     relpath: str
     service: str
+    default_target: bool = False
 
 
 @dataclass(frozen=True)
@@ -357,6 +362,43 @@ def merge_components(components: list[ComponentFiles]) -> MergedLayout:
 def start_targets(units: tuple[UnitFile, ...] | list[UnitFile]) -> list[str]:
     """Services that the printed next-step commands start (containers, kubes, pods)."""
     return [unit.service for unit in units if PurePosixPath(unit.relpath).name.endswith(START_SUFFIXES)]
+
+
+def declares_default_target(unit_text: str) -> bool:
+    """True when the [Install] section of a unit file lists default.target in WantedBy=.
+
+    Follows systemd's reading of unit files: lines starting with ``#`` or ``;`` are comments, a
+    trailing backslash continues the line, whitespace may surround ``=``, several targets may share
+    one line, and an empty ``WantedBy=`` resets the list. Only the [Install] section counts.
+    """
+    logical: list[str] = []
+    buffer = ""
+    for raw in unit_text.splitlines():
+        line = raw.strip()
+        if not buffer and (not line or line[0] in "#;"):
+            continue
+        if line.endswith("\\"):
+            buffer += line[:-1] + " "
+            continue
+        logical.append(buffer + line)
+        buffer = ""
+    if buffer:
+        logical.append(buffer)
+
+    section = ""
+    tokens: list[str] = []
+    for line in logical:
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or section != "Install" or key.strip() != "WantedBy":
+            continue
+        if not value.strip():
+            tokens = []
+            continue
+        tokens.extend(value.split())
+    return "default.target" in tokens
 
 
 def unapplied_parameters(doc: dict[str, Any]) -> list[str]:

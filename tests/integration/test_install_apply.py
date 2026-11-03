@@ -13,7 +13,7 @@ from pytest import fixture, raises
 from margot.domain.install import MARKER_FILENAME
 from margot.infra.systemd import SystemdError
 from margot.services import install as install_service
-from tests.integration._install_helpers import build_project
+from tests.integration._install_helpers import build_project, quadlet_payload
 
 
 def _completed(returncode: int = 0, stderr: str = "") -> Any:
@@ -226,3 +226,57 @@ class TestFailurePhases:
         app = xdg / "com-belden-mosquitto"
         assert (app / "mosquitto.container").is_file()
         assert json.loads((app / MARKER_FILENAME).read_text(encoding="utf-8"))["state"] == "installed"
+
+
+class TestResultHints:
+    """What the result reports for the printed hints: upgrade and WantedBy=default.target (sprint-13 §3.7)."""
+
+    def test_fresh_install_is_not_an_upgrade(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should report upgraded=False when no marker existed before."""
+        prepared = _prepare(tmp_path)
+        try:
+            result = install_service.apply_install(prepared, root=xdg)
+        finally:
+            prepared.cleanup()
+
+        assert result.upgraded is False
+
+    def test_second_install_is_an_upgrade(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should report upgraded=True when a margot marker of the same profile already exists."""
+        first = _prepare(tmp_path / "a")
+        try:
+            install_service.apply_install(first, root=xdg)
+        finally:
+            first.cleanup()
+        second = _prepare(tmp_path / "b")
+        try:
+            result = install_service.apply_install(second, root=xdg)
+        finally:
+            second.cleanup()
+
+        assert result.upgraded is True
+
+    def test_unit_wanted_by_default_target_is_reported(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should list the service whose unit file declares WantedBy=default.target."""
+        members = quadlet_payload()
+        members["mosquitto-1.0.2_mosquitto-quadlet/mosquitto.container"] = (
+            b"[Container]\nImage=docker.io/library/eclipse-mosquitto:2\n\n[Install]\nWantedBy=default.target\n"
+        )
+        project, build = build_project(tmp_path, archive_members=members)
+        prepared = install_service.prepare_install(uri=None, project_dir=str(project), build_dir=str(build), profile_id=None)
+        try:
+            result = install_service.apply_install(prepared, root=xdg)
+        finally:
+            prepared.cleanup()
+
+        assert result.wanted_services == ("mosquitto.service",)
+
+    def test_unit_without_wanted_by_default_target_is_not_reported(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should report no WantedBy service when the unit file does not name default.target."""
+        prepared = _prepare(tmp_path)
+        try:
+            result = install_service.apply_install(prepared, root=xdg)
+        finally:
+            prepared.cleanup()
+
+        assert result.wanted_services == ()

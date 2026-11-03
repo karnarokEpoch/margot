@@ -13,6 +13,7 @@ from margot.domain.install import (
     application_dir_name,
     check_payload,
     component_specs,
+    declares_default_target,
     merge_components,
     record_from_dict,
     select_profile,
@@ -369,3 +370,44 @@ class TestInstallRecord:
 
         with raises(ValueError, match=r"state"):
             record_from_dict(data)
+
+
+class TestDeclaresDefaultTarget:
+    """WantedBy=default.target in the [Install] section of a unit file (sprint-13 §3.7)."""
+
+    def test_wanted_by_default_target_in_install_section_is_true(self) -> None:
+        """Should report True for a unit whose [Install] section names default.target."""
+        assert declares_default_target("[Container]\nImage=x\n\n[Install]\nWantedBy=default.target\n") is True
+
+    def test_several_targets_on_one_line_are_split(self) -> None:
+        """Should find default.target among several whitespace-separated targets."""
+        assert declares_default_target("[Install]\nWantedBy=multi-user.target default.target\n") is True
+
+    def test_spaces_around_equals_are_allowed(self) -> None:
+        """Should accept systemd's optional whitespace around the assignment."""
+        assert declares_default_target("[Install]\nWantedBy = default.target\n") is True
+
+    def test_line_continuation_is_joined(self) -> None:
+        """Should read a target that continues on the next line after a backslash."""
+        assert declares_default_target("[Install]\nWantedBy=multi-user.target \\\n  default.target\n") is True
+
+    def test_wanted_by_in_another_section_is_false(self) -> None:
+        """Should ignore WantedBy outside [Install]."""
+        assert declares_default_target("[Container]\nWantedBy=default.target\n") is False
+
+    def test_wanted_by_in_a_comment_is_false(self) -> None:
+        """Should ignore commented-out WantedBy lines (# and ;)."""
+        text = "[Install]\n# WantedBy=default.target\n; WantedBy=default.target\n"
+        assert declares_default_target(text) is False
+
+    def test_other_target_only_is_false(self) -> None:
+        """Should be False for a unit wanted by another target only."""
+        assert declares_default_target("[Install]\nWantedBy=multi-user.target\n") is False
+
+    def test_empty_assignment_resets_the_list(self) -> None:
+        """Should treat an empty WantedBy= as a reset, as systemd does."""
+        assert declares_default_target("[Install]\nWantedBy=default.target\nWantedBy=\n") is False
+
+    def test_no_install_section_is_false(self) -> None:
+        """Should be False for a unit without any [Install] section."""
+        assert declares_default_target("[Container]\nImage=x\n") is False
