@@ -127,6 +127,7 @@ def _apply(prepared: PreparedInstall) -> InstallResult:
 
 def _show_plan(plan: InstallPlan) -> None:
     console.print_renderable(Panel(Group(*_plan_rows(plan), _component_tree(plan)), title="Install plan", title_align="left"))
+    console.print_line(f"margot sets QUADLET_DIR={plan.target_dir} for every unit.")
     if plan.bindings:
         console.print_table(_parameter_table(plan))
     hint = "Hint: install does not schema-validate the descriptor; run `margot verify` first."

@@ -518,3 +518,40 @@ class TestParameters:
         assert result.exit_code == 0, result.output
         assert not xdg.exists()
         systemctl.assert_not_called()
+
+
+class TestQuadletDirPlan:
+    """The plan states once that margot sets QUADLET_DIR to the application directory for every unit (sprint-13 §3.9)."""
+
+    def test_plan_states_quadlet_dir_once_without_parameters(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should print one line naming QUADLET_DIR and the application directory, even with no parameters."""
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        expected = f"margot sets QUADLET_DIR={xdg / 'com-belden-mosquitto'} for every unit."
+        assert result.output.splitlines().count(expected) == 1
+        assert result.output.count("QUADLET_DIR") == 1
+
+    def test_plan_keeps_the_directory_whole_on_one_line(self, tmp_path: Path, systemctl: Any, monkeypatch: Any) -> None:
+        """Should keep a long application directory whole on one line, and keep brackets in it literal."""
+        base = tmp_path / "a-very-long-configuration-directory-name-for-the-wrapping-check" / "[lit]"
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(base))
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        expected = f"margot sets QUADLET_DIR={base / 'containers' / 'systemd' / 'com-belden-mosquitto'} for every unit."
+        assert expected in result.output.splitlines()
+
+    def test_plan_names_the_same_directory_with_parameters(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should keep one parameter table of descriptor parameters, and the QUADLET_DIR line outside it."""
+        args = _project_with(tmp_path, PARAMETER_PORT)
+
+        result = runner.invoke(app, ["install", *args, "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert f"margot sets QUADLET_DIR={xdg / 'com-belden-mosquitto'} for every unit." in result.output.splitlines()
+        assert "QUADLET_DIR" not in result.output.split("Parameters", 1)[1]

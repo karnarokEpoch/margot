@@ -70,7 +70,11 @@ class TestFreshInstall:
         assert marker["state"] == "installed"
         assert marker["profileId"] == "quadlet-v1"
         assert marker["services"] == ["mosquitto.service"]
-        assert sorted(marker["components"][0]["files"]) == ["conf/mosquitto.conf", "mosquitto.container"]
+        assert sorted(marker["components"][0]["files"]) == [
+            "conf/mosquitto.conf",
+            "mosquitto.container",
+            "mosquitto.container.d/50-margot-parameters.conf",
+        ]
         assert result.services == ("mosquitto.service",)
 
     def test_only_daemon_reload_is_called_and_never_start_or_enable(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
@@ -113,6 +117,17 @@ class TestOwnership:
 
         assert sorted(p.name for p in app.iterdir()) == ["hand-written.container"]
         assert [argv[-1] for argv in _argv_list(systemctl)] == ["show-environment"]
+
+    def test_plan_prepared_for_another_root_is_refused(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should refuse to apply a plan whose QUADLET_DIR names another directory, so the drop-in always matches the install."""
+        prepared = _prepare(tmp_path)
+        try:
+            with raises(ValueError, match=r"prepared for"):
+                install_service.apply_install(prepared, root=tmp_path / "elsewhere")
+        finally:
+            prepared.cleanup()
+
+        assert not (tmp_path / "elsewhere").exists()
 
     def test_recorded_other_profile_is_refused(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should name the recorded profile when the marker belongs to another profile."""

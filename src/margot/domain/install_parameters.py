@@ -20,6 +20,10 @@ DROPIN_HEADER = (
 )
 SOURCE_DESCRIPTOR = "descriptor"
 SOURCE_SET = "--set"
+# Set by margot on every unit to the directory the files are installed in (sprint-13 §3.9). A descriptor
+# parameter may not use it as a pointer, and --set cannot reach it.
+QUADLET_DIR_VARIABLE = "QUADLET_DIR"
+RESERVED_VARIABLES = frozenset({QUADLET_DIR_VARIABLE})
 
 _VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _ESCAPES = {"\\": "\\\\", '"': '\\"', "%": "%%"}
@@ -85,15 +89,17 @@ def resolve_parameters(
     profile. Targets of other components are ignored. ``--set`` wins over the descriptor ``value``.
 
     Raises:
-        ValueError: An unknown ``--set`` name, a pointer that is not an environment variable name, two
-            parameters that set one variable on one component, an array value that would be applied, or
-            a value with a newline, carriage return or NUL. Each message names the parameter.
+        ValueError: An unknown ``--set`` name, a pointer that is not an environment variable name, a pointer
+            that is reserved (``QUADLET_DIR``), two parameters that set one variable on one component, an array
+            value that would be applied, or a value with a newline, carriage return or NUL. Each message names
+            the parameter.
     """
     names = set(component_names)
     declared = doc.get("parameters") if isinstance(doc.get("parameters"), dict) else {}
     targets = _applicable_targets(declared, names)
 
     _check_pointers(targets)
+    _check_reserved(targets)
     _check_overrides(overrides, targets)
     _check_conflicts(targets)
 
@@ -176,16 +182,21 @@ def dropin_relpath(unit_relpath: str) -> str:
 def variables_by_unit(
     bindings: Iterable[Binding],
     units_by_component: Mapping[str, Sequence[str]],
+    application_dir: str,
 ) -> dict[str, dict[str, str]]:
     """Map each unit file to the variables it receives.
 
-    A unit receives every variable of every component that ships it. Two components that ship one unit
-    may not set one variable to different values.
+    Every unit gets ``QUADLET_DIR`` set to the application directory, even when no parameter applies.
+    A unit also receives every variable of every component that ships it. Two components that ship one
+    unit may not set one variable to different values.
 
     Raises:
         ValueError: A unit would receive two values for one variable.
     """
     result: dict[str, dict[str, str]] = {}
+    for units in units_by_component.values():
+        for unit in units:
+            result.setdefault(unit, {})[QUADLET_DIR_VARIABLE] = application_dir
     for binding in bindings:
         for unit in units_by_component.get(binding.component, ()):
             variables = result.setdefault(unit, {})
@@ -221,6 +232,16 @@ def _check_pointers(targets: Mapping[str, list[tuple[str, Any]]]) -> None:
                 raise ValueError(
                     f"Parameter '{parameter}' has pointer {pointer!r} for component '{component}'. "
                     "A quadlet pointer is an environment variable name ([A-Za-z_][A-Za-z0-9_]*)."
+                )
+
+
+def _check_reserved(targets: Mapping[str, list[tuple[str, Any]]]) -> None:
+    for parameter in sorted(targets):
+        for component, pointer in targets[parameter]:
+            if pointer in RESERVED_VARIABLES:
+                raise ValueError(
+                    f"Parameter '{parameter}' uses pointer {pointer} on component '{component}', which is reserved by "
+                    "margot (it holds the application directory). Give the parameter another pointer."
                 )
 
 

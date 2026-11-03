@@ -14,7 +14,7 @@ from pytest import fixture, raises
 from margot.domain.install import MARKER_FILENAME
 from margot.services import install as install_service
 from margot.services.install import InstallResult
-from tests.integration._install_helpers import MOSQUITTO_CONTAINER, app_description, build_project
+from tests.integration._install_helpers import MOSQUITTO_CONTAINER, app_description, build_project, unquote_environment
 
 APP = "com-belden-mosquitto"
 DROPIN = "mosquitto.container.d/50-margot-parameters.conf"
@@ -84,6 +84,12 @@ def _marker(xdg: Path) -> dict[str, Any]:
     return json.loads((xdg / APP / MARKER_FILENAME).read_text(encoding="utf-8"))
 
 
+def _environment_lines(xdg: Path) -> list[str]:
+    """The Environment= lines of the mosquitto drop-in, in file order."""
+    text = (xdg / APP / DROPIN).read_text(encoding="utf-8")
+    return [line for line in text.splitlines() if line.startswith("Environment=")]
+
+
 class TestDropInPlacement:
     """The drop-in beside each unit, its content, its mode, and what the marker records."""
 
@@ -92,7 +98,7 @@ class TestDropInPlacement:
         _install(tmp_path, xdg, parameters=MQTT_PARAMETER)
 
         text = (xdg / APP / DROPIN).read_text(encoding="utf-8")
-        assert text.endswith('[Service]\nEnvironment="MQTT_PORT=1883"\n')
+        assert text.endswith('[Service]\nEnvironment="MQTT_PORT=1883"\nEnvironment="QUADLET_DIR=' + f'{xdg / APP}"\n')
 
     def test_set_value_replaces_the_descriptor_default(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should write the --set value instead of the descriptor default."""
@@ -127,11 +133,13 @@ class TestDropInPlacement:
         assert "s3cr3t-value" not in (xdg / APP / MARKER_FILENAME).read_text(encoding="utf-8")
         assert "s3cr3t-value" in (xdg / APP / DROPIN).read_text(encoding="utf-8")
 
-    def test_parameter_without_value_writes_no_dropin_and_is_unapplied(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
-        """Should list an applicable parameter that has no value as unapplied, with no drop-in and no marker name."""
+    def test_parameter_without_value_leaves_only_quadlet_dir_in_the_dropin(
+        self, tmp_path: Path, systemctl: Any, xdg: Path
+    ) -> None:
+        """Should not apply a parameter without a value: the drop-in holds only QUADLET_DIR, and the marker names no parameter."""
         _install(tmp_path, xdg, parameters=NO_VALUE_PARAMETER)
 
-        assert not (xdg / APP / DROPIN).exists()
+        assert _environment_lines(xdg) == [f'Environment="QUADLET_DIR={xdg / APP}"']
         assert _marker(xdg)["parameters"] == []
 
     def test_parameter_for_another_component_is_ignored(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
@@ -146,16 +154,73 @@ class TestDropInPlacement:
             prepared.cleanup()
 
 
+class TestQuadletDir:
+    """margot always provides QUADLET_DIR, with or without descriptor parameters (sprint-13 §3.9)."""
+
+    def test_unit_without_parameters_gets_a_dropin_with_only_quadlet_dir(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should write the drop-in with the header and the application directory when no parameter exists."""
+        _install(tmp_path, xdg)
+
+        text = (xdg / APP / DROPIN).read_text(encoding="utf-8")
+        assert text.endswith(f'[Service]\nEnvironment="QUADLET_DIR={xdg / APP}"\n')
+        assert stat.S_IMODE((xdg / APP / DROPIN).stat().st_mode) == 0o600
+        assert _marker(xdg)["parameters"] == []
+        assert DROPIN in _marker(xdg)["components"][0]["files"]
+
+    def test_quadlet_dir_sorts_with_the_descriptor_variables(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should write QUADLET_DIR in name order next to MQTT_PORT, in one drop-in."""
+        _install(tmp_path, xdg, parameters=MQTT_PARAMETER)
+
+        assert _environment_lines(xdg) == [
+            'Environment="MQTT_PORT=1883"',
+            f'Environment="QUADLET_DIR={xdg / APP}"',
+        ]
+
+    def test_quadlet_dir_round_trips_byte_exactly_for_a_special_directory(
+        self, tmp_path: Path, systemctl: Any, monkeypatch: Any
+    ) -> None:
+        """Should store the exact application directory when it has a space, %, quotes and non-ASCII."""
+        base = tmp_path / 'cfg 100% "é" 中'
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(base))
+        root = base / "containers" / "systemd"
+        _install(tmp_path, root, parameters=MQTT_PARAMETER)
+
+        line = _environment_lines(root)[1]
+        assert line.startswith('Environment="QUADLET_DIR=')
+        assert unquote_environment(line) == str(root / APP)
+
+    def test_quadlet_dir_is_not_listed_as_a_parameter(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should keep the marker parameters to descriptor names: QUADLET_DIR is not a parameter."""
+        _install(tmp_path, xdg, parameters=MQTT_PARAMETER)
+
+        assert _marker(xdg)["parameters"] == ["mqttPort"]
+
+    def test_user_dropin_can_override_quadlet_dir(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should keep a later user drop-in that sets QUADLET_DIR differently; margot does not rewrite it."""
+        _install(tmp_path, xdg, run="a")
+        local = xdg / APP / "mosquitto.container.d" / "90-local.conf"
+        local.write_text('[Service]\nEnvironment="QUADLET_DIR=/srv/mosquitto"\n', encoding="utf-8")
+
+        _install(tmp_path, xdg, run="b")
+
+        assert local.read_text(encoding="utf-8") == '[Service]\nEnvironment="QUADLET_DIR=/srv/mosquitto"\n'
+        assert f'Environment="QUADLET_DIR={xdg / APP}"' in (xdg / APP / DROPIN).read_text(encoding="utf-8")
+
+
 class TestUpgradeOfDropIns:
     """Re-running install regenerates margot's drop-ins and never touches the user's."""
 
-    def test_dropin_is_removed_when_the_parameter_no_longer_applies(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
-        """Should delete a drop-in the previous marker lists and the new run no longer writes, then prune its directory."""
-        _install(tmp_path, xdg, run="a", parameters=MQTT_PARAMETER)
-        _install(tmp_path, xdg, run="b", parameters=NO_VALUE_PARAMETER)
+    def test_dropin_of_a_unit_no_longer_shipped_is_removed(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should delete the drop-in of a unit the previous marker listed and the new payload no longer ships."""
+        net = {
+            "mosquitto-1.0.2_mosquitto-quadlet/mosquitto.container": MOSQUITTO_CONTAINER,
+            "mosquitto-1.0.2_mosquitto-quadlet/net.network": b"[Network]\nSubnet=10.89.0.0/24\n",
+        }
+        _install(tmp_path, xdg, run="a", parameters=MQTT_PARAMETER, members=net)
+        _install(tmp_path, xdg, run="b", parameters=MQTT_PARAMETER)
 
-        assert not (xdg / APP / DROPIN).exists()
-        assert not (xdg / APP / "mosquitto.container.d").exists()
+        assert not (xdg / APP / "net.network.d").exists()
+        assert 'Environment="MQTT_PORT=1883"' in (xdg / APP / DROPIN).read_text(encoding="utf-8")
 
     def test_reinstall_without_set_restores_the_descriptor_default(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should regenerate the drop-in with the descriptor default once --set is no longer given."""
@@ -213,6 +278,12 @@ class TestRefusals:
             "          - mosquitto-quadlet\n"
         )
         with raises(ValueError, match=r"'mqttPort' and 'mqttPortAgain'"):
+            self._prepare(tmp_path, parameters)
+
+    def test_quadlet_dir_pointer_is_refused(self, tmp_path: Path) -> None:
+        """Should refuse a descriptor parameter that uses QUADLET_DIR as its pointer, naming it as reserved."""
+        parameters = MQTT_PARAMETER.replace("MQTT_PORT", "QUADLET_DIR")
+        with raises(ValueError, match=r"'mqttPort'.*QUADLET_DIR.*reserved by margot"):
             self._prepare(tmp_path, parameters)
 
     def test_invalid_pointer_is_refused(self, tmp_path: Path) -> None:

@@ -217,6 +217,26 @@ class TestResolveParameters:
         with raises(ValueError, match=r"'a' and 'b'.*PORT.*'web'"):
             resolve_parameters(doc, ["web"], {})
 
+    def test_quadlet_dir_pointer_is_reserved_by_margot(self) -> None:
+        """Should refuse a parameter whose pointer is QUADLET_DIR on a selected component, naming it as reserved."""
+        doc = _doc({"dir": _param("/elsewhere", ("QUADLET_DIR", ["web"]))})
+
+        with raises(ValueError, match=r"'dir'.*QUADLET_DIR.*'web'.*reserved by margot"):
+            resolve_parameters(doc, ["web"], {})
+
+    def test_quadlet_dir_pointer_on_a_component_outside_the_profile_is_ignored(self) -> None:
+        """Should not refuse QUADLET_DIR when the target names a component the profile does not select."""
+        doc = _doc({"dir": _param("/elsewhere", ("QUADLET_DIR", ["other"]))})
+
+        assert resolve_parameters(doc, ["web"], {}).bindings == ()
+
+    def test_set_cannot_reach_quadlet_dir(self) -> None:
+        """Should refuse --set QUADLET_DIR, because it is not an applicable parameter name."""
+        doc = _doc({"port": _param(8080, ("NGINX_PORT", ["web"]))})
+
+        with raises(ValueError, match=r"--set QUADLET_DIR"):
+            resolve_parameters(doc, ["web"], {"QUADLET_DIR": "/tmp"})
+
     def test_same_pointer_on_different_components_is_not_a_conflict(self) -> None:
         """Should allow two parameters to use one variable name on two different components."""
         doc = _doc({"a": _param(1, ("PORT", ["web"])), "b": _param(2, ("PORT", ["proxy"]))})
@@ -292,18 +312,30 @@ class TestDropIn:
         assert dropin_relpath("nginx.kube") == "nginx.kube.d/50-margot-parameters.conf"
 
     def test_every_unit_of_a_component_gets_all_its_variables(self) -> None:
-        """Should map each unit of a component to all variables of that component."""
+        """Should map each unit of a component to all variables of that component, plus QUADLET_DIR."""
         bindings = [
             Binding("port", "web", "NGINX_PORT", "8080", SOURCE_DESCRIPTOR),
             Binding("greet", "web", "GREETING", "hi", SOURCE_DESCRIPTOR),
         ]
 
-        mapping = variables_by_unit(bindings, {"web": ["web.container", "conf/net.network"]})
+        mapping = variables_by_unit(bindings, {"web": ["web.container", "conf/net.network"]}, "/app")
 
         assert mapping == {
-            "web.container": {"NGINX_PORT": "8080", "GREETING": "hi"},
-            "conf/net.network": {"NGINX_PORT": "8080", "GREETING": "hi"},
+            "web.container": {"NGINX_PORT": "8080", "GREETING": "hi", "QUADLET_DIR": "/app"},
+            "conf/net.network": {"NGINX_PORT": "8080", "GREETING": "hi", "QUADLET_DIR": "/app"},
         }
+
+    def test_unit_without_parameters_still_gets_quadlet_dir(self) -> None:
+        """Should give every unit QUADLET_DIR even when no parameter applies to its component."""
+        mapping = variables_by_unit([], {"web": ["web.container"]}, "/cfg/com-x")
+
+        assert mapping == {"web.container": {"QUADLET_DIR": "/cfg/com-x"}}
+
+    def test_quadlet_dir_line_escapes_space_percent_and_quotes(self) -> None:
+        """Should write QUADLET_DIR with % doubled and quotes escaped, the spike S2 rules applied to a path."""
+        text = render_dropin({"QUADLET_DIR": '/cfg/my apps/100%/"quoted"'})
+
+        assert text.splitlines()[-1] == 'Environment="QUADLET_DIR=/cfg/my apps/100%%/\\"quoted\\""'
 
     def test_unit_shipped_by_two_components_gets_the_union(self) -> None:
         """Should give a shared unit the variables of every component that ships it."""
@@ -312,9 +344,9 @@ class TestDropIn:
             Binding("b", "copy", "B", "2", SOURCE_DESCRIPTOR),
         ]
 
-        mapping = variables_by_unit(bindings, {"web": ["x.container"], "copy": ["x.container"]})
+        mapping = variables_by_unit(bindings, {"web": ["x.container"], "copy": ["x.container"]}, "/app")
 
-        assert mapping == {"x.container": {"A": "1", "B": "2"}}
+        assert mapping == {"x.container": {"A": "1", "B": "2", "QUADLET_DIR": "/app"}}
 
     def test_unit_shared_with_different_values_for_one_variable_is_refused(self) -> None:
         """Should refuse a shared unit that two components would set to different values for one variable."""
@@ -324,4 +356,4 @@ class TestDropIn:
         ]
 
         with raises(ValueError, match=r"x\.container.*PORT"):
-            variables_by_unit(bindings, {"web": ["x.container"], "copy": ["x.container"]})
+            variables_by_unit(bindings, {"web": ["x.container"], "copy": ["x.container"]}, "/app")

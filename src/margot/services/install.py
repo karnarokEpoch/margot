@@ -138,6 +138,11 @@ def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
     plan = prepared.plan
     systemd.ensure_user_session()
     app_dir = root / domain.application_dir_name(plan.app_id)
+    if str(app_dir) != plan.target_dir:
+        raise ValueError(
+            f"This install was prepared for {plan.target_dir}, not {app_dir}. QUADLET_DIR in the drop-ins names the "
+            "prepared directory, so run install again."
+        )
     existing = _check_ownership(app_dir, plan)
     installed_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -324,11 +329,13 @@ def _assemble(  # noqa: PLR0913 - one parameter per input of the plan
     )
 
     resolution = resolve_parameters(doc, [ref.spec.name for ref in refs], overrides)
+    app_id = str(doc.get("id") or "")
+    application_dir = quadlet_root() / domain.application_dir_name(app_id)
     units_by_component = {
         ref.spec.name: tuple(unit.relpath for unit in units if unit.relpath in staged[ref.key].files) for ref in refs
     }
     dropin_by_component: dict[str, list[str]] = {name: [] for name in units_by_component}
-    for unit, variables in sorted(variables_by_unit(resolution.bindings, units_by_component).items()):
+    for unit, variables in sorted(variables_by_unit(resolution.bindings, units_by_component, str(application_dir)).items()):
         relpath = dropin_relpath(unit)
         dropin = staging / "dropins" / relpath
         dropin.parent.mkdir(parents=True, exist_ok=True)
@@ -353,7 +360,6 @@ def _assemble(  # noqa: PLR0913 - one parameter per input of the plan
         plan_components.append(PlanComponent(entry=entry, reference=ref.reference, services=services))
 
     metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
-    app_id = str(doc.get("id") or "")
 
     plan = InstallPlan(
         app_id=app_id,
@@ -361,7 +367,7 @@ def _assemble(  # noqa: PLR0913 - one parameter per input of the plan
         app_version=str(metadata.get("version") or ""),
         profile_id=str(profile.get("id")),
         source=source,
-        target_dir=str(quadlet_root() / domain.application_dir_name(app_id)),
+        target_dir=str(application_dir),
         components=tuple(plan_components),
         units=units,
         unapplied=resolution.unapplied,

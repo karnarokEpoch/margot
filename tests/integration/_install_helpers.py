@@ -2,6 +2,7 @@
 
 import io
 from pathlib import Path
+import re
 import tarfile
 
 MOSQUITTO_QUADLET_REVISION = "1.0.2+mosquitto-quadlet"
@@ -23,6 +24,21 @@ def write_tar(path: Path, members: dict[str, bytes]) -> Path:
             info.size = len(data)
             tar.addfile(info, io.BytesIO(data))
     return path
+
+
+def unquote_environment(line: str) -> str:
+    """Return the value of an ``Environment="NAME=value"`` line as systemd reads it.
+
+    The independent reader used to check margot's encoding: it removes the surrounding quotes, turns
+    ``\\\\`` and ``\\"`` back into a backslash and a quote, and ``%%`` back into ``%``.
+
+    Raises:
+        ValueError: If the line is not a quoted Environment assignment.
+    """
+    match = re.fullmatch(r'Environment="[^=]*=(.*)"', line)
+    if match is None:
+        raise ValueError(f"not a quoted Environment assignment: {line!r}")
+    return re.sub(r"\\(.)|%%", lambda found: found.group(1) or "%", match.group(1))
 
 
 def quadlet_payload(root: str | None = "mosquitto-1.0.2_mosquitto-quadlet") -> dict[str, bytes]:

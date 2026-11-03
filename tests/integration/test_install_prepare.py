@@ -56,7 +56,11 @@ class TestProjectSource:
             assert plan.profile_id == "quadlet-v1"
             assert plan.source.kind == "project"
             assert plan.services == ("mosquitto.service",)
-            assert sorted(plan.files) == ["conf/mosquitto.conf", "mosquitto.container"]
+            assert sorted(plan.files) == [
+                "conf/mosquitto.conf",
+                "mosquitto.container",
+                "mosquitto.container.d/50-margot-parameters.conf",
+            ]
             component = plan.components[0]
             assert component.entry.repository == REPOSITORY
             assert component.entry.revision == "1.0.2+mosquitto-quadlet"
@@ -233,7 +237,11 @@ class TestRemoteSource:
             assert plan.source.uri == f"{REPOSITORY}:1.0.3"
             assert plan.components[0].reference == REFERENCE
             assert plan.services == ("mosquitto.service",)
-            assert sorted(plan.files) == ["conf/mosquitto.conf", "mosquitto.container"]
+            assert sorted(plan.files) == [
+                "conf/mosquitto.conf",
+                "mosquitto.container",
+                "mosquitto.container.d/50-margot-parameters.conf",
+            ]
         finally:
             prepared.cleanup()
 
@@ -297,7 +305,11 @@ class TestRemoteSource:
 
         prepared = install_service.prepare_install(uri=f"{REPOSITORY}:1.0.3", project_dir=None, build_dir=None, profile_id=None)
         try:
-            assert sorted(prepared.plan.files) == ["site/index.html", "web.container"]
+            assert sorted(prepared.plan.files) == [
+                "site/index.html",
+                "web.container",
+                "web.container.d/50-margot-parameters.conf",
+            ]
             assert prepared.plan.services == ("web.service",)
         finally:
             prepared.cleanup()
