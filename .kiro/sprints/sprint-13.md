@@ -969,6 +969,44 @@ Deviations and findings (for the owner's decision):
 Not started: no `start`, `enable`, `restart` or `stop` is issued by `install`. The argv seen on the host is the
 generator dry run, `show-environment`, `daemon-reload` and `cat`.
 
+#### Follow-up after Step 3 review (owner decision, 2026-11-03)
+
+Deviation 2 is resolved by the owner's decision in §3.10 ("Principle"): a reference to a unit outside the
+application is valid when the host has it (silent) and otherwise gives one warning; the service is then
+not required to exist after reload. Shadowing a unit is still refused (guard 1 unchanged). The search path
+is not added to `QUADLET_UNIT_DIRS`.
+
+Commits on `feat/add-install-cmd`: `7dec401` (pure parser of generator output), `1a6a425` (guards 2 and 3
+accept unresolved references; warnings; deferred services), `14fb3e7` (a drop-in progress line was taken for an
+error on the host; fixed).
+
+Warning printed, once per reference: `scratch-c.container references scratch-missing.network, which is not
+installed on this host. scratch-c.service is generated once scratch-missing.network is installed and systemd is
+reloaded.`
+
+Host results (reference host, Podman 5.8.2, scratch apps from a copy of the Mosquitto source, removed afterwards;
+the owner's zot units compared by sha256 before and after, `systemd-zot` unchanged):
+
+- (a) A ships `scratch-a.network`; B (`Network=scratch-a.network`): exit 0, no warning. `systemctl --user cat
+  scratch-b.service` shows `Requires=scratch-a-network.service` and `--network scratch-a-net`.
+- (b) C (`Network=scratch-missing.network`): exit 0, one warning, `scratch-c.service` not generated. D ships
+  `scratch-missing.network`: exit 0, no warning; after its reload `scratch-c.service` exists and requires
+  `scratch-missing-network.service`. C was not reinstalled.
+- (c) E ships `scratch-a.network`: exit 3 with `--dry-run` and with `--yes`; nothing written.
+
+**Open limitation (found on the host, not fixed; owner decision needed).** The generator reports only the first
+unresolved reference of a unit. F (`Network=scratch-a.network` present, `Volume=scratch-missing.volume` missing)
+passed the dry run, because the network was reported and the volume never was. The files were written, and
+guard 3 then stopped the install with exit 1 (`systemd does not know scratch-f.service`). Two options:
+(1) repeat the dry run, copying only the referenced host units that exist into the staged copy (not the whole
+search path), until no new reference appears; a broken host unit would then fail this install; (2) read the
+`Network=`/`Volume=`/`Pod=`/`Image=` values of the staged units with a pure parser and treat them as references
+before the dry run; this duplicates a part of Quadlet's rules.
+
+Verification: `make check` lint clean; 1753 passed, 3 skipped, 1 failed (the known
+`TestResolveAllPlatformsRealSocket`); coverage 94.18%. `install` issues only the generator dry run,
+`show-environment`, `daemon-reload` and `cat`; no `start`, `enable`, `restart` or `stop`.
+
 ### Docs (docs-writer) and close-out
 
 - [ ] `docs/commands/install.md` (synopsis, flag table, three sources, profile selection, what is
