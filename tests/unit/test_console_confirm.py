@@ -1,4 +1,4 @@
-"""Unit tests for console.confirm and console.is_interactive (sprint-13 §3.6)."""
+"""Unit tests for console.confirm and console.is_interactive."""
 
 from io import StringIO
 from typing import Any

@@ -29,7 +29,7 @@ def record() -> InstallRecord:
 
 
 class TestQuadletRoot:
-    """XDG-aware rootless Quadlet directory (sprint-13 §3.7)."""
+    """XDG-aware rootless Quadlet directory."""
 
     def test_default_is_home_config_containers_systemd(self, tmp_path: Path) -> None:
         """Should default to ~/.config/containers/systemd when XDG_CONFIG_HOME is unset."""
@@ -47,7 +47,7 @@ class TestQuadletRoot:
 
 
 class TestMarker:
-    """Atomic marker read/write (sprint-13 §3.8)."""
+    """Atomic marker read/write."""
 
     def test_missing_marker_reads_as_none(self, tmp_path: Path) -> None:
         """Should return None when the application directory has no marker."""
@@ -82,7 +82,7 @@ class TestMarker:
 
 
 class TestPlacement:
-    """File placement, stale-file removal and empty-directory pruning (sprint-13 §3.7)."""
+    """File placement, stale-file removal and empty-directory pruning."""
 
     def test_place_file_keeps_relative_layout_and_content(self, tmp_path: Path) -> None:
         """Should create sub-directories and copy the content to the relative path."""

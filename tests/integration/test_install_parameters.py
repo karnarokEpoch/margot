@@ -1,4 +1,4 @@
-"""Integration tests for parameters as unit environment (sprint-13 §3.9): drop-ins written by apply_install,
+"""Integration tests for parameters as unit environment: drop-ins written by apply_install,
 the marker that holds parameter names only, upgrade cleanup, and the refusals of prepare_install.
 
 systemctl is mocked and the Quadlet root is a tmp_path. Nothing touches the real user session.
@@ -158,7 +158,7 @@ class TestDropInPlacement:
 
 
 class TestQuadletDir:
-    """margot always provides QUADLET_DIR, with or without descriptor parameters (sprint-13 §3.9)."""
+    """margot always provides QUADLET_DIR, with or without descriptor parameters."""
 
     def test_unit_without_parameters_gets_a_dropin_with_only_quadlet_dir(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should write the drop-in with the header and the application directory when no parameter exists."""

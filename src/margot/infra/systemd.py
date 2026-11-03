@@ -16,7 +16,7 @@ from margot import console
 
 _TIMEOUT_SECONDS = 120
 _MAX_DETAIL_CHARS = 600
-# Fixed locations first; Podman 5.8.2 ships the generator under libexec only (sprint-13 spike S1).
+# Fixed locations first; Podman 5.8.2 ships the generator under libexec only.
 QUADLET_BINARIES = ("/usr/libexec/podman/quadlet", "/usr/lib/podman/quadlet")
 
 
@@ -65,7 +65,7 @@ def run(argv: list[str], env: Mapping[str, str] | None = None) -> subprocess.Com
 
 
 def ensure_user_session() -> None:
-    """Check that the systemd user session answers (sprint-13 §3.7, pre-check 1).
+    """Check that the systemd user session answers.
 
     Raises:
         SystemdError: If `systemctl --user show-environment` fails.
@@ -108,7 +108,7 @@ def quadlet_binary() -> str | None:
 
 
 def check_units(unit_dir: Path | None, binary: str, environ: Mapping[str, str]) -> GeneratorRun:
-    """Run `<binary> -dryrun -user` and return its exit status and stderr (sprint-13 §3.10, guards 2 and 3).
+    """Run `<binary> -dryrun -user` and return its exit status and stderr.
 
     With ``unit_dir``, ``QUADLET_UNIT_DIRS`` replaces the search path, so the dry run sees only the staged
     tree (guard 2). With None, the variable is removed and the generator scans the real Quadlet search path
@@ -129,7 +129,7 @@ def check_units(unit_dir: Path | None, binary: str, environ: Mapping[str, str]) 
 
 
 def unit_is_known(service: str) -> bool:
-    """True when systemd knows the unit: `systemctl --user cat <service>` exits 0 (sprint-13 §3.10, guard 3).
+    """True when systemd knows the unit: `systemctl --user cat <service>` exits 0.
 
     Raises:
         SystemdError: If systemctl is not available.

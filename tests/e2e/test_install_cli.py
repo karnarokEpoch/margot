@@ -439,7 +439,7 @@ def _mosquitto_dropin(xdg: Path) -> str:
 
 
 class TestParameters:
-    """--set and the parameter table (sprint-13 §3.5, §3.9, §3.11)."""
+    """--set and the parameter table."""
 
     def test_set_without_equals_exits_2(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should exit 2 for a --set argument that has no '=', before any work."""
@@ -537,7 +537,7 @@ class TestParameters:
 
 
 class TestQuadletDirPlan:
-    """The plan states once that margot sets QUADLET_DIR to the application directory for every unit (sprint-13 §3.9)."""
+    """The plan states once that margot sets QUADLET_DIR to the application directory for every unit."""
 
     def test_plan_states_quadlet_dir_once_without_parameters(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should print one line naming QUADLET_DIR and the application directory, even with no parameters."""
@@ -574,7 +574,7 @@ class TestQuadletDirPlan:
 
 
 class TestGuards:
-    """Step 3 through the CLI: collision (exit 3, also in --dry-run), generator (exit 3), post-reload (exit 1)."""
+    """The install guards through the CLI: collision (exit 3, also in --dry-run), generator (exit 3), post-reload (exit 1)."""
 
     def test_collision_in_dry_run_exits_3_and_names_both_paths(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should refuse a unit already present elsewhere, even for --dry-run, naming both paths."""
@@ -692,7 +692,7 @@ def _flat(output: str) -> str:
 
 
 class TestUnresolvedReferences:
-    """A unit may refer to a unit that is not in the application (sprint-13 §3.10, guard 2)."""
+    """A unit may refer to a unit that is not in the application."""
 
     def test_missing_reference_prints_one_warning_and_exits_0(
         self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
@@ -771,7 +771,7 @@ VOLUME_WARNING_START = "mosquitto.container references owner.volume, which is no
 
 
 class TestMissingServiceAfterWrite:
-    """A unit whose second reference is missing is installed with a warning; a real error is exit 1 (sprint-13 §3.10)."""
+    """A unit whose second reference is missing is installed with a warning; a real error is exit 1."""
 
     @fixture
     def cat_fails_for_mosquitto(self, mocker: Any) -> Any:

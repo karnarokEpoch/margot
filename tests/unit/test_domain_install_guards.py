@@ -1,4 +1,4 @@
-"""Unit tests for the Step 3 pure rules in domain/install.py: search roots, candidates and unit collisions."""
+"""Unit tests for the pure guard rules in domain/install.py: search roots, candidates and unit collisions."""
 
 
 from pytest import fixture, mark, raises
@@ -13,7 +13,7 @@ def roots() -> tuple[str, ...]:
 
 
 class TestSearchPathRoots:
-    """The six roots of sprint-13 §2, in Quadlet's order."""
+    """The six search-path roots of the user manager, in Quadlet's order."""
 
     def test_all_six_roots_are_listed_in_quadlet_order(self, roots: tuple[str, ...]) -> None:
         """Should list the runtime, config and four system roots, with $UID substituted."""

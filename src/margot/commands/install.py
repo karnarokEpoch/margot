@@ -140,7 +140,7 @@ def _show_plan(plan: InstallPlan) -> None:
 
 
 def _parameter_table(plan: InstallPlan) -> Table:
-    """Parameter · value · source · variable · units, one row per target (sprint-13 §3.5, §3.9)."""
+    """Parameter · value · source · variable · units, one row per target."""
     services = {component.entry.name: component.services for component in plan.components}
     table = Table(title=f"Parameters ({len(plan.parameters)} applied)", title_justify="left")
     for header in ("parameter", "value", "source", "variable", "units"):
@@ -196,7 +196,7 @@ def _report(result: InstallResult) -> None:
 
 
 def _next_steps(result: InstallResult) -> list[Text]:
-    """The commands and timing notes margot prints. It never runs them (sprint-13 §3.7)."""
+    """The commands and timing notes margot prints. It never runs them."""
     lines = [Text("Next steps. install did not start anything; run these yourself:", style="bold")]
     if result.start_services:
         for service in result.start_services:

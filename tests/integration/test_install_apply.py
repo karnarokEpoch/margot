@@ -103,7 +103,7 @@ class TestFreshInstall:
 
 
 class TestOwnership:
-    """margot never writes into a directory without its marker, nor into another profile's (sprint-13 §3.7)."""
+    """margot never writes into a directory without its marker, nor into another profile's."""
 
     def test_directory_without_marker_is_refused_and_untouched(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should refuse an application directory that margot did not create, leaving it unchanged."""
@@ -246,7 +246,7 @@ class TestFailurePhases:
 
 
 class TestResultHints:
-    """What the result reports for the printed WantedBy=default.target hint (sprint-13 §3.7)."""
+    """What the result reports for the printed WantedBy=default.target hint."""
 
     def test_second_install_is_applied_over_the_first(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should accept a second install of the same profile over an existing margot marker."""

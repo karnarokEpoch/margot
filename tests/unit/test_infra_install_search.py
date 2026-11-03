@@ -1,4 +1,4 @@
-"""Unit tests for the search-path listing and scan in infra/install_store.py (sprint-13 §3.10, guard 1).
+"""Unit tests for the search-path listing and scan in infra/install_store.py.
 
 Real directories under tmp_path stand in for the Quadlet roots. The /etc and /usr/share roots are
 redirected to tmp_path through the domain constant, so the host's own units never influence a test.

@@ -1,4 +1,4 @@
-"""Unit tests for the pure reading of Quadlet generator output (sprint-13 §3.10, guard 2).
+"""Unit tests for the pure reading of Quadlet generator output.
 
 The fixture lines are copied from `quadlet -dryrun -user` on the reference host (Podman 5.8.2) with
 QUADLET_UNIT_DIRS pointing at a tree that holds a unit with an unresolved reference. The PIDs are the
@@ -43,7 +43,7 @@ class TestParseGeneratorStderr:
         assert report.errors == ()
 
     def test_drop_in_progress_lines_are_not_errors(self) -> None:
-        """Should ignore 'Loading source drop-in file' lines: a unit with a drop-in logs one (host output, S2 Checkpoint)."""
+        """Should ignore 'Loading source drop-in file' lines: a unit with a drop-in logs one (observed on Podman 5.8.2)."""
         report = parse_generator_stderr(_stderr(PROGRESS_DROPIN_B, NETWORK_B, SUMMARY))
 
         assert report.errors == ()
@@ -154,7 +154,7 @@ SYNTAX_A = 'quadlet-generator[811023]: converting "a.container": unsupported key
 
 
 class TestGroupGeneratorOutput:
-    """Generator output sorted by the unit file each line names (sprint-13 §3.10, guard 3 diagnosis)."""
+    """Generator output sorted by the unit file each line names."""
 
     def test_references_and_errors_are_grouped_by_their_unit(self) -> None:
         """Should keep each unit's references and error lines under its unit file name."""

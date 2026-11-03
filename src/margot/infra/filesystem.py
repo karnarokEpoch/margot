@@ -154,7 +154,7 @@ def sha256_file(path: str) -> str:
 
 
 def extract_tar_archive(archive: Path, destination: Path) -> None:
-    """Extract a tar archive safely into an empty directory (sprint-13 §3.4).
+    """Extract a tar archive safely into an empty directory.
 
     Entries are checked for absolute or parent-relative paths, then extracted with
     ``tarfile``'s ``data`` filter, which also refuses links that escape the destination and

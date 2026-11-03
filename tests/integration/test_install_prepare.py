@@ -45,7 +45,7 @@ def _leftover_staging(staging_tmp: Path) -> list[str]:
 
 
 class TestProjectSource:
-    """A built project: the descriptor and archives come from the build directory only (sprint-13 §3.4)."""
+    """A built project: the descriptor and archives come from the build directory only."""
 
     def test_built_project_is_staged_and_planned(self, tmp_path: Path) -> None:
         """Should stage the built quadlet archive and build the plan from it."""
@@ -133,7 +133,7 @@ class TestProjectSource:
 
 
 class TestStaticSource:
-    """A `pull --recursive` folder: app.yaml next to <component>/<one archive> (sprint-13 §3.4)."""
+    """A `pull --recursive` folder: app.yaml next to <component>/<one archive>."""
 
     def test_pulled_folder_is_staged_and_planned(self, tmp_path: Path) -> None:
         """Should read the single archive of the component folder and plan the install."""
@@ -191,7 +191,7 @@ class TestStaticSource:
 
 
 class TestRemoteSource:
-    """Remote OCI artifacts through the faked registry boundary (sprint-13 §3.4)."""
+    """Remote OCI artifacts through the faked registry boundary."""
 
     @fixture
     def remote_descriptor(self, tmp_path: Path, mocker: Any) -> Path:
@@ -289,7 +289,7 @@ class TestRemoteSource:
         assert _leftover_staging(isolated_staging) == []
 
     def test_non_margot_shaped_artifact_installs(self, remote_descriptor: Path, mocker: Any) -> None:
-        """Should install an archive with no top-level directory and other file names (sprint-13 §4 fixture)."""
+        """Should install an archive with no top-level directory and other file names."""
         other_members = {"web.container": b"[Container]\nImage=docker.io/library/nginx:1\n", "site/index.html": b"<h1>x</h1>"}
 
         def pull(_prepared: Any, outdir: str, **_: Any) -> list[str]:

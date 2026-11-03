@@ -1,5 +1,5 @@
 """Unit tests for domain/install.py: profile selection, component specs, payload and merge checks,
-unit-to-service derivation (sprint-13 spike S1), the ownership marker, and the plan dataclasses."""
+unit-to-service derivation (observed on Podman 5.8.2), the ownership marker, and the plan dataclasses."""
 
 from pytest import fixture, mark, raises
 
@@ -45,7 +45,7 @@ def _doc(*profiles: dict, parameters: dict | None = None) -> dict:
 
 
 class TestSelectProfile:
-    """Profile selection rows of sprint-13 §3.3."""
+    """Profile selection rows."""
 
     def test_single_quadlet_profile_is_selected_without_id(self) -> None:
         """Should select the only quadlet profile when no --profile is given."""
@@ -107,7 +107,7 @@ class TestSelectProfile:
 
 
 class TestComponentSpecs:
-    """Component validation rules of sprint-13 §3.3."""
+    """Component validation rules."""
 
     def test_valid_component_is_returned_with_scheme_stripped(self) -> None:
         """Should return name, repository without oci:// and revision."""
@@ -180,7 +180,7 @@ class TestApplicationDirName:
 
 
 class TestUnitServiceName:
-    """Service names from file names, per spike S1 (sprint-13 §4 'Spike results')."""
+    """Service names from file names, as observed on Podman 5.8.2."""
 
     @mark.parametrize(
         ("filename", "service"),
@@ -211,7 +211,7 @@ class TestUnitServiceName:
 
 
 class TestCheckPayload:
-    """Payload validation: a quadlet component must ship a unit at its root (sprint-13 §3.4)."""
+    """Payload validation: a quadlet component must ship a unit at its root."""
 
     def test_root_unit_passes(self) -> None:
         """Should accept a payload with a quadlet unit at its root."""
@@ -234,7 +234,7 @@ class TestCheckPayload:
 
 
 class TestMergeComponents:
-    """Merge validation across selected components (sprint-13 §3.4)."""
+    """Merge validation across selected components."""
 
     def test_disjoint_components_merge_and_derive_units(self) -> None:
         """Should merge disjoint components and derive one unit per unit file."""
@@ -298,7 +298,7 @@ class TestMergeComponents:
 
 
 class TestStartTargets:
-    """Only workloads get a printed start command (sprint-13 §3.7, decision note in §4)."""
+    """Only workloads get a printed start command."""
 
     def test_containers_kubes_and_pods_are_start_targets(self) -> None:
         """Should return the services of container, kube and pod units only."""
@@ -316,7 +316,7 @@ class TestStartTargets:
 
 
 class TestInstallRecord:
-    """The ownership marker round trip (sprint-13 §3.8)."""
+    """The ownership marker round trip."""
 
     @fixture
     def record(self) -> InstallRecord:
@@ -374,7 +374,7 @@ class TestInstallRecord:
 
 
 class TestDeclaresDefaultTarget:
-    """WantedBy=default.target in the [Install] section of a unit file (sprint-13 §3.7)."""
+    """WantedBy=default.target in the [Install] section of a unit file."""
 
     def test_wanted_by_default_target_in_install_section_is_true(self) -> None:
         """Should report True for a unit whose [Install] section names default.target."""

@@ -21,7 +21,7 @@ def _write_tar(path: Path, members: list[tuple[str, bytes]]) -> Path:
 
 
 class TestExtractTarArchive:
-    """Safe extraction into a fresh directory (sprint-13 §3.4)."""
+    """Safe extraction into a fresh directory."""
 
     def test_single_top_level_directory_is_stripped(self, tmp_path: Path) -> None:
         """Should strip the one top-level directory (margot's build layout)."""

@@ -1,7 +1,7 @@
 """Pure domain logic for `margot install` (quadlet profiles).
 
 Covers profile selection, component validation, payload and merge checks, unit-to-service
-derivation (sprint-13 spike S1), the ownership marker and the plan model. No I/O, no console,
+derivation (observed on Podman 5.8.2), the ownership marker and the plan model. No I/O, no console,
 no rich imports.
 """
 
@@ -19,14 +19,14 @@ MARKER_FILENAME = ".margot-install.json"
 MARKER_SCHEMA = 1
 MARKER_STATES = ("installing", "installed")
 
-# Quadlet source suffixes accepted by the Podman generator on the reference host (S1).
+# Quadlet source suffixes that the Podman 5.8.2 generator accepts.
 QUADLET_SUFFIXES = (".container", ".volume", ".network", ".pod", ".image", ".build", ".kube", ".artifact")
 # These suffixes generate a service named <stem>.service; the others <stem>-<suffix>.service.
 _PLAIN_SERVICE_SUFFIXES = (".container", ".kube")
-# Units that a user starts directly; the others are pulled in by their dependents (S1).
+# Units that a user starts directly; the others are pulled in by their dependents.
 START_SUFFIXES = (".container", ".kube", ".pod")
 COMPOSE_FILE_NAMES = frozenset({"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"})
-# Quadlet system-wide roots for the user manager, after the runtime and config roots (sprint-13 §2).
+# Quadlet system-wide roots for the user manager, after the runtime and config roots.
 # `{uid}` is the numeric user id.
 SYSTEM_QUADLET_ROOTS = (
     "/etc/containers/systemd/users/{uid}",
@@ -74,7 +74,7 @@ class UnitFile:
     """A quadlet unit file in the merged install tree and the service systemd derives from it.
 
     ``default_target`` is True when the unit file's [Install] section has WantedBy=default.target;
-    the Quadlet generator then links the service into the user's default target (sprint-13 §3.7).
+    the Quadlet generator then links the service into the user's default target.
     """
 
     relpath: str
@@ -136,7 +136,7 @@ class ComponentEntry:
 
 @dataclass(frozen=True)
 class InstallRecord:
-    """The ownership marker `<application-id>/.margot-install.json` (sprint-13 §3.8)."""
+    """The ownership marker `<application-id>/.margot-install.json`."""
 
     state: str
     app_id: str
@@ -211,7 +211,7 @@ class InstallPlan:
 
 
 def select_profile(doc: dict[str, Any], profile_id: str | None = None) -> dict[str, Any]:
-    """Select the deployment profile to install (sprint-13 §3.3).
+    """Select the deployment profile to install.
 
     Args:
         doc: Parsed application description.
@@ -247,7 +247,7 @@ def select_profile(doc: dict[str, Any], profile_id: str | None = None) -> dict[s
 
 
 def component_specs(profile: dict[str, Any]) -> list[ComponentSpec]:
-    """Validate every component of a profile before anything is staged (sprint-13 §3.3).
+    """Validate every component of a profile before anything is staged.
 
     Raises:
         ValueError: No components, an unnamed or duplicated component, a component without
@@ -305,7 +305,7 @@ def is_quadlet_file(relpath: str) -> bool:
 
 
 def unit_service_name(relpath: str) -> str:
-    """Return the systemd service a quadlet unit file generates (spike S1).
+    """Return the systemd service a quadlet unit file generates (observed on Podman 5.8.2).
 
     `<stem>.container` and `<stem>.kube` give `<stem>.service`; every other suffix gives
     `<stem>-<suffix>.service`. Only the file name matters, not the directory.
@@ -323,7 +323,7 @@ def unit_service_name(relpath: str) -> str:
 
 
 def search_path_roots(runtime_dir: str | None, config_root: str, uid: int) -> tuple[str, ...]:
-    """List the Quadlet roots of the user manager in Quadlet's order (sprint-13 §2). No I/O.
+    """List the Quadlet roots of the user manager in Quadlet's order. No I/O.
 
     Args:
         runtime_dir: The value of XDG_RUNTIME_DIR, or None when unset or empty. A relative value is ignored.
@@ -364,7 +364,7 @@ class UnitConflict:
 
 
 def find_unit_conflicts(targets: Sequence[str], found: Sequence[str], own_dir: str) -> list[UnitConflict]:
-    """Compare the units to install with every unit found in the Quadlet search path (sprint-13 §3.10, guard 1).
+    """Compare the units to install with every unit found in the Quadlet search path.
 
     Args:
         targets: Absolute paths where the units would be installed (inside ``own_dir``).
@@ -397,7 +397,7 @@ def find_unit_conflicts(targets: Sequence[str], found: Sequence[str], own_dir: s
 
 _GENERATOR_PROGRESS = "Loading source "
 _GENERATOR_SUMMARY = "processing encountered some errors"
-# The host prints these wordings (Podman 5.8.2, sprint-13 Checkpoint C). Each names the file that was
+# The host prints these wordings (Podman 5.8.2). Each names the file that was
 # converted and the unit file it could not find. A pod reference uses its own sentence.
 _UNRESOLVED_REFERENCE = re.compile(
     r'converting "(?P<unit>[^"]+)": requested Quadlet (?:unit|source|image) (?P<name>\S+) was not found$'
@@ -461,7 +461,7 @@ def parse_generator_stderr(text: str) -> GeneratorReport:
 
 
 def judge_generator(returncode: int, report: GeneratorReport) -> GeneratorVerdict:
-    """Decide the dry-run from the exit status and the sorted output (sprint-13 §3.10).
+    """Decide the dry-run from the exit status and the sorted output.
 
     A zero exit passes. A failing run passes only when its sole problems are unresolved references; any
     other error line fails it, and then only those error lines are reported. A failing run that printed
@@ -518,7 +518,7 @@ def reference_only(diagnosis: UnitDiagnosis | None) -> tuple[UnresolvedReference
 
 
 def check_payload(component_name: str, relpaths: list[str]) -> None:
-    """Require at least one quadlet unit at the root of a component payload (sprint-13 §3.4).
+    """Require at least one quadlet unit at the root of a component payload.
 
     Raises:
         ValueError: If the payload has no root-level quadlet unit. A compose payload gets a
@@ -539,7 +539,7 @@ def check_payload(component_name: str, relpaths: list[str]) -> None:
 
 
 def merge_components(components: list[ComponentFiles]) -> MergedLayout:
-    """Merge components into one install directory and derive the unit list (sprint-13 §3.4).
+    """Merge components into one install directory and derive the unit list.
 
     Two components may ship the same path only when they come from the same artifact (one
     artifact installed under two component names). Two different unit files may not generate

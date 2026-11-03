@@ -36,7 +36,7 @@ class TestArgv:
 
 
 class TestSessionCheck:
-    """Pre-check: the systemd user session must answer (sprint-13 §3.7)."""
+    """Pre-check: the systemd user session must answer."""
 
     def test_usable_session_passes(self, mocker: Any, systemctl_path: str) -> None:
         """Should return without error when show-environment succeeds."""
@@ -62,7 +62,7 @@ class TestSessionCheck:
 
 
 class TestDaemonReload:
-    """Reload after placing files (sprint-13 §3.7)."""
+    """Reload after placing files."""
 
     def test_daemon_reload_runs_the_user_command(self, mocker: Any, systemctl_path: str) -> None:
         """Should run systemctl --user daemon-reload exactly once."""
@@ -101,7 +101,7 @@ class TestRunWrapper:
 
 
 class TestQuadletBinary:
-    """The generator is looked up in the fixed podman paths first, then on PATH (sprint-13 §3.10, spike S1)."""
+    """The generator is looked up in the fixed podman paths first, then on PATH."""
 
     def test_libexec_path_wins_when_executable(self, mocker: Any) -> None:
         """Should return /usr/libexec/podman/quadlet when it is an executable file."""
@@ -146,7 +146,7 @@ class TestGeneratorRun:
     """`quadlet -dryrun -user` with QUADLET_UNIT_DIRS pointing at the staged tree; nothing is written."""
 
     def test_exit_status_and_stderr_are_returned_unchanged(self, mocker: Any, tmp_path: Path) -> None:
-        """Should return the exit status and the raw stderr; the domain layer reads them (sprint-13 §3.10)."""
+        """Should return the exit status and the raw stderr; the domain layer reads them."""
         stderr = 'quadlet-generator[1]: converting "web.container": requested Quadlet unit x.network was not found'
         mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "", stderr))
 
@@ -218,7 +218,7 @@ class TestGeneratorRun:
 
 
 class TestUnitKnown:
-    """`systemctl --user cat <service>` decides whether systemd knows a service (sprint-13 §3.10, guard 3)."""
+    """`systemctl --user cat <service>` decides whether systemd knows a service."""
 
     def test_known_service_exits_zero(self, mocker: Any, systemctl_path: str) -> None:
         """Should report a known service when cat exits 0."""

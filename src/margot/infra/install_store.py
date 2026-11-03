@@ -32,7 +32,7 @@ def quadlet_root(environ: Mapping[str, str] | None = None) -> Path:
 
 
 def search_path_roots(environ: Mapping[str, str] | None = None, uid: int | None = None) -> tuple[Path, ...]:
-    """Return the Quadlet roots of the user manager that exist, in Quadlet's order (sprint-13 §2).
+    """Return the Quadlet roots of the user manager that exist, in Quadlet's order.
 
     The runtime root comes from XDG_RUNTIME_DIR, the config root from XDG_CONFIG_HOME (HOME default),
     and the four system roots use ``uid`` (the real user id, as Quadlet does; the UID variable is

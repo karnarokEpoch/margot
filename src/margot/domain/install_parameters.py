@@ -1,9 +1,9 @@
-"""Pure rules for `margot install` parameters on quadlet profiles (sprint-13 §3.9).
+"""Pure rules for `margot install` parameters on quadlet profiles.
 
 A parameter's ``pointer`` names an environment variable of the systemd unit of the component it
 targets. This module selects the applicable parameters, resolves their values (``--set`` over the
 descriptor default), renders the drop-in text and encodes each ``Environment=`` line so that
-systemd stores the value unchanged (spike S2). No I/O, no console, no rich imports.
+systemd stores the value unchanged (observed byte-for-byte on Podman 5.8.2). No I/O, no console, no rich imports.
 """
 
 from collections.abc import Iterable, Mapping, Sequence
@@ -20,7 +20,7 @@ DROPIN_HEADER = (
 )
 SOURCE_DESCRIPTOR = "descriptor"
 SOURCE_SET = "--set"
-# Set by margot on every unit to the directory the files are installed in (sprint-13 §3.9). A descriptor
+# Set by margot on every unit to the directory the files are installed in. A descriptor
 # parameter may not use it as a pointer, and --set cannot reach it.
 QUADLET_DIR_VARIABLE = "QUADLET_DIR"
 RESERVED_VARIABLES = frozenset({QUADLET_DIR_VARIABLE})
@@ -152,7 +152,7 @@ def render_value(value: object) -> str:
 
 
 def encode_environment(variable: str, value: str) -> str:
-    """Return the ``Environment="NAME=value"`` line that systemd stores byte-for-byte (spike S2).
+    """Return the ``Environment="NAME=value"`` line that systemd stores byte-for-byte (observed on Podman 5.8.2).
 
     The value is always double-quoted. Backslash and double quote are escaped with a backslash,
     and ``%`` is doubled because it is a unit-file specifier. ``$`` needs no escaping.

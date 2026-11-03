@@ -1,5 +1,5 @@
 """Unit tests for domain/install_parameters.py: parameter selection, value resolution, drop-in text and
-the byte-exact Environment encoding verified by sprint-13 spike S2 (every vector of the table)."""
+the byte-exact Environment encoding observed on Podman 5.8.2 (every vector of the table)."""
 
 from pytest import mark, raises
 
@@ -17,8 +17,8 @@ from margot.domain.install_parameters import (
     variables_by_unit,
 )
 
-# S2 vectors: (input value, drop-in line written by margot, value seen by the container).
-# The seen value equals the input in every case (S2, 19 of 19 byte-exact on the reference host).
+# Encoding vectors: (input value, drop-in line written by margot, value seen by the container).
+# The seen value equals the input in every case (19 of 19 byte-exact on Podman 5.8.2).
 S2_VECTORS = [
     ("00", "", 'Environment="S2V00="'),
     ("01", " lead", 'Environment="S2V01= lead"'),
@@ -54,11 +54,11 @@ def _param(value: object = None, *targets: tuple[str, list[str]]) -> dict:
 
 
 class TestEncodeEnvironment:
-    """The Environment= line that stores a value byte-for-byte (sprint-13 §3.9, spike S2)."""
+    """The Environment= line that stores a value byte-for-byte."""
 
     @mark.parametrize(("vector", "value", "expected"), S2_VECTORS, ids=[vector for vector, _, _ in S2_VECTORS])
     def test_s2_vector_is_encoded_as_recorded(self, vector: str, value: str, expected: str) -> None:
-        """Should produce exactly the drop-in line recorded for S2 vector {vector}."""
+        """Should produce exactly the drop-in line recorded for encoding vector {vector}."""
         assert encode_environment(f"S2V{vector}", value) == expected
 
     def test_dollar_signs_are_not_escaped(self) -> None:
@@ -134,7 +134,7 @@ class TestRenderValue:
 
 
 class TestResolveParameters:
-    """Which parameters apply to the selected profile, and with which value (sprint-13 §3.9)."""
+    """Which parameters apply to the selected profile, and with which value."""
 
     def test_descriptor_value_applies_to_the_target_component(self) -> None:
         """Should bind the descriptor default to the component named in the target."""
@@ -291,7 +291,7 @@ class TestResolveParameters:
 
 
 class TestDropIn:
-    """The drop-in text and the mapping of variables to unit files (sprint-13 §3.9)."""
+    """The drop-in text and the mapping of variables to unit files."""
 
     def test_dropin_text_has_the_documented_header_and_sorted_lines(self) -> None:
         """Should write the two header comments, [Service], then one Environment line per name, sorted."""
@@ -332,7 +332,7 @@ class TestDropIn:
         assert mapping == {"web.container": {"QUADLET_DIR": "/cfg/com-x"}}
 
     def test_quadlet_dir_line_escapes_space_percent_and_quotes(self) -> None:
-        """Should write QUADLET_DIR with % doubled and quotes escaped, the spike S2 rules applied to a path."""
+        """Should write QUADLET_DIR with % doubled and quotes escaped, the encoding rules applied to a path."""
         text = render_dropin({"QUADLET_DIR": '/cfg/my apps/100%/"quoted"'})
 
         assert text.splitlines()[-1] == 'Environment="QUADLET_DIR=/cfg/my apps/100%%/\\"quoted\\""'

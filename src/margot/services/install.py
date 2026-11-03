@@ -98,7 +98,7 @@ class InstallResult:
 
 
 def detect_source(uri: str | None, project_dir: str | None) -> str:
-    """Return ``remote``, ``project`` or ``static`` (sprint-13 §3.2)."""
+    """Return ``remote``, ``project`` or ``static``."""
     if uri is not None:
         return "remote"
     if (Path(project_dir or ".") / "margo.yaml").is_file():
@@ -401,7 +401,7 @@ _GENERATOR_MISSING = (
 
 
 def _guard_generator(staging: Path, file_sources: dict[str, Path], found: list[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Validate the merged tree with the Quadlet generator in dry-run mode (sprint-13 §3.10, guard 2).
+    """Validate the merged tree with the Quadlet generator in dry-run mode.
 
     The tree is the one that will be installed: units, bundled files and the drop-ins. Nothing on the host
     is touched. A missing generator gives one warning and the install goes on.
@@ -445,7 +445,7 @@ def _guard_generator(staging: Path, file_sources: dict[str, Path], found: list[s
 
 
 def _reference_warning(unit: str, name: str, service: str) -> str:
-    """The one warning for a unit that refers to a unit the host does not have (sprint-13 §3.10)."""
+    """The one warning for a unit that refers to a unit the host does not have."""
     return (
         f"{unit} references {name}, which is not installed on this host. "
         f"{service} is generated once {name} is installed and systemd is reloaded."
@@ -462,7 +462,7 @@ def _trimmed(text: str) -> str:
 def _verify_services(
     app_dir: Path, plan: InstallPlan, deferred: tuple[str, ...]
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Every expected service must be known to systemd after daemon-reload (sprint-13 §3.10, guard 3).
+    """Every expected service must be known to systemd after daemon-reload.
 
     A service that systemd does not know is explained by the host generator. It runs once, with the real
     search path, for all such services. A unit whose only generator problems are unresolved references is a

@@ -1,4 +1,4 @@
-"""Integration tests for the Step 3 guards of `margot install` (sprint-13 §3.10).
+"""Integration tests for the guards of `margot install`.
 
 Guard 1 (unit-name collision) and guard 2 (Quadlet generator dry-run) run in prepare_install, so
 --dry-run exercises them too. Guard 3 (systemd must know every service after daemon-reload) runs in
@@ -259,7 +259,7 @@ def _prepare_members(tmp_path: Path, members: dict[str, bytes]) -> Any:
 
 
 class TestUnresolvedReferences:
-    """A unit may refer to another unit that is not in the application (sprint-13 §3.10, principle).
+    """A unit may refer to another unit that is not in the application.
 
     The generator sees only the staged tree, so such a reference is reported as unresolved. The
     install checks the host: a unit already installed is silent; a missing one is one warning and its
@@ -478,7 +478,7 @@ def _host_runs(generator: Any) -> list[Any]:
 
 
 class TestMissingServiceAfterReload:
-    """Guard 3 asks the host generator why a service is unknown after reload (sprint-13 §3.10, principle).
+    """Guard 3 asks the host generator why a service is unknown after reload.
 
     The staged dry run reports only the first unresolved reference of a unit, so a unit with a second
     missing reference passes guard 2 and is absent after reload. The host run, with the real search path,
