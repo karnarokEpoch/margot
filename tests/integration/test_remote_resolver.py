@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from pytest import raises
 
-from margot.domain.layers import MARGO_DESCRIPTION_MEDIA_TYPE
+from margot.domain.layers import MARGO_DESCRIPTION_MEDIA_TYPE, MARGO_ICON_MEDIA_TYPE_TEMPLATE
 from margot.domain.models import PackageType
 from margot.infra.credentials import CredentialsExpiredError
 from margot.services import remote as remote_service
@@ -301,3 +301,90 @@ class TestRemoteResolver:
 
         assert result is not None
         assert result.normalized_uri == "public.ecr.aws/g2n4p2m7/margo:1.0.0-legacy-manifest"
+
+
+def _layer(media_type: str, title: str | None, digest: str) -> dict[str, Any]:
+    """Build a manifest layer descriptor, with an OCI title annotation when a title is given."""
+    layer: dict[str, Any] = {"mediaType": media_type, "digest": digest, "size": 100}
+    if title is not None:
+        layer["annotations"] = {"org.opencontainers.image.title": title}
+    return layer
+
+
+def _prepared_margo(manifest: dict[str, Any]) -> MagicMock:
+    """Build a prepared-retrieval stand-in for a margo artifact with the given manifest."""
+    prepared = MagicMock()
+    prepared.normalized_uri = "public.ecr.aws/g2n4p2m7/margo:1.0.0"
+    prepared.manifest = manifest
+    prepared.package_type = PackageType.MARGO
+    return prepared
+
+
+class TestRemoteResolverDescriptorLayer:
+    """The descriptor layer is located by mediaType, never by its filename or position."""
+
+    def test_descriptor_layer_named_manifest_yaml_after_other_layers_resolves_to_its_path(
+        self, mocker: Any, tmp_path: Any
+    ) -> None:
+        """Should return the pulled path of the descriptor layer when it is not first and not named app.yaml."""
+        icon_layer = _layer(MARGO_ICON_MEDIA_TYPE_TEMPLATE.format(ext="png"), "resources/icon.png", "sha256:icon")
+        descriptor_layer = _layer(MARGO_DESCRIPTION_MEDIA_TYPE, "manifest.yaml", "sha256:descriptor")
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=_prepared_margo(_make_manifest(layers=[icon_layer, descriptor_layer])),
+        )
+        icon_path = tmp_path / "resources" / "icon.png"
+        descriptor_path = tmp_path / "manifest.yaml"
+        mocker.patch(
+            "margot.services.remote.pull_service.pull_prepared_context",
+            return_value=[str(icon_path), str(descriptor_path)],
+        )
+
+        result = remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
+
+        assert result.app_yaml_path == str(descriptor_path)
+        result.temp_dir.cleanup()
+
+    def test_two_descriptor_layers_warn_naming_both_and_use_the_first(self, mocker: Any, tmp_path: Any) -> None:
+        """Should warn with the title of every descriptor layer and resolve to the first one in manifest order."""
+        first_layer = _layer(MARGO_DESCRIPTION_MEDIA_TYPE, "manifest.yaml", "sha256:aaaaaaaaaaaaaaaaaa")
+        second_layer = _layer(MARGO_DESCRIPTION_MEDIA_TYPE, "app-copy.yaml", "sha256:bbbbbbbbbbbbbbbbbb")
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=_prepared_margo(_make_manifest(layers=[first_layer, second_layer])),
+        )
+        first_path = tmp_path / "manifest.yaml"
+        second_path = tmp_path / "app-copy.yaml"
+        mocker.patch(
+            "margot.services.remote.pull_service.pull_prepared_context",
+            return_value=[str(first_path), str(second_path)],
+        )
+        warning_mock = mocker.patch("margot.services.remote.console.warning")
+
+        result = remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
+
+        assert result.app_yaml_path == str(first_path)
+        warning_mock.assert_called_once()
+        message = warning_mock.call_args[0][0]
+        assert "manifest.yaml (digest: sha256:aaaa" in message
+        assert "app-copy.yaml (digest: sha256:bbbb" in message
+        result.temp_dir.cleanup()
+
+    def test_pulled_paths_shorter_than_manifest_layers_raises_internal_error(
+        self, mocker: Any, tmp_path: Any
+    ) -> None:
+        """Should raise ValueError and clean up when the pull returns fewer paths than the manifest has layers."""
+        descriptor_layer = _layer(MARGO_DESCRIPTION_MEDIA_TYPE, "manifest.yaml", "sha256:descriptor")
+        icon_layer = _layer(MARGO_ICON_MEDIA_TYPE_TEMPLATE.format(ext="png"), "resources/icon.png", "sha256:icon")
+        mocker.patch(
+            "margot.services.remote.pull_service.prepare_oci_retrieval",
+            return_value=_prepared_margo(_make_manifest(layers=[icon_layer, descriptor_layer])),
+        )
+        # The descriptor layer is index 1, but only one path came back.
+        mocker.patch(
+            "margot.services.remote.pull_service.pull_prepared_context",
+            return_value=[str(tmp_path / "resources" / "icon.png")],
+        )
+
+        with raises(ValueError, match="Internal error"):
+            remote_service.resolve_remote_descriptor("public.ecr.aws/g2n4p2m7/margo:1.0.0")
