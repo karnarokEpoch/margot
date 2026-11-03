@@ -11,6 +11,7 @@ from oras.client import OrasClient as OrasClientLib
 from oras.container import Container
 from oras.defaults import annotation_title
 from oras.oci import ManifestConfig, NewLayer, NewManifest
+from requests import Response
 from yaml import safe_load
 
 from margot import console
@@ -22,6 +23,7 @@ from margot.domain.layers import (
 )
 from margot.domain.uri import extract_hostname, normalize_registry_hostname
 from margot.infra import credentials
+from margot.infra.oci_auth import access_denied, challenge_aware_from, mount_default_timeouts
 
 # HTTP status code constants
 _HTTP_ACCEPTED = 202
@@ -139,6 +141,13 @@ class OrasClient(OrasClientLib):
                 anonymous-only (no credential loading).
         """
         super().__init__()
+        # Replace the stock Bearer-only auth backend with one that answers Basic challenges, and
+        # give the session a default timeout. Both must happen before load_configs() runs below.
+        # oras-py's constructor creates session and auth; a test double that stubs that constructor
+        # has no backend to wrap, so the swap is skipped there.
+        if hasattr(self, "session"):
+            self.auth = challenge_aware_from(self.auth)
+            mount_default_timeouts(self.session)
         # Per-client manifest cache: keyed by string URI, scoped to this client instance
         self._manifest_cache: dict[str, dict[str, Any]] = {}
         if hostname is not None:
@@ -348,6 +357,17 @@ class OrasClient(OrasClientLib):
         console.debug(f"Logout: {hostname}")
         super().logout(hostname=hostname)
         credentials.remove_docker_config_entry(hostname)
+
+    def _check_200_response(self, response: Response) -> None:
+        """Raise AuthenticationException (exit 4) on 401/403; otherwise run the oras-py check.
+
+        Liskov Substitution Principle: same signature as the base class. oras-py's read path
+        (get_manifest, download_blob) calls this for every response, so a denied read maps to
+        the auth error instead of a generic ValueError.
+        """
+        if response.status_code in (401, 403):
+            raise access_denied(response)
+        super()._check_200_response(response)
 
     def push_margo(  # noqa: PLR0913
         self,
@@ -580,7 +600,7 @@ class OrasClient(OrasClientLib):
         self.auth.load_configs(container)
 
         # Initiate blob upload session (POST to upload endpoint)
-        upload_url = container.upload_blob_url()
+        upload_url = f"{self.prefix}://{container.upload_blob_url()}"
         console.debug(f"  POST {upload_url}")
 
         response = self.do_request(upload_url, "POST")
