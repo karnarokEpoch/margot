@@ -181,7 +181,7 @@ class InstallPlan:
     @property
     def files(self) -> tuple[str, ...]:
         """Every payload file that will be written, in component order."""
-        return tuple(path for component in self.components for path in component.entry.files)
+        return tuple(dict.fromkeys(path for component in self.components for path in component.entry.files))
 
 
 def select_profile(doc: dict[str, Any], profile_id: str | None = None) -> dict[str, Any]:
