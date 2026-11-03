@@ -95,6 +95,15 @@ Independent of Sprints 11–16. Full plan at [`.kiro/sprints/sprint-17.md`](.kir
 
 Unordered within groups; sequencing decided at sprint planning.
 
+### Fixes (no sprint; any branch, any fix release)
+
+- **fix:** `auth login` password entry. The only way to give a password is a pipe: no `--password`
+  option, no prompt without `--password-stdin`, and `--password-stdin` on a terminal blocks until Ctrl-D
+  while echoing the typed password (the docs even promise a prompt that does not exist). Plan: add
+  `--password` (insecure, warns; mutually exclusive with `--password-stdin`) and a hidden prompt on a
+  terminal. Full plan at
+  [`.kiro/sprints/fix-auth-login-password.md`](.kiro/sprints/fix-auth-login-password.md).
+
 ### Display UX
 
 - Minified JSON output + make minified the **default** display for artifacts
