@@ -16,6 +16,7 @@ import sys
 
 from rich.console import Console, RenderableType
 from rich.table import Table
+from rich.text import Text
 from typer import Exit
 
 # Module-level console instances (for testing, may be replaced with mocks)
@@ -175,6 +176,14 @@ def print_table(table: Table) -> None:
 def print_renderable(renderable: RenderableType) -> None:
     """Print a rich renderable (Panel, Tree, Group, etc.) to stdout. Always shown."""
     _get_stdout().print(renderable)
+
+
+def print_line(text: str) -> None:
+    """Print one plain line to stdout, never wrapped, cropped or read as markup. Always shown.
+
+    For values that must stay whole on one line, such as a directory a user copies.
+    """
+    _get_stdout().print(Text(text), no_wrap=True, overflow="ignore", crop=False)
 
 
 def warning(message: str) -> None:

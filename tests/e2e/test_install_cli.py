@@ -328,3 +328,62 @@ class TestInstall:
 
         assert result.exit_code == 0
         assert name in result.output
+
+
+class TestResultReport:
+    """The printed result: directory on its own line, start timing for WantedBy=default.target, upgrade restart."""
+
+    def test_installed_directory_is_printed_on_its_own_line(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should print the application directory as a whole line, never folded into the message."""
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert str(xdg / "com-belden-mosquitto") in result.output.splitlines()
+
+    def test_wanted_by_default_target_unit_gets_next_login_hint(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should say the service starts at the next login/boot when its unit declares WantedBy=default.target."""
+        members = quadlet_payload()
+        members["mosquitto-1.0.2_mosquitto-quadlet/mosquitto.container"] = (
+            b"[Container]\nImage=docker.io/library/eclipse-mosquitto:2\n\n[Install]\nWantedBy=default.target\n"
+        )
+        project, build = build_project(tmp_path, archive_members=members)
+
+        result = runner.invoke(app, ["install", "--project-dir", str(project), "--build-dir", str(build), "--yes"])
+
+        assert result.exit_code == 0, result.output
+        flat = " ".join(result.output.split())
+        assert "mosquitto.service starts at the next login/boot" in flat
+        assert "loginctl enable-linger" in flat
+
+    def test_unit_without_wanted_by_gets_no_start_timing_hint(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should say nothing about login or boot start for a unit without WantedBy=default.target."""
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert "next login" not in result.output
+        assert "WantedBy=" not in result.output
+
+    def test_first_install_prints_no_restart_command(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should not mention restart on a fresh install."""
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert "systemctl --user restart" not in result.output
+
+    def test_upgrade_prints_restart_command_for_running_services(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should explain that running services keep the old units and print the restart command on upgrade."""
+        args, _ = _project_args(tmp_path)
+        first = runner.invoke(app, ["install", *args, "--yes"])
+        assert first.exit_code == 0, first.output
+
+        second = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert second.exit_code == 0, second.output
+        assert "keep the old unit files until restarted" in second.output
+        assert "systemctl --user restart mosquitto.service" in second.output

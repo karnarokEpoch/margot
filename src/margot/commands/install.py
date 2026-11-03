@@ -134,7 +134,13 @@ def _component_tree(plan: InstallPlan) -> Tree:
 
 
 def _report(result: InstallResult) -> None:
-    console.success(escape(f"Installed {len(result.services)} unit(s) into {result.app_dir}"))
+    console.success(f"Installed {len(result.services)} unit(s) into:")
+    console.print_line(str(result.app_dir))
+    console.print_renderable(Group(*_next_steps(result)))
+
+
+def _next_steps(result: InstallResult) -> list[Text]:
+    """The commands and timing notes margot prints. It never runs them (sprint-13 §3.7)."""
     lines = [Text("Next steps. install did not start anything; run these yourself:", style="bold")]
     if result.start_services:
         for service in result.start_services:
@@ -142,11 +148,21 @@ def _report(result: InstallResult) -> None:
             lines.append(Text(f"  systemctl --user status {service}"))
     else:
         lines.append(Text("  No container or pod unit to start. Other units start as dependencies."))
+    lines.extend(
+        Text(
+            f"{service} starts at the next login/boot. Without a login, boot starts it only with lingering "
+            "(loginctl enable-linger).",
+            style="dim",
+        )
+        for service in result.wanted_services
+    )
+    if result.upgraded and result.start_services:
+        lines.append(Text("Running services keep the old unit files until restarted. Restart them with:", style="bold"))
+        lines.extend(Text(f"  systemctl --user restart {service}") for service in result.start_services)
     lines.append(
         Text(
-            "A first start may pull images and exceed systemd's 90 s start timeout. "
-            "Units with a WantedBy= line are not enabled by install.",
+            "A first start may pull images and exceed systemd's 90 s start timeout.",
             style="dim",
         )
     )
-    console.print_renderable(Group(*lines))
+    return lines
