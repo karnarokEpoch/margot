@@ -147,8 +147,7 @@ def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
         systemd.daemon_reload()
     except systemd.SystemdError as error:
         raise systemd.SystemdError(
-            f"{error} Files were written to {app_dir} and nothing was rolled back. "
-            "Fix the cause and run install again."
+            f"{error} Files were written to {app_dir} and nothing was rolled back. Fix the cause and run install again."
         ) from error
 
     return InstallResult(
@@ -238,16 +237,12 @@ def _from_static(folder: str, profile_id: str | None) -> tuple[SourceRecord, dic
             )
         files = sorted(path for path in component_dir.iterdir() if path.is_file())
         if len(files) != 1:
-            raise ValueError(
-                f"Component folder {component_dir} must hold exactly one archive; found {len(files)} file(s)."
-            )
+            raise ValueError(f"Component folder {component_dir} must hold exactly one archive; found {len(files)} file(s).")
         refs.append(_ArchiveRef(spec=spec, key=str(component_dir), archive=files[0], reference=str(files[0])))
     return SourceRecord(kind="static", path=str(base)), doc, refs
 
 
-def _from_remote(
-    uri: str, profile_id: str | None, staging: Path
-) -> tuple[SourceRecord, dict[str, Any], list[_ArchiveRef]]:
+def _from_remote(uri: str, profile_id: str | None, staging: Path) -> tuple[SourceRecord, dict[str, Any], list[_ArchiveRef]]:
     """A remote margo artifact: its descriptor, then each quadlet component pulled by reference."""
     resolved = remote_service.resolve_remote_descriptor(uri)
     try:
@@ -271,9 +266,7 @@ def _pull_component(spec: ComponentSpec, outdir: Path) -> Path:
     prepared = pull_service.prepare_oci_retrieval(spec.reference)
     if prepared.package_type != PackageType.QUADLET:
         artifact = prepared.manifest.get("artifactType") or "unknown"
-        raise ValueError(
-            f"Component '{spec.name}' ({spec.reference}) is not a quadlet component (artifact type: {artifact})."
-        )
+        raise ValueError(f"Component '{spec.name}' ({spec.reference}) is not a quadlet component (artifact type: {artifact}).")
     outdir.mkdir(parents=True)
     pull_service.pull_prepared_context(prepared, str(outdir))
     files = sorted(path for path in outdir.iterdir() if path.is_file())
@@ -324,9 +317,7 @@ def _assemble(
         plan_components.append(PlanComponent(entry=entry, reference=ref.reference, services=services))
 
     key_by_name = {ref.spec.name: ref.key for ref in refs}
-    file_sources = {
-        relpath: staged[key_by_name[owner]].extracted / relpath for relpath, owner in layout.owners.items()
-    }
+    file_sources = {relpath: staged[key_by_name[owner]].extracted / relpath for relpath, owner in layout.owners.items()}
     metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
     app_id = str(doc.get("id") or "")
 
@@ -342,5 +333,3 @@ def _assemble(
         unapplied=tuple(domain.unapplied_parameters(doc)),
     )
     return PreparedInstall(plan=plan, files=file_sources, temp_dir=temp_dir)
-
-

@@ -49,9 +49,7 @@ class TestProjectSource:
         """Should stage the built quadlet archive and build the plan from it."""
         project, build = build_project(tmp_path)
 
-        prepared = install_service.prepare_install(
-            uri=None, project_dir=str(project), build_dir=str(build), profile_id=None
-        )
+        prepared = install_service.prepare_install(uri=None, project_dir=str(project), build_dir=str(build), profile_id=None)
         try:
             plan = prepared.plan
             assert plan.app_id == "com-belden-mosquitto"
@@ -260,9 +258,7 @@ class TestRemoteSource:
         with raises(CredentialsExpiredError):
             install_service.prepare_install(uri=f"{REPOSITORY}:1.0.3", project_dir=None, build_dir=None, profile_id=None)
 
-    def test_remote_temp_directories_are_removed_on_failure(
-        self, tmp_path: Path, mocker: Any, isolated_staging: Path
-    ) -> None:
+    def test_remote_temp_directories_are_removed_on_failure(self, tmp_path: Path, mocker: Any, isolated_staging: Path) -> None:
         """Should clean the descriptor's temporary directory and the staging directory when a component fails."""
         temp = tmp_path / "remote-temp-2"
         temp.mkdir()
