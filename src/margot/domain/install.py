@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
+from margot.domain.install_parameters import Binding
 from margot.domain.layers import sanitize_filename
 from margot.domain.uri import strip_scheme
 
@@ -166,7 +167,11 @@ class PlanComponent:
 
 @dataclass(frozen=True)
 class InstallPlan:
-    """Everything `install` will do, computed before the host is touched."""
+    """Everything `install` will do, computed before the host is touched.
+
+    ``bindings`` are the parameter values applied to units; ``unapplied`` names the applicable
+    parameters that have no value.
+    """
 
     app_id: str
     app_name: str
@@ -177,6 +182,7 @@ class InstallPlan:
     components: tuple[PlanComponent, ...]
     units: tuple[UnitFile, ...]
     unapplied: tuple[str, ...]
+    bindings: tuple[Binding, ...]
 
     @property
     def services(self) -> tuple[str, ...]:
@@ -185,8 +191,13 @@ class InstallPlan:
 
     @property
     def files(self) -> tuple[str, ...]:
-        """Every payload file that will be written, in component order."""
+        """Every payload file and drop-in that will be written, in component order."""
         return tuple(dict.fromkeys(path for component in self.components for path in component.entry.files))
+
+    @property
+    def parameters(self) -> tuple[str, ...]:
+        """Names of the applied parameters (marker `parameters[]`; values are never recorded)."""
+        return tuple(sorted({binding.parameter for binding in self.bindings}))
 
 
 def select_profile(doc: dict[str, Any], profile_id: str | None = None) -> dict[str, Any]:
@@ -399,14 +410,6 @@ def declares_default_target(unit_text: str) -> bool:
             continue
         tokens.extend(value.split())
     return "default.target" in tokens
-
-
-def unapplied_parameters(doc: dict[str, Any]) -> list[str]:
-    """Declared parameter names that margot does not apply (all of them in Step 1)."""
-    parameters = doc.get("parameters")
-    if not isinstance(parameters, dict):
-        return []
-    return sorted(str(name) for name in parameters)
 
 
 def record_from_dict(data: object) -> InstallRecord:

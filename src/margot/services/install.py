@@ -6,6 +6,7 @@ function that writes to the host: it checks the systemd user session and ownersh
 files, maintains the marker and reloads systemd. It never starts, enables or stops a unit.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ from margot.domain.install import (
     PlanComponent,
     SourceRecord,
 )
+from margot.domain.install_parameters import dropin_relpath, render_dropin, resolve_parameters, variables_by_unit
 from margot.domain.layers import sanitize_filename
 from margot.domain.metadata import load_margo_yaml
 from margot.domain.models import PackageType
@@ -80,6 +82,7 @@ class InstallResult:
     wanted_services: tuple[str, ...]
     files: tuple[str, ...]
     upgraded: bool
+    parameters: tuple[str, ...]
 
 
 def detect_source(uri: str | None, project_dir: str | None) -> str:
@@ -97,11 +100,15 @@ def prepare_install(
     project_dir: str | None,
     build_dir: str | None,
     profile_id: str | None,
+    overrides: Mapping[str, str] | None = None,
 ) -> PreparedInstall:
     """Resolve, select, stage and plan an install. Nothing on the host is changed.
 
+    Args:
+        overrides: ``--set`` values by parameter name.
+
     Raises:
-        ValueError: Any source, profile, component, payload or merge problem (exit 3).
+        ValueError: Any source, profile, component, payload, merge or parameter problem (exit 3).
         CredentialsExpiredError, OciRegistryError, OSError: Registry problems (exit 4 in the command).
     """
     kind = detect_source(uri, project_dir)
@@ -115,7 +122,7 @@ def prepare_install(
         else:
             source, doc, refs = _from_static(project_dir or ".", profile_id)
         profile = domain.select_profile(doc, profile_id)
-        return _assemble(temp_dir, source, doc, profile, refs)
+        return _assemble(temp_dir, source, doc, profile, refs, overrides or {})
     except BaseException:
         temp_dir.cleanup()
         raise
@@ -159,6 +166,7 @@ def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
         wanted_services=tuple(unit.service for unit in plan.units if unit.default_target),
         files=plan.files,
         upgraded=existing is not None,
+        parameters=plan.parameters,
     )
 
 
@@ -192,7 +200,7 @@ def _record(plan: InstallPlan, state: str, installed_at: str) -> InstallRecord:
         source=plan.source,
         components=tuple(component.entry for component in plan.components),
         services=plan.services,
-        parameters=(),
+        parameters=plan.parameters,
     )
 
 
@@ -287,14 +295,15 @@ def _stage(archive: Path, destination: Path) -> _Staged:
     return _Staged(sha256=sha256_file(str(archive)), extracted=extracted, files=files)
 
 
-def _assemble(
+def _assemble(  # noqa: PLR0913 - one parameter per input of the plan
     temp_dir: TemporaryDirectory,
     source: SourceRecord,
     doc: dict[str, Any],
     profile: dict[str, Any],
     refs: list[_ArchiveRef],
+    overrides: Mapping[str, str],
 ) -> PreparedInstall:
-    """Stage every unique archive, validate payloads and merge, then build the plan."""
+    """Stage every unique archive, validate payloads and merge, resolve parameters, then build the plan."""
     staging = Path(temp_dir.name)
     staged: dict[str, _Staged] = {}
     for ref in refs:
@@ -307,6 +316,29 @@ def _assemble(
         components_files.append(ComponentFiles(name=ref.spec.name, source_key=ref.key, files=staged[ref.key].files))
     layout = domain.merge_components(components_files)
 
+    key_by_name = {ref.spec.name: ref.key for ref in refs}
+    file_sources = {relpath: staged[key_by_name[owner]].extracted / relpath for relpath, owner in layout.owners.items()}
+    units = tuple(
+        replace(unit, default_target=domain.declares_default_target(_read_text(file_sources[unit.relpath])))
+        for unit in layout.units
+    )
+
+    resolution = resolve_parameters(doc, [ref.spec.name for ref in refs], overrides)
+    units_by_component = {
+        ref.spec.name: tuple(unit.relpath for unit in units if unit.relpath in staged[ref.key].files) for ref in refs
+    }
+    dropin_by_component: dict[str, list[str]] = {name: [] for name in units_by_component}
+    for unit, variables in sorted(variables_by_unit(resolution.bindings, units_by_component).items()):
+        relpath = dropin_relpath(unit)
+        dropin = staging / "dropins" / relpath
+        dropin.parent.mkdir(parents=True, exist_ok=True)
+        dropin.write_text(render_dropin(variables), encoding="utf-8")
+        dropin.chmod(0o600)
+        file_sources[relpath] = dropin
+        for name, unit_paths in units_by_component.items():
+            if unit in unit_paths:
+                dropin_by_component[name].append(relpath)
+
     plan_components: list[PlanComponent] = []
     for ref in refs:
         stage = staged[ref.key]
@@ -315,17 +347,11 @@ def _assemble(
             repository=ref.spec.repository,
             revision=ref.spec.revision,
             archive_sha256=stage.sha256,
-            files=stage.files,
+            files=tuple(sorted({*stage.files, *dropin_by_component[ref.spec.name]})),
         )
-        services = tuple(unit.service for unit in layout.units if unit.relpath in stage.files)
+        services = tuple(unit.service for unit in units if unit.relpath in stage.files)
         plan_components.append(PlanComponent(entry=entry, reference=ref.reference, services=services))
 
-    key_by_name = {ref.spec.name: ref.key for ref in refs}
-    file_sources = {relpath: staged[key_by_name[owner]].extracted / relpath for relpath, owner in layout.owners.items()}
-    units = tuple(
-        replace(unit, default_target=domain.declares_default_target(_read_text(file_sources[unit.relpath])))
-        for unit in layout.units
-    )
     metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
     app_id = str(doc.get("id") or "")
 
@@ -338,7 +364,8 @@ def _assemble(
         target_dir=str(quadlet_root() / domain.application_dir_name(app_id)),
         components=tuple(plan_components),
         units=units,
-        unapplied=tuple(domain.unapplied_parameters(doc)),
+        unapplied=resolution.unapplied,
+        bindings=resolution.bindings,
     )
     return PreparedInstall(plan=plan, files=file_sources, temp_dir=temp_dir)
 

@@ -4,17 +4,21 @@ Files go to ``$XDG_CONFIG_HOME/containers/systemd/<application-id>/`` and system
 The command never starts, enables or stops a unit. It prints the systemctl commands for the user.
 """
 
+from typing import Annotated
+
 from oras.auth import AuthenticationException
 from requests.exceptions import RequestException
 from rich.console import Group
 from rich.markup import escape
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 from typer import Argument, Option
 
 from margot import console
 from margot.domain.install import InstallPlan, SourceRecord
+from margot.domain.install_parameters import parse_set_options
 from margot.infra import systemd
 from margot.infra.credentials import CredentialsExpiredError
 from margot.infra.install_store import quadlet_root
@@ -34,6 +38,14 @@ def install_cmd(  # noqa: PLR0913 - one parameter per documented option
     profile: str | None = Option(None, "--profile", help="Deployment profile id to install."),
     yes: bool = Option(False, "--yes", "-y", help="Do not ask for confirmation."),
     dry_run: bool = Option(False, "--dry-run", help="Show the plan and change nothing on this host."),
+    set_values: Annotated[
+        list[str] | None,
+        Option(
+            "--set",
+            metavar="NAME=VALUE",
+            help="Value for a parameter of the profile's components (repeatable; the last value wins).",
+        ),
+    ] = None,
 ) -> None:
     """Install one quadlet deployment profile of a Margo application on this host.
 
@@ -54,7 +66,8 @@ def install_cmd(  # noqa: PLR0913 - one parameter per documented option
     if build_dir is not None and install_service.detect_source(uri, project_dir) != "project":
         console.fatal("--build-dir applies to a built project only, not to a URI or a static folder.", code=2)
 
-    prepared = _prepare(uri, project_dir, build_dir, profile)
+    overrides = _parse_set_values(set_values or [])
+    prepared = _prepare(uri, project_dir, build_dir, profile, overrides)
     try:
         _show_plan(prepared.plan)
         if dry_run:
@@ -67,13 +80,31 @@ def install_cmd(  # noqa: PLR0913 - one parameter per documented option
         prepared.cleanup()
 
 
-def _prepare(uri: str | None, project_dir: str | None, build_dir: str | None, profile: str | None) -> PreparedInstall:
+def _parse_set_values(values: list[str]) -> dict[str, str]:
+    """Parse --set NAME=VALUE before any work. A malformed value is a usage error (exit 2)."""
+    try:
+        overrides, repeated = parse_set_options(values)
+    except ValueError as error:
+        console.fatal(escape(str(error)), code=2)
+    for name in repeated:
+        console.warning(escape(f"--set {name} is given more than once; the last value is used."))
+    return overrides
+
+
+def _prepare(
+    uri: str | None,
+    project_dir: str | None,
+    build_dir: str | None,
+    profile: str | None,
+    overrides: dict[str, str],
+) -> PreparedInstall:
     try:
         return install_service.prepare_install(
             uri=uri,
             project_dir=project_dir,
             build_dir=build_dir,
             profile_id=profile,
+            overrides=overrides,
         )
     except _REGISTRY_ERRORS as error:
         console.fatal(escape(str(error)), code=4)
@@ -96,10 +127,30 @@ def _apply(prepared: PreparedInstall) -> InstallResult:
 
 def _show_plan(plan: InstallPlan) -> None:
     console.print_renderable(Panel(Group(*_plan_rows(plan), _component_tree(plan)), title="Install plan", title_align="left"))
+    if plan.bindings:
+        console.print_table(_parameter_table(plan))
     hint = "Hint: install does not schema-validate the descriptor; run `margot verify` first."
     console.print_renderable(Text(hint, style="dim"))
     if plan.unapplied:
-        console.warning(escape(f"Declared parameters are not applied yet: {', '.join(plan.unapplied)}."))
+        names = ", ".join(plan.unapplied)
+        console.warning(escape(f"Parameter(s) without a value are not applied: {names}. Set one with --set NAME=VALUE."))
+
+
+def _parameter_table(plan: InstallPlan) -> Table:
+    """Parameter · value · source · variable · units, one row per target (sprint-13 §3.5, §3.9)."""
+    services = {component.entry.name: component.services for component in plan.components}
+    table = Table(title=f"Parameters ({len(plan.parameters)} applied)", title_justify="left")
+    for header in ("parameter", "value", "source", "variable", "units"):
+        table.add_column(header, overflow="fold")
+    for binding in plan.bindings:
+        table.add_row(
+            Text(binding.parameter),
+            Text(binding.value),
+            Text(binding.source),
+            Text(binding.variable),
+            Text(_DOT.join(services.get(binding.component, ()))),
+        )
+    return table
 
 
 def _plan_rows(plan: InstallPlan) -> list[Text]:
@@ -165,4 +216,12 @@ def _next_steps(result: InstallResult) -> list[Text]:
             style="dim",
         )
     )
+    if result.parameters:
+        lines.append(
+            Text(
+                "Parameter values are visible through: systemctl --user show -p Environment <service>, "
+                "or systemctl --user cat <service>.",
+                style="dim",
+            )
+        )
     return lines

@@ -18,7 +18,6 @@ from margot.domain.install import (
     record_from_dict,
     select_profile,
     start_targets,
-    unapplied_parameters,
     unit_service_name,
 )
 
@@ -298,20 +297,6 @@ class TestStartTargets:
         ).units
 
         assert start_targets(units) == ["web.service", "p-pod.service", "k.service"]
-
-
-class TestUnappliedParameters:
-    """Declared parameters are not applied in Step 1."""
-
-    def test_all_declared_parameters_are_reported_sorted(self) -> None:
-        """Should list every declared parameter name, sorted."""
-        doc = _doc(_quadlet_profile(), parameters={"zeta": {"value": 1}, "alpha": {"value": "x"}})
-
-        assert unapplied_parameters(doc) == ["alpha", "zeta"]
-
-    def test_no_parameters_reports_nothing(self) -> None:
-        """Should return an empty list when the description declares no parameters."""
-        assert unapplied_parameters(_doc(_quadlet_profile())) == []
 
 
 class TestInstallRecord:

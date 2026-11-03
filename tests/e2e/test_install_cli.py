@@ -66,15 +66,15 @@ def _project_args(tmp_path: Path) -> tuple[list[str], Path]:
 class TestHelp:
     """The command exists and documents its options."""
 
-    def test_help_lists_the_options_without_set(self) -> None:
-        """Should show --dry-run, --yes and --profile, and no --set yet (Step 2)."""
+    def test_help_lists_the_options_including_set(self) -> None:
+        """Should show --dry-run, --yes, --profile and the repeatable --set."""
         result = runner.invoke(app, ["install", "--help"])
 
         assert result.exit_code == 0
         assert "--dry-run" in result.output
         assert "--yes" in result.output
         assert "--profile" in result.output
-        assert "--set" not in result.output
+        assert "--set" in result.output
 
 
 class TestUsageErrors:
@@ -387,3 +387,134 @@ class TestResultReport:
         assert second.exit_code == 0, second.output
         assert "keep the old unit files until restarted" in second.output
         assert "systemctl --user restart mosquitto.service" in second.output
+
+
+PARAMETER_PORT = """parameters:
+  mqttPort:
+    value: 1883
+    targets:
+      - pointer: MQTT_PORT
+        components:
+          - mosquitto-quadlet
+"""
+PARAMETER_BRACKETS = """parameters:
+  label:
+    value: "[Container] array[string]"
+    targets:
+      - pointer: LABEL_TEXT
+        components:
+          - mosquitto-quadlet
+"""
+PARAMETER_UNVALUED = """parameters:
+  mqttPort:
+    targets:
+      - pointer: MQTT_PORT
+        components:
+          - mosquitto-quadlet
+"""
+
+
+def _project_with(tmp_path: Path, parameters: str) -> list[str]:
+    project, build = build_project(tmp_path, descriptor=app_description(parameters=parameters))
+    return ["--project-dir", str(project), "--build-dir", str(build)]
+
+
+def _mosquitto_dropin(xdg: Path) -> str:
+    return (xdg / "com-belden-mosquitto" / "mosquitto.container.d" / "50-margot-parameters.conf").read_text(encoding="utf-8")
+
+
+class TestParameters:
+    """--set and the parameter table (sprint-13 §3.5, §3.9, §3.11)."""
+
+    def test_set_without_equals_exits_2(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should exit 2 for a --set argument that has no '=', before any work."""
+        args = _project_with(tmp_path, PARAMETER_PORT)
+
+        result = runner.invoke(app, ["install", *args, "--set", "mqttPort", "--yes"])
+
+        assert result.exit_code == 2
+        assert not xdg.exists()
+
+    def test_unknown_set_name_exits_3_and_lists_the_applicable_names(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should exit 3 for a --set name that is not applicable and list the applicable names."""
+        args = _project_with(tmp_path, PARAMETER_PORT)
+
+        result = runner.invoke(app, ["install", *args, "--set", "ghost=1", "--yes"])
+
+        assert result.exit_code == 3
+        assert "mqttPort" in result.output
+        assert not xdg.exists()
+
+    def test_newline_in_set_value_exits_3(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should exit 3 when a --set value contains a newline."""
+        args = _project_with(tmp_path, PARAMETER_PORT)
+
+        result = runner.invoke(app, ["install", *args, "--set", "mqttPort=a\nb", "--yes"])
+
+        assert result.exit_code == 3
+        assert "newline" in result.output
+        assert not xdg.exists()
+
+    def test_repeated_set_last_wins_and_is_announced(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should keep the last value of a repeated --set name and say so."""
+        args = _project_with(tmp_path, PARAMETER_PORT)
+
+        result = runner.invoke(app, ["install", *args, "--set", "mqttPort=1", "--set", "mqttPort=2", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert "given more than once" in result.output
+        assert 'Environment="MQTT_PORT=2"' in _mosquitto_dropin(xdg)
+
+    def test_dry_run_table_renders_brackets_and_types_literally(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should show a value with [ ] and array[string] intact in the parameter table."""
+        args = _project_with(tmp_path, PARAMETER_BRACKETS)
+
+        result = runner.invoke(app, ["install", *args, "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert "[Container] array[string]" in " ".join(result.output.split())
+        assert "LABEL_TEXT" in result.output
+        assert not xdg.exists()
+
+    def test_dry_run_table_names_the_source_of_each_value(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should show whether the value comes from the descriptor or from --set."""
+        args = _project_with(tmp_path, PARAMETER_PORT)
+
+        plain = runner.invoke(app, ["install", *args, "--dry-run"])
+        overridden = runner.invoke(app, ["install", *args, "--set", "mqttPort=1884", "--dry-run"])
+
+        assert "descriptor" in plain.output
+        assert "--set" in overridden.output
+        assert "1884" in overridden.output
+
+    def test_unvalued_parameter_is_reported_as_not_applied(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should warn that a parameter without a value is not applied and name it."""
+        args = _project_with(tmp_path, PARAMETER_UNVALUED)
+
+        result = runner.invoke(app, ["install", *args, "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert "not applied" in result.output
+        assert "mqttPort" in result.output
+
+    def test_install_with_set_writes_the_dropin_and_names_the_visibility_commands(
+        self, tmp_path: Path, systemctl: Any, xdg: Path
+    ) -> None:
+        """Should apply --set through the drop-in and say how to inspect the value."""
+        args = _project_with(tmp_path, PARAMETER_PORT)
+
+        result = runner.invoke(app, ["install", *args, "--set", "mqttPort=1884", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert 'Environment="MQTT_PORT=1884"' in _mosquitto_dropin(xdg)
+        assert "systemctl --user show -p Environment" in " ".join(result.output.split())
+
+    def test_dry_run_with_set_changes_nothing(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should show the value in the plan and leave the host untouched."""
+        args = _project_with(tmp_path, PARAMETER_PORT)
+
+        result = runner.invoke(app, ["install", *args, "--set", "mqttPort=1884", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert not xdg.exists()
+        systemctl.assert_not_called()
