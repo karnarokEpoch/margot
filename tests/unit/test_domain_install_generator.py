@@ -12,6 +12,10 @@ from margot.domain.install import judge_generator, parse_generator_stderr
 PROGRESS_A = "quadlet-generator[811023]: Loading source unit file /tmp/gen-ref/app/a.container"
 PROGRESS_B = "quadlet-generator[811023]: Loading source unit file /tmp/gen-ref/app/b.container"
 PROGRESS_C = "quadlet-generator[811033]: Loading source unit file /tmp/gen-ref/app/c.container"
+PROGRESS_DROPIN_B = (
+    "quadlet-generator[817680]: Loading source drop-in file /tmp/gen-dropin/t/scratch-b.container.d/50-margot-parameters.conf"
+)
+NETWORK_B = 'quadlet-generator[817680]: converting "scratch-b.container": requested Quadlet unit scratch-a.network was not found'
 NETWORK_A = 'quadlet-generator[811023]: converting "a.container": requested Quadlet unit nothere.network was not found'
 VOLUME = 'quadlet-generator[811170]: converting "v.container": requested Quadlet source nothere.volume was not found'
 POD = 'quadlet-generator[811177]: converting "p.container": quadlet pod unit nothere.pod does not exist'
@@ -37,6 +41,13 @@ class TestParseGeneratorStderr:
 
         assert report.unresolved == ()
         assert report.errors == ()
+
+    def test_drop_in_progress_lines_are_not_errors(self) -> None:
+        """Should ignore 'Loading source drop-in file' lines: a unit with a drop-in logs one (host output, S2 Checkpoint)."""
+        report = parse_generator_stderr(_stderr(PROGRESS_DROPIN_B, NETWORK_B, SUMMARY))
+
+        assert report.errors == ()
+        assert [(ref.unit, ref.name) for ref in report.unresolved] == [("scratch-b.container", "scratch-a.network")]
 
     def test_unresolved_network_reports_the_unit_file_and_the_name(self) -> None:
         """Should read the real network line into (unit file, referenced unit)."""

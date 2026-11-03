@@ -241,7 +241,10 @@ def _members(units: dict[str, bytes]) -> dict[str, bytes]:
 
 def _generator_lines(*references: tuple[str, str], errors: tuple[str, ...] = ()) -> str:
     """Generator stderr as the host prints it: progress lines, one line per reference, then real errors."""
-    lines = ["quadlet-generator[1]: Loading source unit file /staging/mosquitto.container"]
+    lines = [
+        "quadlet-generator[1]: Loading source unit file /staging/mosquitto.container",
+        "quadlet-generator[1]: Loading source drop-in file /staging/mosquitto.container.d/50-margot-parameters.conf",
+    ]
     lines.extend(
         f'quadlet-generator[1]: converting "{unit}": requested Quadlet unit {name} was not found' for unit, name in references
     )

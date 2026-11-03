@@ -395,7 +395,7 @@ def find_unit_conflicts(targets: Sequence[str], found: Sequence[str], own_dir: s
     return conflicts
 
 
-_GENERATOR_PROGRESS = "Loading source unit file "
+_GENERATOR_PROGRESS = "Loading source "
 _GENERATOR_SUMMARY = "processing encountered some errors"
 # The host prints these wordings (Podman 5.8.2, sprint-13 Checkpoint C). Each names the file that was
 # converted and the unit file it could not find. A pod reference uses its own sentence.
