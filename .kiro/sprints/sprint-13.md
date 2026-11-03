@@ -629,19 +629,19 @@ or more conventional commits. **The dev agent stops at Checkpoint A (after Step 
 
 ### Step 1 — files
 
-- [ ] Tests first, then `domain/install.py`: profile selection (all rows of §3.3), component
+- [x] Tests first, then `domain/install.py`: profile selection (all rows of §3.3), component
   validation (incl. `packageLocation`), name sanitisation, payload validation (quadlet; compose
   collision message), merge validation (same path in two components), unit → service derivation
   (from S1), `unapplied_parameters`, plan and record dataclasses and the record (de)serialisation
   round trip.
-- [ ] `infra/filesystem.py`: safe extraction with top-level strip (hostile-archive tests: absolute,
+- [x] `infra/filesystem.py`: safe extraction with top-level strip (hostile-archive tests: absolute,
   `..`, symlink escape, device), `sha256`.
-- [ ] `infra/systemd.py`: `systemctl --user` argv construction and error mapping (mocked `run`).
-- [ ] `infra/install_store.py`: XDG path resolution (`XDG_CONFIG_HOME` set and unset), marker atomic
+- [x] `infra/systemd.py`: `systemctl --user` argv construction and error mapping (mocked `run`).
+- [x] `infra/install_store.py`: XDG path resolution (`XDG_CONFIG_HOME` set and unset), marker atomic
   write/read (tolerant of a missing file), file placement with stale-file removal driven by the
   previous marker.
-- [ ] `console.confirm` / `is_interactive` + tests.
-- [ ] `services/install.py::prepare_install`: **project** mode (built fixture in `tmp_path`: missing
+- [x] `console.confirm` / `is_interactive` + tests.
+- [x] `services/install.py::prepare_install`: **project** mode (built fixture in `tmp_path`: missing
   build dir, missing component archive, compose payload in a quadlet profile, success); **static**
   mode (`pull -r`-shaped fixture: missing folder, several files, non-tar, valid; Sprint 12
   `.jinja` error passes through; component deduplicated by `pull -r`); **remote** mode with the
@@ -649,13 +649,13 @@ or more conventional commits. **The dev agent stops at Checkpoint A (after Step 
   credential expiry → exit 4 path, success; temp directories removed in all paths); a
   non-margot-shaped fixture (archive without a top-level directory, different file names,
   descriptor layer found by `mediaType`) through the remote path.
-- [ ] `apply_install` with the mocked systemd wrapper and a `tmp_path` XDG root: files at the
+- [x] `apply_install` with the mocked systemd wrapper and a `tmp_path` XDG root: files at the
   expected paths with preserved relative layout; marker `installing` → `installed`; ownership
   refusals (no marker; other profile); upgrade removes stale files listed by the previous marker and
   keeps unlisted user files; `daemon-reload` argv; `systemctl --user` unusable → nothing written;
   **no `start`/`enable` call is ever made**; **`--dry-run` writes nothing and calls nothing**
   (asserted by a test).
-- [ ] `commands/install.py`: usage errors (exit 2), exit-code table of §3.11 (test names and
+- [x] `commands/install.py`: usage errors (exit 2), exit-code table of §3.11 (test names and
   docstrings carry the asserted number), plan rendering (values with `[`…`]` such as
   `array[string]` or `[Container]` render intact), printed next-step commands, `--dry-run` does not
   ask, `--yes`, decline → 1, non-TTY → 2, staging cleanup on every path; register in `main.py`.
@@ -664,7 +664,7 @@ or more conventional commits. **The dev agent stops at Checkpoint A (after Step 
 
 ### Checkpoint A — Step 1 real-host verification and review (required — not CI)
 
-- [ ] On the dev machine (Fedora, rootless Podman) with a quadlet fixture built from
+- [x] On the dev machine (Fedora, rootless Podman) with a quadlet fixture built from
   `docs/examples/basic-quadlet.md`: `margot install --dry-run`; `margot install --yes`; verify
   `~/.config/containers/systemd/<application-id>/` content and marker, `systemctl --user list-unit-files`
   shows the generated service, run the printed `systemctl --user start` and confirm with `podman ps`;
@@ -672,6 +672,57 @@ or more conventional commits. **The dev agent stops at Checkpoint A (after Step 
   against a local registry if one is available, otherwise state it was verified with the faked
   registry only.
 - [ ] `make check` passes. **Stop and report to the planner for owner review before Step 2.**
+
+#### Checkpoint A result (2026-11-03, reference host, Podman 5.8.2, systemd 258)
+
+Fixture: a copy of `~/work/margo/apps_margo/mosquitto` in a scratch directory. Its `quadlet/mosquitto.container`
+was changed to `Volume=./mosquitto.conf:…` in the scratch copy only.
+
+- `margot build -t all` in the copy: ok. `margot install --dry-run`: plan shown, exit 0, nothing written.
+- `margot install --yes`: `com-belden-mosquitto/` holds `mosquitto.container`, `mosquitto.conf` and
+  `.margot-install.json` (`state: installed`). `systemctl --user list-unit-files` lists
+  `mosquitto.service` as `generated`.
+- The printed `systemctl --user start mosquitto.service`: the container became healthy. `mosquitto_pub` and
+  `mosquitto_sub` inside the container exchanged a message. Host port 1883 listened. The health check passed.
+  The bind source resolved to `com-belden-mosquitto/mosquitto.conf`.
+- Second `install --yes` (upgrade, same profile): exit 0. The running container kept its start time.
+- Static source (a `pull --recursive`-shaped folder made from the build output): dry-run and `--yes` ok. The
+  marker recorded `kind: static`.
+- Remote source: the owner's stored `public.ecr.aws` credentials are expired, so margot exits 4 with
+  "Credentials … have expired". Anonymous access works. With a throwaway `HOME` (the credential store) and
+  the real `XDG_CONFIG_HOME`, `--dry-run` and `--yes` both worked. The `--yes` run upgraded the application
+  to the published 1.0.2 artifact (marker `kind: remote`). A project install then restored 1.0.3.
+- Cleanup: service stopped, application directory removed, `daemon-reload`. Quadlet removed the anonymous
+  volumes on stop. The owner's zot units, containers and volumes were unchanged. Their listing and sha256
+  match the snapshot taken before the spikes; only the mtime of the Quadlet directory changed.
+
+Findings from Checkpoint A (for the planner; the design was not changed):
+
+1. **Owner's Mosquitto unit does not fit margot's layout.** `Volume=${QUADLET_DIR}/mosquitto.conf:…` keeps the
+   variable literal in the generator output. systemd expands it to `~/.config/containers/systemd/mosquitto.conf`,
+   which margot never writes. On the reference host Podman refuses a missing bind source with
+   `statfs … no such file or directory`, so the unit fails to start. The published 1.0.2 artifact contains the
+   same `${QUADLET_DIR}` line, so a remote install of it has the same problem. A relative `./mosquitto.conf`
+   resolves to the unit's own directory at generation time.
+2. **`PublishPort=1883:1883` is hard-coded** and does not use `${MQTT_PORT}`, although the parameter
+   `mqttPort` declares `pointer: MQTT_PORT`. This is a Step 2 concern. Install printed the expected
+   "parameters not applied yet: mqttPort" warning.
+3. **Exit code for registry HTTP errors.** oras-py raises a plain `ValueError` for HTTP errors (for example
+   `429 Too Many Requests`). The shared remote path then maps it to exit 3, not exit 4. `describe` and `verify`
+   behave the same way. This predates install and needs a shared fix in `infra/oci.py`, which this sprint does
+   not change.
+4. **`WantedBy=default.target` is not honoured by install.** Generated units are not enabled (see §3.7 and
+   spike S1). The hint says so and makes no boot-start promise.
+
+Not verified on the host: boot or login start; the `/etc` and `/usr/share` Quadlet roots (absent and no root);
+the collision and generator guards (Step 3); a registry rate-limit retry beyond one manual retry.
+
+#### Step 1 status
+
+All Step 1 items are implemented with tests. `make check` shows 1530 passed and 1 failed. The failure is
+`tests/unit/test_manifest_list_fallback.py::TestResolveAllPlatformsRealSocket`. The test takes the first two
+entries of `podman images`, and on this host both are the same image ID (`localhost/supermario:dev` and
+`:v0.1.0_…-dev`), so it cannot find two platforms. This is host state and predates the sprint.
 
 ### Step 2 — parameters
 
