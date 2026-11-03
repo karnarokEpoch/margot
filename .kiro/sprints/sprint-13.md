@@ -473,7 +473,22 @@ built last so they can be exercised against the complete flow (units + drop-ins)
    derivation from the unit list, table from S1) must be known to systemd
    (`systemctl --user cat <service>` exits 0). A missing service means the generator rejected a
    file: error with the service name, the unit file, and the hint to run the generator in dry-run
-   mode or `journalctl --user -b -t quadlet-generator`.
+   mode or `journalctl --user -b -t quadlet-generator`. A service whose generation was deferred
+   because of an unresolved reference (rule below) is reported by a warning instead.
+
+**Principle (owner, after Step 3): references to other units are the unit author's responsibility;
+shadowing a unit is not allowed.** `install` never requires that every unit a file refers to
+(`Network=x.network`, `Volume=y.volume`, `Requires=…`, `Pod=…`) ships in the same application, and it
+never refuses an install because a referenced unit lives elsewhere. Only a unit name that this install
+would override (guard 1) is refused. Consequences for guard 2: the generator dry-run sees only the staged
+tree, so a reference to a unit outside it fails with `requested Quadlet unit <name> was not found`.
+That message (and only that message; a pure parser in `domain/install.py`) is **not** an install error:
+- referenced unit present in the Quadlet search path (the guard-1 scan) → silently valid;
+- referenced unit absent from the host → one `console.warning` naming the unit file, the missing unit and
+  that the service is generated once the missing unit is installed and systemd is reloaded.
+Every other generator error line still fails the install (exit 3). In guard 3, a service whose unit file
+has an unresolved reference of the second kind is excluded from the "known to systemd" check (warned
+instead of exit 1); every other expected service is still checked.
 
 ### 3.11 Error cases
 
