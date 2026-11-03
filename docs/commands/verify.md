@@ -24,7 +24,7 @@ margot verify public.ecr.aws/g2n4p2m7/margo:1.0.0
 | Flag                   | Default                    | Description                                                                   |
 | ---------------------- | -------------------------- | ----------------------------------------------------------------------------- |
 | `URI`                  | —                          | Optional tagged OCI reference. Selects remote mode.                           |
-| `--project-dir`        | `.`                        | Directory holding `margo.yaml`. Local mode only.                              |
+| `--project-dir`        | `.`                        | Project directory. Local mode only. Without margo.yaml, reads app.yaml.       |
 | `--manifest`           | resolved from `margo.yaml` | Explicit `app.yaml` or `app.yaml.jinja` path. Local mode only.                |
 | `--schema`             | vendored Schema A          | Override the upstream Margo spec schema.                                      |
 | `--recommended-schema` | vendored Schema B          | Override the curated recommended schema.                                      |

@@ -13,16 +13,6 @@ The authority model:
 
 ## Planned Sprints
 
-### Sprint 12 — Local descriptor fallback resolution (no `margo.yaml` required)
-
-Lets `margot describe` and `margot verify` run directly against a directory holding a
-bare, static `app.yaml` (e.g. produced by `margot pull`) with no `margo.yaml` present —
-silently, no new flag. Fallback search order: `<project_dir>/app.yaml`, then
-`<project_dir>/margo/app.yaml`; static-only, no Jinja2 (a `.jinja` found in fallback mode
-is an actionable error, since rendering requires `margo.yaml`'s context). `pull` itself is
-explicitly unchanged — it stays a simple layer dump, no synthesized files. Full plan at
-[`.kiro/sprints/sprint-12.md`](.kiro/sprints/sprint-12.md).
-
 ### Sprint 13 — `margot install`
 
 Installs one **quadlet** deployment profile of a Margo application on the local host (rootless
@@ -201,3 +191,4 @@ Known, accepted limitations of the first version — documented in `docs/command
 | Sprint 9 | Remote OCI inspection for `describe` and `verify` (optional positional URI, shared fetch/pull path); `margot package` offline bundle command with OCI image inclusion (`--no-images`, `--runtime`, `--platform`); Docker Hub normalization (`docker.io` → `registry-1.docker.io`, `library/` prefix for official images); attestation manifest filtering for multi-arch indexes. | [0.9.0](https://github.com/karnarokEpoch/margot/releases/tag/0.9.0) |
 | Sprint 10 | `--json` output for `describe` and `verify`, stable exit-code taxonomy, structured JSON error envelopes, and explicit `--no-color` / `NO_COLOR` controls; default Rich rendering preserved. | [0.10.0](https://github.com/karnarokEpoch/margot/releases/tag/0.10.0) |
 | Sprint 11 | Resource discovery driven by `app.yaml` fields (`icon`, `descriptionFile`, `licenseFile`, `releaseNotes`, any extension): `push` ships each referenced file with its spec media type (`licenseFile` name, `{file format}` tokens `jpeg` / `tiff` / `markdown`, other extensions as-is, no extension `bin`), sets `org.margo.app.resource` on every resource layer, warns on missing referenced files, and titles nested files with their sub-folder. Other files under `resources/` ship as `application/octet-stream`. `describe`, `verify` and `pull --recursive` locate the descriptor layer by `mediaType` (not the name `app.yaml`), warning with every match and using the first when several match. | [0.11.0](https://github.com/karnarokEpoch/margot/releases/tag/0.11.0) |
+| Sprint 12 | Local descriptor fallback: `describe` and `verify` resolve a static `app.yaml` (`<project-dir>/app.yaml`, then `<project-dir>/margo/app.yaml`) with no `margo.yaml` required, silently and with no new flag. A `.jinja` descriptor without `margo.yaml` is an actionable error (exit 3). `pull` is unchanged. | [0.11.0](https://github.com/karnarokEpoch/margot/releases/tag/0.11.0) |

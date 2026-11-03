@@ -104,7 +104,7 @@ A Margo application project that margot operates on:
 
 ```tree
 <project-root>/
-├── margo.yaml                     # project descriptor (required)
+├── margo.yaml                     # project descriptor (required by build and push)
 ├── margo/                         # margo artifact source (default: margo/)
 │   ├── app.yaml                   # Margo app descriptor — static
 │   ├── app.yaml.jinja             # Margo app descriptor — Jinja2 template (use one, not both)
