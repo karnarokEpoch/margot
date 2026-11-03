@@ -134,6 +134,12 @@ Environment="QUADLET_DIR=/home/user/.config/containers/systemd/com-example-nginx
 
 Variables are sorted alphabetically. The file is regenerated on every install.
 
+A unit file that two components of the same profile both ship receives the variables of both
+components. Two components may ship the same file only when they come from the same artifact. If
+the two components bind one variable on that unit to different values, the install fails with
+exit 3 before any file is written to the host, and the message names the unit and the variable;
+identical values are accepted.
+
 A user drop-in with a later-sorting name (e.g. `90-local.conf`) overrides margot's values —
 margot never touches files it did not write, so hand-edited drop-ins survive upgrades.
 
