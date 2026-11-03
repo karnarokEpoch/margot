@@ -9,6 +9,7 @@ files, maintains the marker and reloads systemd. It never starts, enables or sto
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -61,11 +62,15 @@ class _ArchiveRef:
 
 @dataclass
 class PreparedInstall:
-    """Everything prepared for an install. The caller must call ``cleanup`` in a ``finally``."""
+    """Everything prepared for an install. The caller must call ``cleanup`` in a ``finally``.
+
+    ``warnings`` are messages for the command to print (for example, the Quadlet generator was not found).
+    """
 
     plan: InstallPlan
     files: dict[str, Path]
     temp_dir: TemporaryDirectory
+    warnings: tuple[str, ...] = ()
 
     def cleanup(self) -> None:
         """Remove the staging directory."""
@@ -161,6 +166,7 @@ def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
         raise systemd.SystemdError(
             f"{error} Files were written to {app_dir} and nothing was rolled back. Fix the cause and run install again."
         ) from error
+    _verify_services(app_dir, plan)
 
     return InstallResult(
         app_dir=app_dir,
@@ -327,6 +333,7 @@ def _assemble(  # noqa: PLR0913 - one parameter per input of the plan
     resolution = resolve_parameters(doc, [ref.spec.name for ref in refs], overrides)
     app_id = str(doc.get("id") or "")
     application_dir = quadlet_root() / domain.application_dir_name(app_id)
+    _guard_unit_names(application_dir, units)
     units_by_component = {
         ref.spec.name: tuple(unit.relpath for unit in units if unit.relpath in staged[ref.key].files) for ref in refs
     }
@@ -356,6 +363,7 @@ def _assemble(  # noqa: PLR0913 - one parameter per input of the plan
         plan_components.append(PlanComponent(entry=entry, reference=ref.reference, services=services))
 
     metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+    warnings = _guard_generator(staging, file_sources)
 
     plan = InstallPlan(
         app_id=app_id,
@@ -369,8 +377,81 @@ def _assemble(  # noqa: PLR0913 - one parameter per input of the plan
         unapplied=resolution.unapplied,
         bindings=resolution.bindings,
     )
-    return PreparedInstall(plan=plan, files=file_sources, temp_dir=temp_dir)
+    return PreparedInstall(plan=plan, files=file_sources, temp_dir=temp_dir, warnings=warnings)
+
+
+def _guard_generator(staging: Path, file_sources: dict[str, Path]) -> tuple[str, ...]:
+    """Validate the merged tree with the Quadlet generator in dry-run mode (sprint-13 §3.10, guard 2).
+
+    The tree is the one that will be installed: units, bundled files and the drop-ins. Nothing on the host
+    is touched. A missing generator returns one warning and the install goes on.
+
+    Raises:
+        ValueError: The generator rejected the tree (exit 3), with its trimmed message.
+    """
+    binary = systemd.quadlet_binary()
+    if binary is None:
+        return (
+            "The Quadlet generator (podman's quadlet) was not found, so the unit files were not "
+            "validated before install.",
+        )
+    tree = install_store.write_tree(file_sources, staging / "merge-tree")
+    check = systemd.check_units(tree, binary, os.environ)
+    if not check.passed:
+        raise ValueError(
+            "The Quadlet generator rejected the unit files. Nothing was written to the host.\n" + check.detail
+        )
+    return ()
+
+
+def _verify_services(app_dir: Path, plan: InstallPlan) -> None:
+    """Every expected service must be known to systemd after daemon-reload (sprint-13 §3.10, guard 3).
+
+    Raises:
+        systemd.SystemdError: At least one service is unknown, so the generator rejected its unit file (exit 1).
+    """
+    missing = [unit for unit in plan.units if not systemd.unit_is_known(unit.service)]
+    if not missing:
+        return
+    lines = [
+        f"systemd does not know {unit.service} after daemon-reload (unit file {app_dir / unit.relpath})."
+        for unit in missing
+    ]
+    lines.append(
+        f"The Quadlet generator probably rejected the file. Check it with: QUADLET_UNIT_DIRS={app_dir} "
+        "/usr/libexec/podman/quadlet -dryrun -user, or read journalctl --user -b -t quadlet-generator."
+    )
+    lines.append(f"Files were written to {app_dir} and nothing was rolled back. Fix the cause and run install again.")
+    raise systemd.SystemdError("\n".join(lines))
 
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _guard_unit_names(application_dir: Path, units: tuple[domain.UnitFile, ...]) -> None:
+    """Refuse a unit whose file name or generated service already exists in the Quadlet search path (guard 1).
+
+    Units of this application's own directory are an upgrade and are allowed. The check runs for every
+    install, including --dry-run, because it is prepare-time work.
+
+    Raises:
+        ValueError: Naming the unit to install, the existing file and the clashing name (exit 3).
+    """
+    targets = [str(application_dir / unit.relpath) for unit in units]
+    found = install_store.scan_unit_files(install_store.search_path_roots(), exclude_dir=application_dir)
+    conflicts = domain.find_unit_conflicts(targets, found, own_dir=str(application_dir))
+    if not conflicts:
+        return
+    lines = []
+    for conflict in conflicts:
+        reason = (
+            f"same file name {conflict.name}"
+            if conflict.reason == "file name"
+            else f"same service name {conflict.name}; both units generate it"
+        )
+        lines.append(f"{conflict.target} clashes with {conflict.existing} ({reason}).")
+    lines.append(
+        "margot never renames or shadows a unit. Remove or rename the other file, then run install again."
+    )
+    raise ValueError("\n".join(lines))

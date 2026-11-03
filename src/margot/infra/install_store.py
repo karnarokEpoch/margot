@@ -5,7 +5,7 @@ reads and writes files, and it never touches anything outside the application di
 given.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 import json
 import os
 from pathlib import Path
@@ -13,6 +13,7 @@ import shutil
 
 from margot import console
 from margot.domain.install import MARKER_FILENAME, InstallRecord, record_from_dict
+from margot.domain.install import search_path_roots as candidate_search_roots
 
 _PLACED_MODE_MASK = 0o755  # owner rwx; group and others keep read only, never write
 
@@ -28,6 +29,55 @@ def quadlet_root(environ: Mapping[str, str] | None = None) -> Path:
     config_home = env.get("XDG_CONFIG_HOME", "")
     base = Path(config_home) if config_home and Path(config_home).is_absolute() else home / ".config"
     return base / "containers" / "systemd"
+
+
+def search_path_roots(environ: Mapping[str, str] | None = None, uid: int | None = None) -> tuple[Path, ...]:
+    """Return the Quadlet roots of the user manager that exist, in Quadlet's order (sprint-13 §2).
+
+    The runtime root comes from XDG_RUNTIME_DIR, the config root from XDG_CONFIG_HOME (HOME default),
+    and the four system roots use ``uid`` (the real user id, as Quadlet does; the UID variable is
+    not read). Missing roots are skipped, and roots that resolve to the same directory are listed once.
+    """
+    env = os.environ if environ is None else environ
+    candidates = candidate_search_roots(
+        env.get("XDG_RUNTIME_DIR") or None,
+        str(quadlet_root(env)),
+        os.getuid() if uid is None else uid,
+    )
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        path = Path(candidate)
+        if not path.is_dir():
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        roots.append(path)
+    console.debug(f"Quadlet search path: {', '.join(str(root) for root in roots) or 'no roots found'}")
+    return tuple(roots)
+
+
+def scan_unit_files(roots: Iterable[Path], exclude_dir: Path) -> list[str]:
+    """List every regular file under the roots, as absolute path strings.
+
+    Hidden directories and ``<unit>.d`` drop-in directories are not entered, and the application's own
+    directory (``exclude_dir``, compared by resolved path) is skipped. Names are filtered later by the domain.
+    """
+    excluded = exclude_dir.resolve()
+    found: list[str] = []
+    for root in roots:
+        for dirpath, dirnames, filenames in os.walk(root):
+            current = Path(dirpath)
+            dirnames[:] = [
+                name
+                for name in dirnames
+                if not name.startswith(".") and not name.endswith(".d") and (current / name).resolve() != excluded
+            ]
+            found.extend(str(current / name) for name in filenames if (current / name).is_file())
+    console.debug(f"Scanned {len(found)} file(s) in the Quadlet search path")
+    return found
 
 
 def read_marker(app_dir: Path) -> InstallRecord | None:
@@ -73,6 +123,20 @@ def place_file(app_dir: Path, relpath: str, source: Path) -> None:
     temporary.chmod((source.stat().st_mode & _PLACED_MODE_MASK) | 0o600)
     temporary.replace(target)
     console.debug(f"Placed {target}")
+
+
+def write_tree(files: Mapping[str, Path], destination: Path) -> Path:
+    """Copy staged files into ``destination`` at their relative paths: the tree the generator validates.
+
+    The copy keeps every relative path, so unit drop-ins sit beside their units exactly as they will be installed.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    for relpath, source in files.items():
+        target = destination / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    console.debug(f"Wrote {len(files)} staged file(s) for validation in {destination}")
+    return destination
 
 
 def remove_file(app_dir: Path, relpath: str) -> None:

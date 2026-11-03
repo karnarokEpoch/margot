@@ -214,16 +214,21 @@ def debug(message: str) -> None:
     _get_stderr().print(f"[dim]{_now_ms()} debug: [{_caller_location()}] {message}[/dim]", highlight=False)
 
 
-def fatal(message: str, code: int = 1) -> None:
+def fatal(message: str, code: int = 1, *, verbatim: bool = False) -> None:
     """Print an error to stderr and immediately exit with ``code``.
 
     JSON mode emits the stable machine-readable envelope; normal invocations retain
-    the historical Rich-formatted ``Error:`` message.
+    the historical Rich-formatted ``Error:`` message. ``verbatim=True`` keeps each line of the message
+    whole (no folding), for messages that carry paths a user must copy.
     """
     if _json:
         envelope = {"error": True, "code": code, "message": message}
         _get_stderr().print(
             dumps(envelope), markup=False, highlight=False, no_wrap=True, overflow="ignore", crop=False
+        )
+    elif verbatim:
+        _get_stderr().print(
+            f"[red]Error:[/red] {message}", highlight=False, no_wrap=True, overflow="ignore", crop=False
         )
     else:
         _get_stderr().print(f"[red]Error:[/red] {message}", highlight=False)

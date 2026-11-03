@@ -1,5 +1,6 @@
 """Unit tests for infra/systemd.py: systemctl --user argv, session check and daemon-reload, all with a mocked run."""
 
+from pathlib import Path
 import subprocess
 from typing import Any
 
@@ -97,3 +98,150 @@ class TestRunWrapper:
         assert kwargs["check"] is False
         assert kwargs["capture_output"] is True
         assert kwargs["text"] is True
+
+
+class TestQuadletBinary:
+    """The generator is looked up in the fixed podman paths first, then on PATH (sprint-13 §3.10, spike S1)."""
+
+    def test_libexec_path_wins_when_executable(self, mocker: Any) -> None:
+        """Should return /usr/libexec/podman/quadlet when it is an executable file."""
+        mocker.patch("margot.infra.systemd.Path.is_file", return_value=True)
+        mocker.patch("margot.infra.systemd.os.access", return_value=True)
+
+        assert systemd.quadlet_binary() == "/usr/libexec/podman/quadlet"
+
+    def test_lib_path_is_the_second_choice(self, mocker: Any) -> None:
+        """Should use /usr/lib/podman/quadlet when the libexec path is absent."""
+        mocker.patch(
+            "margot.infra.systemd.os.access",
+            side_effect=lambda path, _mode: path == "/usr/lib/podman/quadlet",
+        )
+        mocker.patch(
+            "margot.infra.systemd.Path.is_file",
+            autospec=True,
+            side_effect=lambda self: str(self) == "/usr/lib/podman/quadlet",
+        )
+
+        assert systemd.quadlet_binary() == "/usr/lib/podman/quadlet"
+
+    def test_path_lookup_is_the_last_choice(self, mocker: Any) -> None:
+        """Should fall back to a quadlet found on PATH."""
+        mocker.patch("margot.infra.systemd.Path.is_file", return_value=False)
+        mocker.patch("margot.infra.systemd.which", return_value="/opt/bin/quadlet")
+
+        assert systemd.quadlet_binary() == "/opt/bin/quadlet"
+
+    def test_no_binary_gives_none(self, mocker: Any) -> None:
+        """Should return None when no generator exists anywhere."""
+        mocker.patch("margot.infra.systemd.Path.is_file", return_value=False)
+        mocker.patch("margot.infra.systemd.which", return_value=None)
+
+        assert systemd.quadlet_binary() is None
+
+
+ENVIRON = {"PATH": "/usr/bin:/bin", "HOME": "/home/u", "XDG_RUNTIME_DIR": "/run/user/1000", "KEEP": "yes"}
+
+
+class TestGeneratorCheck:
+    """`quadlet -dryrun -user` with QUADLET_UNIT_DIRS pointing at the staged tree; nothing is written."""
+
+
+    def test_valid_tree_passes(self, mocker: Any, tmp_path: Path) -> None:
+        """Should pass when the generator exits 0 with no error output."""
+        mocker.patch("margot.infra.systemd.run", return_value=_completed(0, "---web.service---\n[Service]\n"))
+
+        check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
+
+        assert check.passed is True
+        assert check.detail == ""
+
+    def test_invalid_tree_fails_with_the_generator_message(self, mocker: Any, tmp_path: Path) -> None:
+        """Should fail and carry the generator's error text when it exits non-zero."""
+        mocker.patch(
+            "margot.infra.systemd.run",
+            return_value=_completed(1, "", "web.container: unknown key 'Imag'\nprocessing encountered some errors"),
+        )
+
+        check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
+
+        assert check.passed is False
+        assert "unknown key 'Imag'" in check.detail
+
+    def test_generator_stdout_is_never_part_of_the_detail(self, mocker: Any, tmp_path: Path) -> None:
+        """Should keep the generated service blocks out of the message (they are not an error)."""
+        mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "---SECRET=1---", "bad unit"))
+
+        check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
+
+        assert "SECRET" not in check.detail
+
+    def test_error_output_with_zero_exit_fails(self, mocker: Any, tmp_path: Path) -> None:
+        """Should treat error output on stderr as a failure even when the exit status is 0."""
+        mocker.patch("margot.infra.systemd.run", return_value=_completed(0, "", "warning: something"))
+
+        check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
+
+        assert check.passed is False
+
+    def test_argv_is_the_dry_run_user_command_and_environment_keeps_the_user_env(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        """Should run `<binary> -dryrun -user` with the user's environment plus QUADLET_UNIT_DIRS only."""
+        run = mocker.patch("margot.infra.systemd.run", return_value=_completed(0))
+
+        systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
+
+        argv = run.call_args.args[0]
+        env = run.call_args.kwargs["env"]
+        assert argv == ["/usr/libexec/podman/quadlet", "-dryrun", "-user"]
+        assert env["QUADLET_UNIT_DIRS"] == str(tmp_path)
+        assert env["PATH"] == "/usr/bin:/bin"
+        assert env["HOME"] == "/home/u"
+        assert env["XDG_RUNTIME_DIR"] == "/run/user/1000"
+        assert env["KEEP"] == "yes"
+
+    def test_caller_environment_is_not_mutated(self, mocker: Any, tmp_path: Path) -> None:
+        """Should build a new environment mapping, leaving the caller's mapping untouched."""
+        mocker.patch("margot.infra.systemd.run", return_value=_completed(0))
+        environ = dict(ENVIRON)
+
+        systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", environ)
+
+        assert "QUADLET_UNIT_DIRS" not in environ
+
+
+class TestUnitKnown:
+    """`systemctl --user cat <service>` decides whether systemd knows a service (sprint-13 §3.10, guard 3)."""
+
+    def test_known_service_exits_zero(self, mocker: Any, systemctl_path: str) -> None:
+        """Should report a known service when cat exits 0."""
+        run = mocker.patch("margot.infra.systemd.run", return_value=_completed(0, "# mosquitto.service"))
+
+        assert systemd.unit_is_known("mosquitto.service") is True
+        assert run.call_args.args[0] == ["/usr/bin/systemctl", "--user", "cat", "mosquitto.service"]
+
+    def test_unknown_service_is_reported_not_raised(self, mocker: Any, systemctl_path: str) -> None:
+        """Should report an unknown service as False when cat exits non-zero."""
+        mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "", "No files found"))
+
+        assert systemd.unit_is_known("missing.service") is False
+
+
+class TestRunEnvironment:
+    """The run wrapper passes an explicit environment only when one is given."""
+
+    def test_run_passes_env_when_given(self, mocker: Any) -> None:
+        """Should forward the env mapping to subprocess.run."""
+        popen = mocker.patch("margot.infra.systemd.subprocess.run", return_value=_completed(0))
+
+        systemd.run(["/bin/true"], env={"A": "1"})
+
+        assert popen.call_args.kwargs["env"] == {"A": "1"}
+
+    def test_run_inherits_the_environment_by_default(self, mocker: Any) -> None:
+        """Should leave env unset (inherit) when none is given."""
+        popen = mocker.patch("margot.infra.systemd.subprocess.run", return_value=_completed(0))
+
+        systemd.run(["/bin/true"])
+
+        assert popen.call_args.kwargs.get("env") is None

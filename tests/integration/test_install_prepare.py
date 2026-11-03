@@ -26,6 +26,8 @@ from tests.integration._install_helpers import (
 
 REFERENCE = f"{REPOSITORY}:1.0.2+mosquitto-quadlet"
 
+pytestmark = mark.usefixtures("install_host")
+
 
 @fixture(autouse=True)
 def isolated_staging(monkeypatch: Any, tmp_path: Path) -> Path:

@@ -9,7 +9,7 @@ from pathlib import Path
 import stat
 from typing import Any
 
-from pytest import fixture, raises
+from pytest import fixture, mark, raises
 
 from margot.domain.install import MARKER_FILENAME
 from margot.services import install as install_service
@@ -18,6 +18,9 @@ from tests.integration._install_helpers import MOSQUITTO_CONTAINER, app_descript
 
 APP = "com-belden-mosquitto"
 DROPIN = "mosquitto.container.d/50-margot-parameters.conf"
+
+pytestmark = mark.usefixtures("install_host")
+
 MQTT_PARAMETER = """parameters:
   mqttPort:
     value: 1883

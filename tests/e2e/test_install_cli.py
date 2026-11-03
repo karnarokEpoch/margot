@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 from margot.domain.install import MARKER_FILENAME
 from margot.domain.models import PackageType
 from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.systemd import GeneratorCheck
 from margot.main import app
 from tests.integration._install_helpers import (
     REPOSITORY,
@@ -25,6 +26,8 @@ from tests.integration._install_helpers import (
 )
 
 runner = CliRunner()
+
+pytestmark = mark.usefixtures("install_host")
 
 
 def _completed(returncode: int = 0, stderr: str = "") -> Any:
@@ -284,12 +287,12 @@ class TestInstall:
         assert _leftovers(staging_tmp) == []
 
     def test_install_never_starts_or_enables(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
-        """Should call systemctl only for show-environment and daemon-reload."""
+        """Should call systemctl only for show-environment, daemon-reload and one cat per service."""
         args, _ = _project_args(tmp_path)
 
         runner.invoke(app, ["install", *args, "--yes"])
 
-        assert [call.args[0][-1] for call in systemctl.call_args_list] == ["show-environment", "daemon-reload"]
+        assert [call.args[0][2] for call in systemctl.call_args_list] == ["show-environment", "daemon-reload", "cat"]
 
     def test_marker_is_written_with_installed_state(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should leave a marker in state 'installed' inside the application directory."""
@@ -567,3 +570,99 @@ class TestQuadletDirPlan:
         assert result.exit_code == 0, result.output
         assert f"margot sets QUADLET_DIR={xdg / 'com-belden-mosquitto'} for every unit." in result.output.splitlines()
         assert "QUADLET_DIR" not in result.output.split("Parameters", 1)[1]
+
+
+class TestGuards:
+    """Step 3 through the CLI: collision (exit 3, also in --dry-run), generator (exit 3), post-reload (exit 1)."""
+
+    def test_collision_in_dry_run_exits_3_and_names_both_paths(
+        self, tmp_path: Path, systemctl: Any, xdg: Path
+    ) -> None:
+        """Should refuse a unit already present elsewhere, even for --dry-run, naming both paths."""
+        existing = xdg / "handmade" / "mosquitto.container"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("[Container]\nImage=x\n", encoding="utf-8")
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--dry-run"])
+
+        assert result.exit_code == 3
+        assert str(existing) in result.output
+        assert str(xdg / "com-belden-mosquitto" / "mosquitto.container") in result.output
+        assert "same file name" in result.output
+        assert not (xdg / "com-belden-mosquitto").exists()
+        systemctl.assert_not_called()
+
+    def test_collision_with_yes_exits_3_and_writes_nothing(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should exit 3 with --yes too, and not reload systemd."""
+        existing = xdg / "handmade" / "mosquitto.kube"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("[Kube]\nYaml=x.yaml\n", encoding="utf-8")
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 3
+        assert "same service name" in result.output
+        assert "mosquitto.service" in result.output
+        assert not (xdg / "com-belden-mosquitto").exists()
+        systemctl.assert_not_called()
+
+    def test_generator_rejection_exits_3_with_its_message_and_writes_nothing(
+        self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
+    ) -> None:
+        """Should exit 3 with the trimmed generator message before the host is touched."""
+        install_host.generator.return_value = GeneratorCheck(
+            passed=False, detail="mosquitto.container: unknown key 'Imag'"
+        )
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 3
+        assert "unknown key 'Imag'" in result.output
+        assert not (xdg / "com-belden-mosquitto").exists()
+        systemctl.assert_not_called()
+
+    def test_generator_output_stays_out_of_stdout(self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any) -> None:
+        """Should not print the generator's service blocks on stdout, valid tree or not."""
+        install_host.generator.side_effect = lambda *_: GeneratorCheck(passed=True, detail="")
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "---mosquitto.service---" not in result.output
+
+    def test_missing_generator_warns_once_and_install_continues(
+        self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
+    ) -> None:
+        """Should print one warning and still install when the Quadlet generator is not found."""
+        install_host.binary.return_value = None
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 0
+        assert result.output.count("Quadlet generator") == 1
+        assert (xdg / "com-belden-mosquitto" / "mosquitto.container").is_file()
+
+    def test_missing_service_after_reload_exits_1_with_the_hint(self, tmp_path: Path, mocker: Any, xdg: Path) -> None:
+        """Should exit 1 naming the service, the unit file and the diagnostics when systemd does not know it."""
+        mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
+
+        def run(argv: list[str], **_kwargs: Any) -> Any:
+            if argv[2] == "cat":
+                return _completed(1, "No files found for mosquitto.service.")
+            return _completed(0)
+
+        mocker.patch("margot.infra.systemd.run", side_effect=run)
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 1
+        assert "mosquitto.service" in result.output
+        assert str(xdg / "com-belden-mosquitto" / "mosquitto.container") in result.output
+        assert "journalctl --user -b -t quadlet-generator" in result.output
+        assert "nothing was rolled back" in result.output.lower()

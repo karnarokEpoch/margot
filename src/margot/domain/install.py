@@ -5,6 +5,7 @@ derivation (sprint-13 spike S1), the ownership marker and the plan model. No I/O
 no rich imports.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
@@ -24,6 +25,14 @@ _PLAIN_SERVICE_SUFFIXES = (".container", ".kube")
 # Units that a user starts directly; the others are pulled in by their dependents (S1).
 START_SUFFIXES = (".container", ".kube", ".pod")
 COMPOSE_FILE_NAMES = frozenset({"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"})
+# Quadlet system-wide roots for the user manager, after the runtime and config roots (sprint-13 §2).
+# `{uid}` is the numeric user id.
+SYSTEM_QUADLET_ROOTS = (
+    "/etc/containers/systemd/users/{uid}",
+    "/etc/containers/systemd/users",
+    "/usr/share/containers/systemd/users/{uid}",
+    "/usr/share/containers/systemd/users",
+)
 
 _NOT_INSTALLABLE_REASONS = {
     "compose": "compose profiles are not supported yet (compose apply is a later release)",
@@ -310,6 +319,79 @@ def unit_service_name(relpath: str) -> str:
     if f".{suffix}" in _PLAIN_SERVICE_SUFFIXES:
         return f"{stem}.service"
     return f"{stem}-{suffix}.service"
+
+
+def search_path_roots(runtime_dir: str | None, config_root: str, uid: int) -> tuple[str, ...]:
+    """List the Quadlet roots of the user manager in Quadlet's order (sprint-13 §2). No I/O.
+
+    Args:
+        runtime_dir: The value of XDG_RUNTIME_DIR, or None when unset or empty. A relative value is ignored.
+        config_root: The XDG config Quadlet root, ``$XDG_CONFIG_HOME/containers/systemd`` (or the HOME default).
+        uid: The numeric user id that fills ``{uid}`` in the per-user system roots.
+
+    Returns:
+        Candidate root paths. Nothing is checked on disk; the infra layer skips missing roots and dedupes.
+    """
+    roots: list[str] = []
+    if runtime_dir and runtime_dir.startswith("/"):
+        roots.append(str(PurePosixPath(runtime_dir) / "containers" / "systemd"))
+    roots.append(config_root)
+    roots.extend(template.format(uid=uid) for template in SYSTEM_QUADLET_ROOTS)
+    return tuple(roots)
+
+
+def is_unit_candidate(file_name: str) -> bool:
+    """True for a visible file whose name carries a quadlet suffix. Hidden files (the marker, dotfiles),
+    drop-ins and every other file are not units and never collide.
+    """
+    return not file_name.startswith(".") and is_quadlet_file(file_name)
+
+
+@dataclass(frozen=True)
+class UnitConflict:
+    """A unit this install would write that clashes with a unit already in the search path.
+
+    ``reason`` is ``file name`` (the same file name exists elsewhere) or ``service name`` (a different
+    file generates the same service, as `<name>.kube` and `<name>.container` do). ``name`` is the clashing
+    file name or service name.
+    """
+
+    target: str
+    existing: str
+    reason: str
+    name: str
+
+
+def find_unit_conflicts(targets: Sequence[str], found: Sequence[str], own_dir: str) -> list[UnitConflict]:
+    """Compare the units to install with every unit found in the Quadlet search path (sprint-13 §3.10, guard 1).
+
+    Args:
+        targets: Absolute paths where the units would be installed (inside ``own_dir``).
+        found: Absolute paths of the files found in the search path, in any order.
+        own_dir: The application's own directory. Files inside it are an upgrade, not a collision.
+
+    Returns:
+        One conflict per clashing pair, in target order, then found order. Empty when nothing clashes.
+    """
+    own = PurePosixPath(own_dir)
+    existing: list[PurePosixPath] = []
+    for path in dict.fromkeys(found):
+        pure = PurePosixPath(path)
+        if pure == own or own in pure.parents:
+            continue
+        if is_unit_candidate(pure.name):
+            existing.append(pure)
+
+    conflicts: list[UnitConflict] = []
+    for target in targets:
+        target_path = PurePosixPath(target)
+        target_service = unit_service_name(target_path.name)
+        for other in existing:
+            if other.name == target_path.name:
+                conflicts.append(UnitConflict(str(target_path), str(other), "file name", target_path.name))
+            elif unit_service_name(other.name) == target_service:
+                conflicts.append(UnitConflict(str(target_path), str(other), "service name", target_service))
+    return conflicts
 
 
 def check_payload(component_name: str, relpaths: list[str]) -> None:

@@ -8,12 +8,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pytest import fixture, raises
+from pytest import fixture, mark, raises
 
 from margot.domain.install import MARKER_FILENAME
 from margot.infra.systemd import SystemdError
 from margot.services import install as install_service
 from tests.integration._install_helpers import build_project, quadlet_payload
+
+pytestmark = mark.usefixtures("install_host")
 
 
 def _completed(returncode: int = 0, stderr: str = "") -> Any:
@@ -78,15 +80,15 @@ class TestFreshInstall:
         assert result.services == ("mosquitto.service",)
 
     def test_only_daemon_reload_is_called_and_never_start_or_enable(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
-        """Should call systemctl with show-environment and daemon-reload only, never start/enable/stop."""
+        """Should call systemctl with show-environment, daemon-reload and cat only, never start/enable/stop."""
         prepared = _prepare(tmp_path)
         try:
             install_service.apply_install(prepared, root=xdg)
         finally:
             prepared.cleanup()
 
-        commands = [argv[-1] for argv in _argv_list(systemctl)]
-        assert commands == ["show-environment", "daemon-reload"]
+        verbs = [argv[2] for argv in _argv_list(systemctl)]
+        assert verbs == ["show-environment", "daemon-reload", "cat"]
         assert not any(word in argv for argv in _argv_list(systemctl) for word in ("start", "enable", "stop", "restart"))
 
     def test_start_targets_are_reported_for_printing_only(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:

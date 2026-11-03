@@ -68,6 +68,8 @@ def install_cmd(  # noqa: PLR0913 - one parameter per documented option
 
     overrides = _parse_set_values(set_values or [])
     prepared = _prepare(uri, project_dir, build_dir, profile, overrides)
+    for message in prepared.warnings:
+        console.warning(escape(message))
     try:
         _show_plan(prepared.plan)
         if dry_run:
@@ -109,7 +111,7 @@ def _prepare(
     except _REGISTRY_ERRORS as error:
         console.fatal(escape(str(error)), code=4)
     except (ValueError, TypeError) as error:
-        console.fatal(escape(str(error)), code=3)
+        console.fatal(escape(str(error)), code=3, verbatim=True)
     except Exception as error:  # noqa: BLE001
         console.fatal(escape(f"Install failed: {error}"), code=1)
 
@@ -118,11 +120,11 @@ def _apply(prepared: PreparedInstall) -> InstallResult:
     try:
         return install_service.apply_install(prepared, root=quadlet_root())
     except systemd.SystemdError as error:
-        console.fatal(escape(str(error)), code=1)
+        console.fatal(escape(str(error)), code=1, verbatim=True)
     except (ValueError, TypeError) as error:
-        console.fatal(escape(str(error)), code=3)
+        console.fatal(escape(str(error)), code=3, verbatim=True)
     except OSError as error:
-        console.fatal(escape(f"Install failed while writing files: {error}"), code=1)
+        console.fatal(escape(f"Install failed while writing files: {error}"), code=1, verbatim=True)
 
 
 def _show_plan(plan: InstallPlan) -> None:
