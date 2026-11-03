@@ -6,6 +6,7 @@ from logging import DEBUG, INFO, WARNING, Formatter, Handler, LogRecord, getLogg
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from oras.client import OrasClient as OrasClientLib
 from oras.container import Container
@@ -26,6 +27,8 @@ from margot.infra import credentials
 from margot.infra.oci_auth import access_denied, challenge_aware_from, mount_default_timeouts
 
 # HTTP status code constants
+_HTTP_OK = 200
+_HTTP_MULTIPLE_CHOICES = 300
 _HTTP_ACCEPTED = 202
 
 # One layer to push: (path, media_type, title) or (path, media_type, title, extra_annotations).
@@ -35,6 +38,21 @@ _LayerEntry = tuple[Path, str, str] | tuple[Path, str, str, Mapping[str, str]]
 
 class OciRegistryError(Exception):
     """Raised when an OCI registry returns an unexpected error response."""
+
+
+def _describe_registry_reply(response: Response) -> str:
+    """Summarise a failed registry reply as status, method and URL.
+
+    The query string and any userinfo are dropped from the URL, and no headers or
+    body are included, so the message cannot carry credentials or upload tokens.
+    """
+    raw_url = response.url or (response.request.url if response.request is not None else "") or ""
+    parts = urlsplit(raw_url)
+    url = urlunsplit((parts.scheme, parts.netloc.rpartition("@")[2], parts.path, "", ""))
+    method = response.request.method if response.request is not None else None
+    reason = f" {response.reason}" if response.reason else ""
+    method_part = f"{method} " if method else ""
+    return f"Registry returned {response.status_code}{reason} for {method_part}{url}"
 
 
 class _OrasLogHandler(Handler):
@@ -329,6 +347,34 @@ class OrasClient(OrasClientLib):
         super().download_blob(resolved_container, digest, outfile)
         return outfile
 
+    def _check_200_response(self, response: Response) -> None:
+        """Map every non-2xx registry reply to exit 4; accept 2xx through oras-py.
+
+        oras-py calls this helper from its manifest GET, its upload and PUT paths, and its
+        pull loop. Its own version raises a bare ValueError, which margot's commands map to
+        exit 3 (invalid input). A registry failure is a remote failure and maps to exit 4:
+
+        - 401 and 403 raise AuthenticationException with the login hint (basic-auth branch).
+        - Any other non-2xx status raises OciRegistryError with the status, method and URL.
+
+        The signature matches the base class exactly, because oras-py dispatches to this
+        method polymorphically from inside its own methods.
+
+        Args:
+            response: The registry reply to check.
+
+        Raises:
+            AuthenticationException: If the registry answers 401 or 403.
+            OciRegistryError: If any other status is outside the 2xx range.
+            ValueError: Raised by oras-py for a 2xx status it does not accept (for example 204).
+        """
+        if response.status_code in (401, 403):
+            raise access_denied(response)
+        if not _HTTP_OK <= response.status_code < _HTTP_MULTIPLE_CHOICES:
+            self._parse_response_errors(response)
+            raise OciRegistryError(_describe_registry_reply(response))
+        super()._check_200_response(response)
+
     def login(self, hostname: str, username: str, password: str) -> None:
         """
         Authenticate with an OCI registry.
@@ -357,17 +403,6 @@ class OrasClient(OrasClientLib):
         console.debug(f"Logout: {hostname}")
         super().logout(hostname=hostname)
         credentials.remove_docker_config_entry(hostname)
-
-    def _check_200_response(self, response: Response) -> None:
-        """Raise AuthenticationException (exit 4) on 401/403; otherwise run the oras-py check.
-
-        Liskov Substitution Principle: same signature as the base class. oras-py's read path
-        (get_manifest, download_blob) calls this for every response, so a denied read maps to
-        the auth error instead of a generic ValueError.
-        """
-        if response.status_code in (401, 403):
-            raise access_denied(response)
-        super()._check_200_response(response)
 
     def push_margo(  # noqa: PLR0913
         self,

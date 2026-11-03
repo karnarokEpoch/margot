@@ -74,12 +74,12 @@ outdir/
 
 ## Exit codes
 
-| Code | Meaning                                                                             |
-| ---- | ----------------------------------------------------------------------------------- |
-| 0    | Pull succeeded (including partial recursive pulls with component warnings).         |
-| 3    | Malformed or invalid URI.                                                           |
-| 4    | Registry or authentication failure (denied access, credentials missing or expired). |
-| 1    | Unexpected failure.                                                                 |
+| Code | Meaning                                                                                                                                                       |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Pull succeeded (including partial recursive pulls with component warnings).                                                                                   |
+| 1    | Unexpected failure.                                                                                                                                           |
+| 3    | Malformed or invalid URI, or other semantic input failure.                                                                                                    |
+| 4    | Registry or authentication failure: denied access (401 or 403), credentials missing or expired, or another HTTP error status such as 429, a 5xx, or a 404 for a missing tag. |
 
 ## Example
 

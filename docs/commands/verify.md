@@ -187,7 +187,7 @@ successful result or validation result; errors are emitted only on stderr.
 | 1    | Unexpected or uncategorized failure.                                                                         |
 | 2    | Usage failure, such as `--recommend` and `--only-recommend` together.                                        |
 | 3    | Descriptor resolution, schema, or semantic validation failure. Includes: `app.yaml` not found (local or fallback), Jinja2 template found without `margo.yaml`, schema errors, or unrecognized `kind`. |
-| 4    | Remote registry or authentication failure.                                                                   |
+| 4    | Remote registry or authentication failure, including an HTTP error status from the registry (for example 429, a 5xx, or a 404 for a missing tag). |
 
 ## Example
 

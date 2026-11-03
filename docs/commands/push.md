@@ -67,7 +67,7 @@ resolved credentials. No content is sent:
 
 - `202 Accepted` → write access confirmed. The upload session is immediately cancelled.
 - `401` / `403` → no write access. Error, exit 4.
-- Any other status → surfaced as-is, exit 1.
+- Any other status → the registry error is reported with the status code and URL, exit 4.
 
 The probe runs once per unique `(registry, repository)` pair per invocation — a single
 `--type all --variant all` push against components sharing one repository opens one probe,
@@ -181,13 +181,13 @@ Annotations pushed with compose/quadlet:
 
 ## Exit codes
 
-| Code | Meaning                                                                                      |
-| ---- | -------------------------------------------------------------------------------------------- |
-| 0    | All artifacts pushed (or dry run passed).                                                    |
-| 2    | Invalid flag value detected before any work begins (e.g. unknown `--type`).                  |
-| 3    | SemVer validation failed, or a required artifact was not found on disk.                      |
-| 4    | Credentials missing or expired, registry rejected credentials, or no write access (dry run). |
-| 1    | Unexpected failure.                                                                          |
+| Code | Meaning                                                                                                                                                                                              |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | All artifacts pushed (or dry run passed).                                                                                                                                                            |
+| 1    | Unexpected failure.                                                                                                                                                                                  |
+| 2    | Invalid flag value detected before any work begins (e.g. unknown `--type`).                                                                                                                          |
+| 3    | SemVer validation failed, or a required artifact was not found on disk.                                                                                                                              |
+| 4    | Registry or authentication failure: credentials missing, expired, or rejected, no write access (dry run), or an HTTP error status from the registry such as 429, or a 5xx or 404 on an upload. |
 
 ## Common errors
 

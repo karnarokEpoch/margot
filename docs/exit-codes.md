@@ -54,4 +54,17 @@ $ echo $?
 ```
 
 A registry permission failure is a remote/authentication failure and returns code `4`.
+
+A registry that answers a remote read or an upload with an HTTP error status is a remote failure and returns
+code `4`. Examples are `429 Too Many Requests`, a `5xx`
+status, and a `404` for a tag that does not exist. The message names the status code, the
+reason phrase, the method and the request URL. It never includes credentials or query strings.
+
+```console
+$ margot describe public.ecr.aws/g2n4p2m7/margo:9.9.9
+Error: Registry returned 404 Not Found for GET https://public.ecr.aws/v2/g2n4p2m7/margo/manifests/9.9.9
+$ echo $?
+4
+```
+
 Unexpected failures that do not fit one of the specific categories return code `1`.
