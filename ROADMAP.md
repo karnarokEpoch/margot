@@ -39,7 +39,30 @@ is an actionable error, since rendering requires `margo.yaml`'s context). `pull`
 explicitly unchanged — it stays a simple layer dump, no synthesized files. Full plan at
 [`.kiro/sprints/sprint-12.md`](.kiro/sprints/sprint-12.md).
 
-### Sprint 13 — `margot.yaml` project file and `margot migrate`
+### Sprint 13 — `margot install`
+
+Installs one **quadlet** deployment profile of a Margo application on the local host (rootless
+Podman + systemd user session is the reference environment). `margot install [URI] [--project-dir]
+[--build-dir] [--profile ID] [--set NAME=VALUE] [--yes] [--dry-run]` takes three sources — a built
+margot project, a static folder (`app.yaml` + component archives, e.g. from `pull --recursive`, not
+adopted by `migrate`), or a remote margo artifact, **including artifacts not produced by margot**
+(resolution relies on the Margo spec and OCI metadata, never on margot-only conventions).
+Everything is resolved, staged and checked (Quadlet generator dry-run) before the host is touched;
+the plan is shown and confirmed (`--yes`, `--dry-run`). Delivered in three reviewed steps. **Step
+1:** the quadlet files are placed in `~/.config/containers/systemd/<application-id>/` (with an
+ownership marker) and systemd is reloaded; `install` never starts anything, it prints the
+`systemctl --user start` commands. **Step 2:** parameters are applied as systemd unit environment
+variables through Quadlet drop-ins (`<unit>.<suffix>.d/50-margot-parameters.conf`, `[Service]
+Environment=`); `pointer` is defined as a unit environment variable name for quadlet, so unit files
+use systemd expansion (`${NAME}`) in `Exec=`, `PublishPort=`, etc.; values come from descriptor
+defaults and `--set`. **Step 3:** final checks: unit-name collisions across the Quadlet search path
+(hard error), Quadlet-generator dry-run of the staged files, post-reload service verification.
+No `--type`, no `--force`, no descriptor schema gate: simple but fully working. Compose and helm
+profiles and `packageLocation` components are refused (see Backlog). Runs against the legacy
+`margo.yaml` name; Sprint 14 sweeps it. Depends on Sprints 11 and 12. Full plan at
+[`.kiro/sprints/sprint-13.md`](.kiro/sprints/sprint-13.md).
+
+### Sprint 14 — `margot.yaml` project file and `margot migrate`
 
 Five items in one sprint. (1) `fix(pull)`: sanitise component names in `pull --recursive`
 (shippable first as a patch). (2) The project descriptor is renamed `margo.yaml` →
@@ -53,9 +76,10 @@ nothing left behind when migrating in place. (5) `margot migrate --components` d
 compose/quadlet components 1:1 as variants and organises their sources into `compose/` /
 `quadlet/` (local `pull -r` archives first, registry otherwise; safe extraction; one
 repository per type unless `--all-repositories`; helm warned, not representable). Depends on
-Sprints 11 and 12. Full plan at [`.kiro/sprints/sprint-13.md`](.kiro/sprints/sprint-13.md).
+Sprints 11, 12 and 13 (`margot install` is swept in the rename). Full plan at
+[`.kiro/sprints/sprint-14.md`](.kiro/sprints/sprint-14.md).
 
-### Sprint 14 — Helm components: build and push
+### Sprint 15 — Helm components: build and push
 
 Helm is entirely absent today (no `PackageType.HELM`, `<helm_chart_tag>` hard-wired to `""`,
 no `helm:` block). Adds a `helm:` block to the project file mirroring `compose` / `quadlet`
@@ -68,20 +92,20 @@ compares helm's own `Pushed:` reference with the expected `repository:tag` after
 reports a mismatch. `describe` and `verify` also gain a first project-level check (helm component
 `name` vs the project's `Chart.yaml` name). Also
 ships a second container image that contains helm, and a CI job that tests Helm 3 and Helm 4.
-Depends on Sprint 13 (project file rename). Full plan at
-[`.kiro/sprints/sprint-14.md`](.kiro/sprints/sprint-14.md).
+Depends on Sprint 14 (project file rename). Full plan at
+[`.kiro/sprints/sprint-15.md`](.kiro/sprints/sprint-15.md).
 
-### Sprint 15 — Helm charts on the pull side
+### Sprint 16 — Helm charts on the pull side
 
 Detects Helm charts from the manifest's config/layer media types (they set no `artifactType`),
 so `pull` stops refusing them, `pull --recursive` follows helm components instead of warning,
 and `margot package` can bundle built helm archives. No `helm` binary needed. Images referenced
-only inside a chart are not bundled (documented limitation). Depends on Sprint 14. Full plan at
-[`.kiro/sprints/sprint-15.md`](.kiro/sprints/sprint-15.md).
+only inside a chart are not bundled (documented limitation). Depends on Sprint 15. Full plan at
+[`.kiro/sprints/sprint-16.md`](.kiro/sprints/sprint-16.md).
 
 ---
 
-## Backlog / Stack (Sprint 16+)
+## Backlog / Stack (Sprint 17+)
 
 Unordered within groups; sequencing decided at sprint planning.
 
@@ -90,7 +114,7 @@ Unordered within groups; sequencing decided at sprint planning.
 - Minified JSON output + make minified the **default** display for artifacts
   (`console.print_json` is still pretty-printed; fetch may keep pretty as default — TBD).
 - Table output when listing **multiple** URIs (new `list`-style command).
-- `--json` for the action commands `build`, `push`, `pull` (deferred from Sprint 10, which
+- `--json` for the action commands `build`, `push`, `pull` and `install` (deferred from Sprint 10, which
   only covers `describe` and `verify`). Revisit once Sprint 10's pattern is proven.
 
 ### Manifest recognition in `fetch`
@@ -102,7 +126,7 @@ Unordered within groups; sequencing decided at sprint planning.
 ### More artifact types
 
 - `pull` already detects margo, compose and quadlet via `artifactType`; `fetch` prints the
-  raw manifest for anything. Helm chart detection is scheduled in Sprint 15. Remaining: detect
+  raw manifest for anything. Helm chart detection is scheduled in Sprint 16. Remaining: detect
   plain image artifacts — extend `PackageType` (no `IMAGE` member today) with per-type handling
   and display.
 
@@ -110,17 +134,43 @@ Unordered within groups; sequencing decided at sprint planning.
 
 - `margot init` — scaffold a new Margo project: generate a starter `margot.yaml` and the
   expected directory layout (`margo/app.yaml.jinja`, optional `compose/` / `quadlet/`).
-  The command does not exist yet. Sprint 13 reworks the "project file not found" error hint
+  The command does not exist yet. Sprint 14 reworks the "project file not found" error hint
   to point at `margot migrate`; once `init` lands, mention it there too.
-- `margot migrate` — now scheduled as Sprint 13 (see Planned Sprints).
+- `margot migrate` — now scheduled as Sprint 14 (see Planned Sprints).
 - `migrate` follow-up (low priority, owner prefers static `app.yaml`): partial reverse
   templating — only the few fields `margot.yaml` manages (`id`, `version`, component
   `repository`/`revision`, catalog), everything else verbatim. Acceptance: render the
   template with the generated `margot.yaml` and compare parsed YAML to the source.
-- **chore:** remove the legacy `margo.yaml` read path at **1.0.0** (deprecated in Sprint 13);
+- **chore:** remove the legacy `margo.yaml` read path at **1.0.0** (deprecated in Sprint 14);
   and rename the internal `MargoYaml` / `load_margo_yaml` identifiers to match `margot.yaml`.
-- Scheduled in Sprint 13 (no longer backlog): `pull --recursive` component-name
+- Scheduled in Sprint 14 (no longer backlog): `pull --recursive` component-name
   sanitisation (Item 1, may ship as an earlier patch) and per-variant `repository` (Item 3).
+
+### `margot install` follow-ups (after Sprint 13)
+
+Known, accepted limitations of the first version — documented in `docs/commands/install.md`.
+
+- **`packageLocation` / `keyLocation` components.** Spec-style compose components point at an
+  HTTPS tar.gz instead of an OCI `repository`/`revision`. v1 refuses them (naming the component);
+  assumed limitation, like helm. Needs: HTTPS-only download with safe extraction, an explicit
+  stance on signature verification via `keyLocation`, and a decision on redirects/size limits.
+- **Compose profiles (next install sprint).** Refused in Sprint 13 (quadlet first). Needs a
+  payload location, `podman compose` / `docker compose` `up -d`, and parameters as environment
+  variables (the spec's compose `pointer` meaning).
+- **Helm profiles.** Refused today (no cluster on the host). Revisit with a clear target model
+  (host `helm` against a user-selected kube context?) once Sprints 15–16 land.
+- **Quadlet parameter follow-ups.** Sprint 13 Step 2 maps `pointer` to a systemd unit environment
+  variable on all units of the component and takes `--set` values as plain strings. Remaining:
+  validate `--set` against the descriptor schema (`dataType`, length, regex, range, options),
+  per-unit targeting, array data types, a secret mechanism (values are clear text in the drop-in
+  and visible through `systemctl show`), `immutable` enforcement on upgrade.
+- **`margot uninstall`, `margot list` / `status`** on top of the ownership marker
+  (`<application-id>/.margot-install.json`). Until then a profile switch for an installed
+  application is refused and cleanup is manual.
+- **Rollback** of a partially applied install (v1 reports what was applied and stops).
+- **Install a bare compose/quadlet component by URI** (no application, no profile).
+- **`--json` for `install`**: fold into the action-commands `--json` item under Display UX.
+- **Runtime selection** (`--runtime`), if a host with both Podman and Docker needs a choice.
 
 ---
 

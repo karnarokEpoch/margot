@@ -1,503 +1,406 @@
-# Sprint 14 — Helm components: build and push
+# Sprint 14 — `margot.yaml` project file and `margot migrate`
 
-**Status:** draft — D2, D3 and D4 settled by the owner (2026-10-15); spikes S1, S2 and S3 resolved against Helm 4.2.0 + zot (2026-10-16); S4–S6 covered by the owner's "Helm 3.8–4.2 UI is stable" ruling
-**Type:** feature
+**Status:** design settled — awaiting Gate 1 (branch/worktree split)
+**Type:** feature (Item 2 is a breaking rename with a compatibility window until 1.0.0)
 **Owner:** python-dev (docs: docs-writer)
-**Release:** planned for `release/X.Y.Z` (TBD, after Sprint 13)
+**Release:** planned for `release/X.Y.Z` (TBD, after Sprints 11 and 12); Item 1 may ship earlier as a patch
 
 ---
 
 ## 1. Goal
 
-margot builds and pushes Helm charts that a project owns, the same way it already does
-compose and quadlet components: a `helm:` block in the project file, variants, placeholder
-substitution and `image` search/replace on a temp copy, `margot build -t helm`,
-`margot push -t helm`. Packaging and pushing are delegated to the host `helm` binary
-through a thin wrapper — margot does **not** reimplement helm. A second container image
-that contains helm is published, CI exercises Helm 3 and Helm 4, `describe` and `verify` gain a
-first project-level (non-manifest) consistency check, and margot gains a real `--plain-http`
-capability for talking to local/insecure registries — needed to test the helm integration
-honestly, and applied uniformly to the existing oras-py registry path as well.
+1. Rename the project descriptor from `margo.yaml` to **`margot.yaml`** (same content, still
+   `apiVersion: v1`). The file is margot's own, not part of the Margo standard, so it must
+   not look like a Margo-spec file or an anchor other tools should use. `margot migrate`
+   performs the rename.
+2. `margot migrate` also **adopts an existing Margo manifest** (typically after
+   `margot pull --recursive`) by generating `margot.yaml` and the margot project layout
+   around it, and with `--components` organises the pulled components into
+   `compose/` / `quadlet/` variant folders.
+3. Supporting changes this needs: a safe `pull --recursive` (Item 1) and a per-variant
+   `repository` in `margot.yaml` (Item 3).
+
+Target workflow:
+
+```text
+margot pull <uri> --recursive     # layer dump + component archives
+margot migrate                    # in the current folder: margot.yaml + margo/ layout
+margot migrate --components       # ... and organise the components too
+```
 
 ---
 
 ## 2. Context
 
-Helm is currently absent from the product:
+- Today `margo.yaml` anchors a project (`--project-dir`), is read by `build`, `push`,
+  `package`, `verify`, `describe`, and feeds `app.yaml.jinja` as `manifest.*`.
+- Sprint 12 makes `describe`/`verify` work on a bare `app.yaml` and defers adoption of such
+  manifests to `migrate`. Its decision that `pull` stays a plain layer dump stands: `pull`'s
+  output layout is not changed here.
 
-- `PackageType` has no `HELM` member (`domain/models.py`).
-- `<helm_chart_tag>` is a declared placeholder but `services/build.py::_build_placeholder_map`
-  hard-wires it to `""`; it is also listed in `infra/filesystem.py::SUPPORTED_TAG_PLACEHOLDERS`.
-- The project file parser (`domain/metadata.py::load_margo_yaml`) only knows `compose` and
-  `quadlet`; `docs/examples/minimal.md` states margot "does not build the Helm chart itself".
-- Helm components exist today only inside `app.yaml`, pointing at *external* charts (e.g. the
-  bitnami example). That keeps working unchanged: the new `helm:` block is **opt-in**, for charts
-  the project itself owns.
-- There is no `subprocess` use anywhere in `src/margot` today — `infra/helm.py` introduces the
-  first one (check the Ruff config for `S603`/`S607` before assuming they are quiet).
-- `Containerfile` is `python:3.12.13-alpine3.24`; `release.yml` builds and pushes one image to
-  GHCR; `ci.yml` has one `test` job (Python 3.12/3.13/3.14). `pyproject.toml` sets
-  `--cov-fail-under=90` in pytest `addopts`, so any test subset run on its own must pass
-  `--no-cov`.
+Dependencies — land first, then branch from the release branch:
 
-**Decision record (owner, 2026-10-15): wrapper over the host `helm` binary.** Alternatives
-evaluated and rejected:
+- **Sprint 11** — `mediaType`-based descriptor lookup; `resolve_margo_resource_files`
+  driven by `app.yaml` fields (picks the files belonging to the margo artifact).
+- **Sprint 12** — `resolve_descriptor` fallback (`<dir>/app.yaml`, then
+  `<dir>/margo/app.yaml`). Item 2 updates that code and its tests to the new filename.
+- **Sprint 13** — `margot install` (see [sprint-13.md](./sprint-13.md)) is built against the
+  legacy `margo.yaml` name through the existing `load_margo_yaml`, at a single call site. Item 2
+  includes `install` in the filename sweep (code, tests, docs). `install` does **not** rely on
+  `pull --recursive` (Item 1) — it pulls components itself.
+- Sprint 10 (exit codes / `--json`) is not a dependency; use `console.fatal` as it exists
+  at implementation time.
 
-- `helm-python-sdk` 0.2.2 (ctypes over a Go c-shared library, no binary needed). Capable
-  (`package`, `push`, `dependency_update`, `lint`), but: Alpha, single maintainer, ~6 weeks old at
-  evaluation; the native library is a prebuilt binary from a second repo by the same author;
-  musl/Alpine unsupported (golang/go#54805, still open); and the Linux x86_64 wheel measured
-  71.5 MiB / ~243 MiB installed because the 81 MiB library is stored three times (symlinks
-  flattened). A real `helm` is 19.4 MiB (v4.3.0) / 17.8 MiB (v3.22.0) to download and ~63 / ~59 MiB
-  unpacked, and is only needed by people who build or push helm components.
-- Pure-Python packaging + oras-py push: reimplements `helm package`/`push`. Rejected by the owner.
+Facts verified against source:
 
-Facts taken from the Helm docs (verified; the registries page has *not* been updated for Helm 4,
-hence spike S6): `helm package` supports `--version`, `--app-version`, `--dependency-update`,
-`--destination`; `helm push CHART REMOTE` requires `REMOTE` to be prefixed with `oci://` and to
-**contain neither the basename nor the tag** — the basename is inferred from the chart's `name` and
-the tag from its semantic version ("a strict requirement"); on success it prints
-`Pushed: <registry>/<path>/<chart>:<tag>` and `Digest: sha256:…`; some registries require the
-repository/namespace to exist beforehand, otherwise the push errors; OCI support is GA from Helm
-3.8. The Margo spec says a helm component's `name` is used as the chart name and its
-`repository`/`revision` locate the chart.
-
-Dependencies:
-
-- **Sprint 13** — project file is `margot.yaml` there, and `repository` becomes settable per
-  variant. This sprint adds the `helm:` block to that file. If Sprint 13 slips, the block is added to
-  `margo.yaml` and renamed with it.
-- Sprint 10 (exit codes) is not a dependency; use `console.fatal` as it exists at implementation
-  time.
+- Hard-coded `"margo.yaml"` path joins: 5 sites in `src/` (`services/build.py`, `push.py`,
+  `package.py`, `verify.py` ×2). Plus ~259 occurrences in `*.py` (mostly tests and error
+  strings) and ~163 in `*.md`.
+- `VariantConfig` has **no per-variant `repository`**; all variants of a type share one
+  (`docs/templating.md` already documents a per-variant override that the code lacks).
+  Repository resolution happens per component type in `push.py`
+  (`_resolve_registry_repository`) and `package.py` (`_resolve_component_repository`,
+  `_add_component_to_bundle`, collision check), and in `domain/metadata.py`
+  (`_build_component_context`).
+- The project file has no helm concept; helm components live only in `app.yaml`.
+- `validate_semver` normalises `_`→`+`, so a revision such as `1.0.9_compose-default` is a
+  valid variant `version` verbatim and rebuilds to the identical tag.
+- `pull --recursive` writes components to `<outdir>/<component-name>/<file>`; the file name
+  is the layer title, else `<title>-<version>.tgz`, else a 12-char digest (no extension).
+  Compose/quadlet archives are `.tgz` with one top-level `<name>/` directory.
+- **Existing security bug:** `services/pull.py::_pull_recursive_components` builds
+  `Path(outdir) / comp_ref.name` from the manifest's component name unsanitised; `../../x`
+  or an absolute name escapes `outdir`, and manifests may come from an untrusted registry.
+  `domain/layers.py::sanitize_filename` already exists for this.
+- `package.py` already uses `tar.extractall(..., filter="data")` for untrusted archives.
 
 ---
 
 ## 3. Authoritative Design
 
-### 3.1 Scope
+Five items in one sprint, one branch each. Ordering: **Item 1 ∥ Item 2** → **Item 3 ∥
+Item 4** → **Item 5** (Item 3 needs Item 2's filename; Item 4 needs Item 2; Item 5 needs 3
+and 4). Items 1 and 2 are independently shippable.
 
-**In scope:** `infra/helm.py` wrapper; `PackageType.HELM`; `helm:` block (parse, template
-context, docs); `build` and `push` for helm (flat and variants); `<helm_chart_tag>` made real;
-second container image; CI jobs; docs; the component-name check in `describe` (Item 6) and in
-`verify` (Item 7); `--plain-http` global flag/env var/setting applied to both the oras-py and
-helm registry paths (Item 8).
+### Item 1 — `fix(pull)`: sanitise component names in `--recursive`
 
-**Out of scope (non-goals):** `pull`/`fetch`/`package` handling of helm charts (Sprint 15);
-provenance/signing (`--sign`); `helm lint` integration; discovering images inside charts
-(`helm template`); values-overlay style variants; HTTP chart repositories (OCI only); Helm 2 and
-Helm < 3.8; any Python helm library; project checks other than the helm component-name check;
-`--insecure` / TLS-verification skipping (distinct from `--plain-http`, see §3.11).
+Pass the component name through `sanitize_filename` before using it as a path; an unsafe
+name (separators, `.`/`..`, NUL, empty) is skipped with a `console.warning` naming the
+component, like other skipped components. Not a layout change. Regression tests with
+`../x`, `a/b`, an absolute path, and a valid name (unchanged behaviour). Release first as a
+patch so `pull -r` can be tried in the field before migrate lands.
 
-### 3.2 Item 1 — `infra/helm.py` wrapper
+### Item 2 — `margot.yaml` + legacy compatibility + `migrate` (rename mode)
 
-- **Binary resolution:** a dynaconf setting (env `MARGOT_HELM_BIN`, matching the existing
-  `MARGOT_` prefix) wins; otherwise `shutil.which("helm")`. Selective imports per
-  `code-conventions.md`.
-- **Lazy:** nothing in this module runs unless a helm step runs. A project without a `helm:` block
-  never touches helm, including under `-t all`. A project *with* a `helm:` block and no usable
-  binary is an **error**, never a silent skip.
-- **Version gate:** run `helm version` once per process, parse the semantic version, require
-  `>= 3.8.0`. Helm 4 accepted. Too old → actionable error naming the found version.
-- **Execution:** argument list, `shell=False`, captured stdout/stderr, text mode, never
-  `check=True`. Non-zero exit → `HelmError` (new exception in `infra/helm.py`, same pattern as
-  `OciRegistryError`) carrying the trimmed stderr, with a short hint for the common cases
-  (authentication failure; repository/namespace not created on the registry). `console.debug` the
-  command line per call (`infra/` rule). **No secret is ever placed on the command line** (visible
-  in `ps`).
-- **Operations (names indicative):**
-  - `package(chart_dir, version, app_version, destination, dependency_update)` → path of the
-    produced `<chart>-<version>.tgz`. Packages into an empty temp directory and returns the file;
-    the caller moves it.
-  - `push(archive, remote, ...)` → runs `helm push <archive> <remote>` and returns the parsed
-    `Pushed:` reference and digest (see §3.5).
-  - `read_chart_name(chart_dir)` → `name` from `Chart.yaml` via PyYAML (no helm needed). Parsing
-    logic in `domain/`, file read in `infra/`.
-- **Inputs validated before use:** `remote` must start with `oci://` (so it can never be parsed as a
-  flag); chart paths are absolute.
+**Canonical file:** `margot.yaml`. Internal names (`MargoYaml`, `load_margo_yaml`) are not
+renamed; ROADMAP records the debt.
 
-### 3.3 Item 2 — `helm:` block in the project file
+**One resolver, no scattered literals.** New `services/project.py::load_project(project_dir)
+-> LoadedProject(meta, path, legacy)` used by all five call sites; constants
+`PROJECT_FILE_NAME = "margot.yaml"` and `LEGACY_PROJECT_FILE_NAME = "margo.yaml"` in
+`domain/metadata.py`.
 
-Same shape as `compose` / `quadlet`:
+| `margot.yaml` | `margo.yaml` | Result |
+| --- | --- | --- |
+| present | absent | load it |
+| absent | present | load it **and** `console.warning` (once per invocation): legacy filename, run `margot migrate`, support **will be removed in 1.0.0** |
+| present | present | error: ambiguous, remove one |
+| absent | absent | error: `margot.yaml not found in <dir>. Create it manually, or run margot migrate to adopt an existing manifest.` (the old hint cites `margot init`, which does not exist) |
 
-| Field | Required | Default | Notes |
-|---|---|---|---|
-| `version` | Yes | — | Chart version base; OCI tag in flat mode; derivation base for variants. |
-| `repository` | **Yes** | — | Where the chart is expected to live: `<parent>/<chart name>`. margot passes `<parent>` (last segment removed) to `helm push`; helm adds the chart name. Not compared with `Chart.yaml` before pushing (D2). No global fallback. |
-| `directory` | No | `helm` | Flat: chart root (`Chart.yaml` here). Variants: `helm/<variant>/` is a full chart. |
-| `variants` | No | — | Same semantics as compose/quadlet; version `<base>+helm-<name>` when omitted. |
-| `image` | No | — | `{search, replace}`, same rules as compose/quadlet. |
-| `dependencyUpdate` | No | `false` | Runs `helm package --dependency-update`. Needs network. |
+Sprint 12's no-project-file fallback keys on "neither file present". The legacy read path is
+dropped at 1.0.0 (ROADMAP chore).
 
-- Component name defaults mirror the others: `{id}-helm` (flat), `{id}-helm-{variant}`.
-- Expose helm in the Jinja2 context exactly like compose/quadlet so `app.yaml.jinja` can template
-  `repository` / `revision` (mirror `_build_component_context`; read `docs/templating.md`).
-- `PackageType.HELM` added; `-t helm` accepted by `build` and `push`; `-t all` includes helm only
-  when the block is declared (same "not defined" skip pattern, but a declared block with a missing
-  binary fails).
+**`migrate` rename mode** (command introduced here; no URI/manifest handling yet):
 
-### 3.4 Item 3 — Build
+- `margot migrate [--source-dir DIR] [--dry-run]`, `DIR` defaults to `.`.
+- Only legacy file present → rename `margo.yaml` → `margot.yaml` in place (`Path.rename`,
+  bytes unchanged — never parsed or rewritten; no git interaction); `console.success` with
+  the new path, plus a warning that references in CI scripts/docs are not rewritten.
+- `margot.yaml` present, legacy absent → `console.warning("nothing to do")`, exit 0
+  (idempotent). Both present → `console.fatal`.
+- Rename mode rejects `URI`, `--output`, `--components`, `--repository`, `--force`,
+  `--all-repositories` (usage error naming the option).
 
-1. Copy the chart directory (or variant directory) to a temp dir (`copy_tree`, honours
-   `.rsyncignore`).
-2. `substitute_placeholders` on the copy: `<app_tag>`, `<margo_tag>`, `<compose_tag>`,
-   `<quadlet_tag>`, **`<helm_chart_tag>` (now the real chart version)**, plus the `image` pair.
-   **Never Jinja2** — Go templates in `templates/` use `{{ }}`.
-3. `helm package <copy> --version <real SemVer> --app-version <appVersion> -d <empty temp>`
-   (`--dependency-update` when enabled). `--app-version` is omitted when `appVersion` is absent.
-4. Move the archive to `.dist/<version-with-underscore>/`.
-5. **Version trap (resolved by S1).** margot replaces `+` with `_` for directory names and
-   `BuildTarget.version` (`services/build.py`). Helm must receive the **real SemVer with `+`** on
-   `helm package --version`; helm itself converts `+` → `_` in the OCI tag on push and back to `+`
-   on pull (S1, verified round-trip). No fallback to the underscore form is needed.
-6. `Chart.yaml` missing → error before any helm call.
+**Sweep.** `src/` messages; all tests and fixtures to `margot.yaml` (keep explicit legacy
+tests for the table); docs: `docs/margo-yaml.md` → `docs/margot-yaml.md` (+ `mkdocs.yml`,
+all links; a redirect only if a redirects plugin is already configured), README,
+`concepts.md`, `templating.md`, command pages, examples, `TESTING.md`,
+`.kiro/steering/product.md`, `documentation.md`. Incidental: `oci-media-types.md` labels
+`application/vnd.margo.app.description.v1+yaml` as the "`margo.yaml` descriptor"; it is the
+`app.yaml` layer. The `margo/` source **directory** and `directory: margo` default are
+unrelated and unchanged.
 
-### 3.5 Item 4 — Push
+### Item 3 — per-variant `repository` in `margot.yaml`
 
-**Helm is the source of truth for where a chart lands (owner decision D2).** margot does not
-validate `repository` against `Chart.yaml` before pushing, and cannot ask helm to use a given name:
-`helm push` infers the name and tag from the archive.
+Needed so `migrate --components --all-repositories` can represent components living in
+different repositories.
 
-1. SemVer gate and the credential-expiry check run first (existing behaviour for registry calls).
-2. Derive the remote: `repository` split at its last `/` → `oci://<parent>` (helm rejects a remote
-   containing the basename or tag).
-3. Run `helm push <archive> <remote>`. Parse the `Pushed: <ref>` line from stdout.
-4. Compare `<ref>` with the expected reference `repository:tag` (tag with `+` → `_`). If they
-   differ, fail with an error that states both, e.g. *expected `…/charts/web-frontend:1.0.0`, helm
-   pushed `…/charts/nginx:1.0.0` (the chart name comes from `Chart.yaml`); the artifact is already
-   in the registry and margot does not delete it.* If the `Pushed:` line cannot be parsed (format
-   change in Helm 4), warn that the pushed reference could not be verified; do not fail.
-5. **Credentials (S2, resolved):** point helm at margot's login via `--registry-config` /
-   `HELM_REGISTRY_CONFIG` (docker-config format). Confirmed: helm authenticates from that file with
-   no password on argv. Never `--password`.
-6. Variants push each variant's archive to its `repository`; one `helm push` per archive.
+- `VariantConfig.repository: str | None = None`; parsed from the variant mapping; if present
+  it must be a non-empty string (`ValueError` like `image` validation otherwise).
+- **Effective repository** = `variant.repository` → `component.repository` → top-level
+  `repository` (then CLI/config exactly as today). Feed this effective value into the
+  existing resolvers: CLI-vs-file precedence is **unchanged**.
+- Template context: `variant.repository` and `variant.ref` use the effective repository
+  (`manifest.<type>.repository` stays the component-level value). Matches what
+  `docs/templating.md` already says.
+- `push.py`: variant pushes resolve registry/repository from the effective repository.
+- `package.py`: bundle layout and collision detection become per-variant (a bundle folder
+  per effective repository; collision key `(repository, filename)`); verify image discovery
+  is unaffected.
+- No change when the field is absent.
+- Docs: variant-fields table in `margot-yaml.md`; reconcile `templating.md`.
+- Tests: parse/validation; context; push resolution (variant overrides component, absent
+  inherits, CLI precedence unchanged); package bundle layout and collision with mixed
+  repositories.
 
-### 3.6 Item 5 — Container image with helm, and CI
+### Item 4 — `migrate`: adopt an existing manifest (margo artifact only)
 
-- **Second image** `Containerfile.helm`: same base as `Containerfile` plus a helm binary. Install
-  the official release tarball for a version pinned by `ARG HELM_VERSION`, verifying its published
-  checksum (alternative: `apk add helm`, available as 3.18.4 in Alpine v3.22 community; v3.24 not
-  checked, and Helm 3 only). Official binaries are static Go, expected to run on musl — verify at
-  build. Tags: `ghcr.io/<repo>:<version>-helm` and `:latest-helm`; the existing image is unchanged.
-  `release.yml` `container` job builds and pushes both; check `release-check.yml` for image builds.
-- **CI:** new `test-helm` job in `ci.yml`: matrix over one pinned Helm 3.x and one pinned Helm 4.x
-  (latest patch at implementation time, bumped deliberately), Python 3.12 only. Installs helm by
-  checksum-verified tarball download (preferred over a third-party action). Runs
-  `make test PYTEST_ARGS="-m helm --no-cov"`. Register a `helm` pytest marker in `pyproject.toml`.
-  Tests marked `helm` are skipped when `which("helm")` is `None`, so the existing `test` job and
-  local runs without helm are unaffected. S3 is resolved: a zot (or `registry:2`) service container
-  enables a real push test, using the real `--plain-http` flag/setting built in this sprint
-  (Item 8, §3.11) — not a test-only workaround.
-- The existing `test` job must keep ≥ 90 % coverage **without** helm: unit tests mock `which`/`run`.
+```text
+margot migrate [URI] [--source-dir DIR] [--output DIR] [--repository REPO]
+               [--dry-run] [--force]
+```
 
-### 3.7 Spikes — resolved (2026-10-16)
+**Mode detection** (no mode flag):
 
-Run against **Helm v4.2.0** and a **zot v2.1.22** registry (htpasswd auth, plain HTTP on
-`127.0.0.1:5000`), pushing the project's own `sensor-dashboard-1.2.3+helm-x` chart. **Owner
-ruling (2026-10-16): the Helm 3.8–4.2 user interface is stable and differences are minor;
-Helm 3 is not re-tested. S4/S6 are treated as answered by the Helm 4.2 run under this ruling.**
+| Situation | Mode |
+| --- | --- |
+| `URI` given | adopt, remote source |
+| no `URI`; source dir has only `margo.yaml` | rename (Item 2) |
+| no `URI`; no project file; descriptor found (Sprint 12 search order) | adopt, local source |
+| `margot.yaml` present | nothing to do / ambiguous, as Item 2 |
+| no `URI`, no project file, no descriptor | error listing the paths tried |
 
-- **S1 — version `+` → OCI tag. RESOLVED.** `helm package --version 1.2.3+helm-x` is accepted
-  (confirmed 2026-10-15) and produces `sensor-dashboard-1.2.3+helm-x.tgz`. On push, **helm itself
-  converts `+` → `_`** and stores the tag `1.2.3_helm-x`; it prints the convention to stderr
-  ("changing plus (+) to an underscore (_) … and back to a plus (+) when pulling"). Registry tag
-  list confirmed `["1.2.3_helm-x"]`. **Round-trip verified:** `helm pull --version 1.2.3+helm-x`
-  restores `sensor-dashboard-1.2.3+helm-x.tgz` with `version: 1.2.3+helm-x` in `Chart.yaml`.
-  **Consequence:** margot passes the real SemVer (with `+`) to `helm package`; the §3.4 step-5
-  fallback paths are dropped (see §3.4). The §3.5 post-push comparison must expect the `_` form,
-  as it already states.
-- **S2 — credentials without a password on argv. RESOLVED.**
-  `helm registry login <reg> --username <u> --password-stdin --registry-config <file>` writes a
-  standard docker-config (`{"auths":{"<reg>":{"auth":"…"}}}`) — the same format `margot auth login`
-  produces. `helm push … --registry-config <file>` then authenticates **purely from that file**,
-  with **no `--password` on the command line**. margot points helm at its own login via
-  `--registry-config` (or `HELM_REGISTRY_CONFIG`). Requirement in §3.2/§3.5 satisfied.
-- **S3 — plain-HTTP registry for integration tests. RESOLVED.** Against an HTTP registry, helm
-  defaults to HTTPS and fails (`http: server gave HTTP response to HTTPS client`) unless
-  **`--plain-http`** is passed; required on both `push` and `pull`. Login quirk: `helm registry
-  login` against an HTTP registry prints the HTTPS error **but still writes a valid credential file
-  and reports "Login Succeeded"** — harmless, not a failure.
-  **Design decision (owner, 2026-10-16): `--plain-http` becomes a real, in-scope Sprint 14
-  deliverable, not a follow-up.** Rationale (owner): without it there is no honest way to exercise
-  the helm integration tests against a local, non-TLS registry — a throwaway test-only hack would
-  be worse engineering than building the real flag once. Promoted to **Item 8** (§3.11): a global
-  flag + `MARGOT_PLAIN_HTTP` env var + `settings.toml` field, applied **uniformly** to both the
-  oras-py registry path (`push`/`pull`/`fetch`/`package`) and the helm path. Distinct from
-  `--insecure` (TLS-verification skip), which stays out of scope — see §3.11 for the full design.
-- **S4 — Helm 3 vs Helm 4 command differences. CLOSED by owner ruling.** Not tested on Helm 3; UI
-  assumed stable across 3.8–4.2.
-- **S5 — Alpine 3.24 `helm` availability.** Not tested here; informs the image choice only (§3.6).
-  Default to the checksum-verified official tarball pinned by `ARG HELM_VERSION` unless the dev
-  confirms a suitable `apk` package at build time.
-- **S6 — `helm push` stdout format. RESOLVED for Helm 4.** On success, **stdout** carries two
-  lines: `Pushed: <registry>/<path>/<chart>:<tag>` and `Digest: sha256:…`. The `+`→`_` convention
-  notice goes to **stderr**. The parser keys on the `Pushed:` line (first token after the colon is
-  the full reference). Behaviour when the chart name differs from the intended path segment is the
-  D2 case: helm pushes under the **chart's own name**, so margot's post-push comparison (§3.5) is
-  the mechanism that catches a mismatch.
+`--source-dir` and `--output` default to `.` (the folder you just pulled into). `URI` and
+`--source-dir` are mutually exclusive.
 
-### 3.8 Error cases
+**Layout produced** (`<output>`):
 
-| Case | Behaviour |
-|---|---|
-| `helm:` declared, no binary | Error naming `MARGOT_HELM_BIN` and install hint; never skipped |
-| helm < 3.8 | Error with the found version |
-| No `Chart.yaml` in chart/variant dir | Error before any helm call |
-| `repository` missing for helm | Error (no global fallback) |
-| `helm` non-zero exit | `HelmError` with trimmed stderr and a hint for auth / missing repository |
-| Pushed reference differs from `repository:tag` | Error stating expected vs actual; artifact stays in the registry |
-| `Pushed:` line not parseable | Warning "could not verify pushed reference"; push counts as done |
+```tree
+<output>/
+├── margot.yaml
+└── margo/
+    ├── app.yaml           # verbatim, always static; named app.yaml whatever the source called it
+    └── resources/...      # files chosen by Sprint 11 resolve_margo_resource_files
+```
 
-### 3.9 Item 6 — Component-name consistency check in `describe` (first project-level check)
+**In place vs copy.** Source dir == output dir → the margo files (`app.yaml` and the
+resources `resolve_margo_resource_files` selects) are **moved** into the layout: no copy is
+left behind. Different dirs, or a URI source → files are copied/pulled and the source is
+never touched. If the descriptor is already at `<output>/margo/app.yaml` (Sprint 12
+candidate 2) nothing is moved; only `margot.yaml` is written. Anything not carried over
+(component archive folders without `--components`, stray files) stays untouched and is named
+in one warning.
 
-The Margo spec says a helm component's `name` is used as the chart name. `describe` flags when a
-helm component declared in `app.yaml` does not match the chart the project itself builds.
+**`app.yaml` is never templated** (owner decision): parameters, configuration, helm
+profiles, `requiredResources`, `catalog.application` and extensions cannot be meaningfully
+templated, so the manifest is copied verbatim and nothing is dropped.
 
-- **Matching:** a helm component in the rendered descriptor corresponds to a `helm:` entry (flat, or
-  one variant) when its `properties.repository` (scheme `oci://` stripped) and `properties.revision`
-  equal that entry's `repository` and effective version (with `+` ≡ `_`, as `validate_semver`
-  does). Components that match nothing (external charts, e.g. bitnami) are **skipped silently**.
-- **Check:** the matched component's `name` must equal the `name` in that chart's `Chart.yaml`.
-  Mismatch → one finding of severity **ERROR** naming the component, the chart directory and both names.
-- **Preconditions:** needs the project file (so `describe` of a remote artifact or a bare
-  `app.yaml` fallback — Sprint 12 — skips the check silently) and a readable `Chart.yaml`. No `helm`
-  binary needed. A missing `Chart.yaml` for a matched entry is a finding too.
-- **`describe` contract is unchanged:** read-only, exit code unaffected by findings (Sprints 7–8).
-  Findings are rendered by `commands/describe.py` following `rich-rendering.md` (values as `Text`,
-  no markup injection, ` · ` composition); one new section or a trailing panel, shown with the
-  existing section selection.
-- **Layering and "first stone":** a pure function in a new `domain/project_checks.py` takes the
-  parsed descriptor and a mapping of chart dir → chart name and returns findings, reusing
-  `Severity`/`ValidationFinding` from `domain/validation.py`. `services/describe.py` gathers the
-  inputs (reads `Chart.yaml` through `infra/`). `verify` calls the same function (Item 7).
-- **Shared helper:** the list of project helm charts to check (`directory`, `repository`, effective
-  version, variant name) is computed by one pure function in `domain/` used by Item 6 and Item 7.
-  `build` and `push` must use the **same** version derivation (`<base>+helm-<name>` for variants
-  with no `version`); extract it from `services/build.py::_build_variant_component` rather than
-  duplicating it, so the check cannot drift from what is actually built.
+**Collisions.** Without `--force`, error if a target exists: `<output>/margot.yaml` or
+legacy `margo.yaml` (use rename mode), a non-empty `<output>/margo/` (unless it is the
+descriptor-already-laid-out case), and with `--components` the specific `<type>/<variant>/`
+folders (never the whole `compose/` / `quadlet/`). `--force` replaces only those targets.
 
-### 3.10 Item 7 — The same check in `verify`
+**Safety.** Plan everything first (parse, map, validate; Item 5: fetch + extract into a
+staging dir inside `<output>`), then commit: move staged results into place, then — in place
+only — remove the originals that were moved. A failure before commit leaves the folder as it
+was. `--dry-run` runs the plan and prints the generated `margot.yaml`, warnings, and the
+files that would be written/moved/removed; writes nothing.
 
-`verify` reports the finding next to the schema results.
+**Mapping `app.yaml` → `margot.yaml`:**
 
-- **When it runs:** local project mode only, when a project file was resolved and at least one
-  helm entry matches a helm component in the descriptor (same matching rules as Item 6). Not for
-  `verify <uri>`, not for `--manifest`, not for the Sprint 12 bare-`app.yaml` fallback (all have no
-  project file). **`--only-recommend` does run the project check** — project coherence checks are
-  orthogonal to which schema flavor is active; `--only-recommend` means "Schema B only", not "skip
-  everything else." No new flag.
-- **Severity: ERROR (owner decision, 2026-10-15).** The check is project coherence: if it does not
-  pass, something is wrong, so a finding **fails `verify` by default** — exit code 1, no flag
-  needed, and `--strict` plays no part in it. `--strict` keeps its current meaning (Schema B only)
-  and its help text and "has no effect" warning are unchanged.
-- **Result shape:** `VerifyResult` gains `project_results: list[ValidationFinding]` (default empty,
-  so existing constructors and tests keep working). `passed` becomes
-  `no Schema A error and no project error and not (strict and Schema B findings)`. The check runs in
-  `services/verify.py::verify`, on the descriptor that is already resolved or rendered there, while
-  its temp file still exists.
-- **Output — position: after the schema blocks, before the final `verify: PASS/FAIL` line.**
-  One labelled block `Project checks`, always printed regardless of applicability: a
-  `console.section("Project checks")` separator, then findings via `console.finding` (severity
-  ERROR), then a `console.verdict` line. The verdict outcome is:
-  - `PASS` (green) — check was applicable and clean.
-  - `FAIL` (red, with count) — check was applicable and found errors.
-  - `advisory` (orange3) — check was **not applicable** (no project file, remote URI, `--manifest`,
-    bare `app.yaml` fallback, no matched helm components). Detail text states the reason, e.g.
-    `skipped (no project file)`, `skipped (no matched helm components)`. This uses the existing
-    `advisory` path in `console.verdict` — no new variant needed.
-  The block must not exit early (`console.fatal` exits); same constraint as `_render_both_schemas`.
-  Schema sections are still only shown when they have findings; the project block is **always**
-  shown — even skipped — so the user always knows where they stand.
+| `margot.yaml` | Source | Rule |
+| --- | --- | --- |
+| `apiVersion` | — | constant `v1` (the project file's own schema version) |
+| `id` | `id` | verbatim; missing → error |
+| `name` | `metadata.name` | **verbatim** (owner decision; it is `manifest.name` in templating). Whitespace → warning that archive/bundle file names will contain spaces. If `sanitize_filename(name)` is `None` (path separators, `.`/`..`, NUL) or the name is empty → fall back to a slug (lowercase, non-`[a-z0-9]` runs → `-`), else `id`, with a warning — `name` is used in `<name>-<version>.tgz` paths |
+| `version` | `metadata.version` | verbatim **string**; a YAML-coerced non-string (e.g. `1.0` → float) is `str()`-ed with a warning; non-SemVer → warn that `build`/`push` will reject it until fixed |
+| `description` | `metadata.description` | missing → `metadata.name` + warning (field required) |
+| `repository` | `URI` repository part (tag stripped) or `--repository` | `--repository` wins; local source with neither → omit + warning; URI tag ≠ `metadata.version` → warning |
+| `author`, `organization` | `metadata.catalog.author` / `.organization` | verbatim lists |
+| `appVersion`, `annotations`, `directory` | — | omitted (no manifest equivalent / default) |
 
-  **Example output — clean local project run:**
-  ```
-  ── Schema A (Margo spec) ───────────────────────────
-  Schema A (Margo spec): PASS — no findings
+**Contracts / layering** (TDD; tests before code):
 
-  ── Schema B (recommended) ──────────────────────────
-  Schema B (recommended): PASS — no findings
+- `domain/uri.py`: `extract_repository(uri)` (pure).
+- `domain/metadata.py`: `margo_yaml_to_dict(meta)` — stable key order (`apiVersion, id,
+  name, version, appVersion, description, directory, repository, author, organization,
+  annotations, compose, quadlet`; variants: `name, version, component, repository, image`),
+  omitting `None`/empty/default values.
+- `domain/migrate.py` (new, pure; no I/O, `console`, `rich`): `plan_migration(app_doc, *,
+  source_uri, repository_override, include_components, all_repositories) ->
+  MigrationPlan` (a `MargoYaml`, planned components, warning strings); name/slug/
+  directory-safe helpers.
+- `infra/filesystem.py`: `write_yaml`, move/copy helpers, staging-dir commit (all
+  `console.debug`).
+- `services/migrate.py` (new): orchestration. Remote: `resolve_remote_descriptor` (temp dir
+  cleaned in `finally`); local: Sprint 12 resolution. `console.info` per step.
+- `commands/migrate.py`: Typer parsing, mode and mutual-exclusion checks, warnings,
+  `console.success` per written path; register in `main.py`; README command table.
+  Manifest values displayed per `rich-rendering.md` (no markup interpolation).
 
-  ── Project checks ──────────────────────────────────
-  Project checks: PASS — helm component sensor-dashboard matches Chart.yaml
+### Item 5 — `migrate --components` (its own feature)
 
-  verify: PASS
-  ```
+Default `migrate` produces only the margo artifact (no `compose`/`quadlet` blocks), so the
+project builds and pushes as-is and the component references in `app.yaml` keep pointing at
+the already-published artifacts. `--components` additionally declares and organises
+components:
 
-  **Example output — mismatch found:**
-  ```
-  ── Schema A (Margo spec) ───────────────────────────
-  Schema A (Margo spec): PASS — no findings
+1. **Eligibility** — profile `type` is `compose` or `quadlet`, component has
+   `properties.repository` and `properties.revision` (`oci://` stripped). Anything else
+   (helm, unknown types, incomplete properties) is skipped with a named warning ("no
+   `margot.yaml` equivalent; remains referenced in app.yaml").
+2. **1:1 variant per component**, under the type block: `name` = component name made
+   directory-safe (`[A-Za-z0-9._-]`, other characters → `-`; collision with
+   `_RESERVED_VARIANT_NAMES` appends `-variant`); `component` = original name, **always
+   written explicitly** (parameter targets in `app.yaml` reference component names);
+   `version` = `revision` verbatim.
+3. **Repositories.**
+   - *Default:* per type, the first eligible component's repository (manifest order) is the
+     one repository handled; it becomes `<type>.repository` (omitted if equal to the
+     top-level `repository`). Components of that type in any other repository are skipped
+     with a warning naming each and suggesting `--all-repositories`.
+   - *`--all-repositories`:* no restriction. Every eligible component is organised. The
+     type block keeps the first component's repository; each variant whose repository
+     differs gets an explicit `repository` (Item 3). Requires `--components` (usage error
+     otherwise).
+4. **Dedup** — identical `(type, name, repository, revision)` across profiles → one variant;
+   same name with a different repository/revision → keep first, warn (variant folders must
+   be unique, even with `--all-repositories`).
+5. **Buildability invariant** — a revision failing `validate_oci_tag`/`validate_semver` is
+   skipped with a warning. Every variant written to `margot.yaml` must build.
+6. **Source of the archive (local first)** — if the source dir holds `<component-name>/`
+   (written by `pull --recursive`) with exactly one regular file that is a tar archive, use
+   it (offline). Otherwise, or if ambiguous, fetch `<repository>:<revision>` via
+   `prepare_oci_retrieval` (credentials per registry host); the detected `PackageType` must
+   match the profile type, else skip + warn. The component name used as a local path goes
+   through `sanitize_filename`; unsafe → skip + warn.
+7. **Safe extraction** — `tarfile` with `filter="data"` into the staging dir, stripping the
+   single top-level directory, destination `<output>/<type>/<variant>/`. Hostile archives
+   (absolute paths, `..`, escaping symlinks) fail that component and never write outside
+   staging.
+8. **Fail-soft per component** — any fetch/extract failure drops only that variant from
+   `margot.yaml` (never declare a variant without sources), with a warning.
+9. **In-place cleanup (no copy left behind)** — after commit, an extracted component's
+   `<component-name>/` folder is removed if it contained nothing but the consumed archive;
+   if it holds anything else it is left in place and named in the warning. Not in place:
+   source untouched.
+10. Resulting block: `directory` and `version` omitted, `variants` as above, no `image`
+    block (pulled content is already final).
 
-  ── Project checks ──────────────────────────────────
-  ERROR  component "sensor-dashboard" · Chart.yaml name "my-chart" · expected "sensor-dashboard"
-  Project checks: FAIL — 1 error
+Rebuilt component archives are semantically equal to the originals, not digest-identical.
 
-  verify: FAIL
-  ```
+### Non-goals (explicit)
 
-  **Example output — remote URI (not applicable):**
-  ```
-  ── Schema A (Margo spec) ───────────────────────────
-  Schema A (Margo spec): PASS — no findings
-
-  ── Project checks ──────────────────────────────────
-  Project checks: skipped (no project file)
-
-  verify: PASS
-  ```
-
-- **A new kind of failure.** Until now `verify` failed only on the Margo spec schema, and
-  `.kiro/steering/product.md` calls it "a schema-validation gate". With this item it also gates
-  project coherence: update the `verify` docs and that sentence at close-out.
-- **Sprint 10 coordination:** that sprint adds `--json` and exit codes to `verify`. `project_results`
-  is additive; whichever sprint lands second adapts (serialise the new field; a project-check
-  failure maps to the same validation-failure exit code as a Schema A error).
-
-### 3.11 Item 8 — `--plain-http`: talk HTTP, not HTTPS, to a registry
-
-**Promoted into scope (owner, 2026-10-16):** without this, Sprint 14's own helm integration tests
-have no honest way to exercise a real push/pull against a local, non-TLS registry. Built once, as a
-real capability, rather than as a throwaway test-only workaround.
-
-- **Surfacing — three layers, one setting:**
-  - A **global CLI flag** on the root callback, alongside `--verbose`/`--debug` in
-    `commands/global_options.py`: `--plain-http` (boolean, default `False`).
-  - A **`MARGOT_PLAIN_HTTP` env var**, following the existing `MARGOT_` prefix convention (see
-    `MARGOT_HELM_BIN` in §3.2).
-  - A **`settings.toml` field** (dynaconf), so it can be set once per machine/project rather than
-    typed on every invocation — this is the owner's explicit motivating use case (a local zot
-    without TLS).
-  - Standard dynaconf layering applies: CLI flag > env var > `settings.local.toml` > `settings.toml`
-    (same precedence order as every other layered setting in the project).
-- **Naming, deliberately not `--insecure`:** `--insecure` conventionally means "skip TLS
-  certificate verification" (still HTTPS, just unverified) — a different capability, with a
-  different risk profile, and **not** what this flag does. `--plain-http` means "use HTTP, do not
-  attempt TLS at all." margot does not introduce an `--insecure`/TLS-skip flag in this sprint; that
-  stays a distinct, unaddressed capability if ever needed later.
-- **Scope — applies uniformly to both registry paths:**
-  - **oras-py path** (`push`/`pull`/`fetch`/`package`): oras-py's own `OrasClient.__init__` /
-    `oras.provider.Registry.__init__` already accept `insecure: bool = False` as a constructor
-    parameter, separate from `tls_verify` (verified against the installed oras-py: signature is
-    `(hostname=None, insecure=False, tls_verify=True, auth_backend='token')`). margot's
-    `infra/oci.py::OrasClient.__init__` gains a `plain_http: bool = False` parameter and passes it
-    through as `super().__init__(insecure=plain_http, ...)`. This is additive — the signature stays
-    a superset per `code-conventions.md`'s inheritance rule, and every existing call site keeps
-    working with the default.
-  - **helm path** (`infra/helm.py`): the resolved flag/setting value is passed through as helm's own
-    `--plain-http` on every `helm package`/`push`/`pull`/`registry login` invocation that touches a
-    registry.
-  - **One resolved value, read once per command invocation** (not re-read per call), then threaded
-    down through `services/` to both `infra/oci.py` and `infra/helm.py` — no layer re-derives it
-    independently.
-- **Not retroactively applied to unrelated commands beyond wiring:** this sprint wires the setting
-  through margot's existing registry call sites; it does not add new registry-facing commands.
-- **Tests:** unit tests for `infra/oci.py` (constructor passes `insecure=True` through when
-  `plain_http=True`) and `infra/helm.py` (the flag appears in the built argv when set, absent when
-  not); an integration test using the real flag end-to-end against the local zot/`registry:2`
-  service container from Item 5's CI job — this *is* the mechanism that makes that job's push test
-  honest, not a parallel test-only path.
-- **Docs:** global options reference, `settings.toml` reference, a short "working with a local/
-  insecure registry" note (likely alongside or near the existing auth/registry docs).
-
-### 3.12 Error cases — Item 8 addendum
-
-| Case | Behaviour |
-|---|---|
-| `--plain-http` set, registry is actually HTTPS-only | Whatever oras-py / helm itself report for a protocol mismatch — not specially caught or reworded by margot |
-| `--plain-http` not set, registry is plain HTTP | Existing HTTPS-by-default failure from oras-py / helm (no change from today) |
+- No `app.yaml.jinja` generation (ROADMAP: at most partial templating of managed fields,
+  later, low priority).
+- No helm support; no `margot init`; no `appVersion`/`annotations` flags.
+- No rename of Python identifiers (`MargoYaml`, `load_margo_yaml`).
+- No change to `pull`'s output layout; `pull -r` stays a staging step and `migrate
+  --components` is the organiser.
+- No removal of legacy `margo.yaml` reading in this sprint (dropped at 1.0.0).
+- No digest-reproducibility guarantee for rebuilt components.
 
 ---
 
 ## 4. Checkable Steps
 
-- [x] Spikes S1–S6 resolved (S1/S2/S3/S6 verified on Helm 4.2 + zot 2026-10-16; S4/S5 closed by
-  owner ruling); results written into §3.7. S3's follow-up design (`--plain-http`) promoted to
-  Item 8 (§3.11), in scope for this sprint.
-- [ ] `infra/helm.py` + unit tests (mocked `which`/`run`): resolution order, version gate, error
-  mapping and hints, `Pushed:` parsing, no secret in argv.
-- [ ] `PackageType.HELM`; `-t helm` in `build` and `push`; `-t all` behaviour.
-- [ ] `helm:` block parsing, validation, template context, component-name defaults.
-- [ ] Build: placeholders (real `<helm_chart_tag>`), `image` pair, `helm package`, move to `.dist/`,
-  variants, the `+` / `_` handling.
-- [ ] Push: remote derivation, `helm push`, post-push reference comparison, credentials per S2,
-  variants.
-- [ ] Item 6: `domain/project_checks.py` + shared helm-chart-target helper + tests (match / no match
-  / mismatch / missing `Chart.yaml` / external chart skipped), `services/describe.py` wiring,
-  `commands/describe.py` rendering, e2e test.
-- [ ] Item 7: `VerifyResult.project_results`, `services/verify.py` wiring, `commands/verify.py`
-  block + verdict; tests: not applicable (remote URI, `--manifest`, bare `app.yaml`) → advisory/
-  skipped verdict printed, exit 0 unchanged; clean local run → PASS verdict; mismatch → ERROR
-  finding and FAIL verdict and exit 1 (without `--strict`); missing `Chart.yaml` → ERROR; `--only-
-  recommend` local run with matched helm components → project check runs (not skipped).
-- [ ] Item 8: `--plain-http` global flag (`commands/global_options.py`), `MARGOT_PLAIN_HTTP` env var,
-  `settings.toml` field; `infra/oci.py::OrasClient.__init__` gains `plain_http` → `insecure`
-  passthrough (unit test); `infra/helm.py` threads it into every registry-touching helm invocation
-  (unit test); one resolved value read once per invocation and threaded through `services/` to both
-  `infra/oci.py` and `infra/helm.py`; docs (global options, `settings.toml` reference, local/
-  insecure-registry note).
-- [ ] Integration tests marked `helm` (real helm; skipped when absent); push/pull test against the
-  local zot/`registry:2` service container uses the real `--plain-http` flag from Item 8.
-- [ ] `Containerfile.helm`; `release.yml`; image smoke test (`helm version` inside).
-- [ ] `ci.yml` `test-helm` job (Helm 3 + Helm 4); `helm` marker registered.
-- [ ] Docs: project-file reference (`helm:`), command pages (`build`, `push`, `describe`, `verify`),
-  templating page, examples (a project that owns a chart), requirements note ("helm needed only
-  for helm components"), container image page; update `docs/examples/minimal.md` wording.
-- [ ] `.kiro/steering/oci-media-types.md`: add the Helm media types (config
-  `application/vnd.cncf.helm.config.v1+json`, layer
-  `application/vnd.cncf.helm.chart.content.v1.tar+gzip`) for Sprint 15 — reference only.
-- [ ] `make docs-check` passes.
-- [ ] Each task committed as one or more conventional commits.
+TDD throughout. Each task is one or more conventional commits on its item's branch.
+
+### Item 1 — pull fix
+
+- [ ] Tests first: unsafe/absolute/valid component names in `pull --recursive`.
+- [ ] Implement sanitisation + warning in `_pull_recursive_components`.
+- [ ] `docs/commands/pull.md`: note skipped unsafe names.
+
+### Item 2 — rename
+
+- [ ] Tests first: `load_project` table (all four rows), warning once and mentions 1.0.0;
+  rename mode (byte-identical, idempotent, both-present error, rejected options, `--dry-run`).
+- [ ] Implement constants, `services/project.py`, switch the 5 call sites, update messages.
+- [ ] Implement `commands/migrate.py` rename mode; register in `main.py`.
+- [ ] Sweep tests/fixtures to `margot.yaml` (keep explicit legacy tests).
+- [ ] Update Sprint 12 code/tests to the new filename (if merged).
+- [ ] Update Sprint 13 (`margot install`) code/tests/docs to the new filename: the single
+  `load_margo_yaml` call site moves to `load_project`, and install's project-mode error hints and
+  tests name `margot.yaml`.
+- [ ] Docs sweep (docs-writer) incl. `docs/margot-yaml.md`, nav, links, new
+  `docs/commands/migrate.md` (rename mode), deprecation note. `make docs-check` passes.
+- [ ] `grep -rn "margo\.yaml"` leaves only intentional legacy references.
+
+### Item 3 — per-variant repository
+
+- [ ] Tests first (see §3 Item 3 list).
+- [ ] Implement `metadata.py` (parse, context), `push.py`, `package.py` changes.
+- [ ] Docs: `margot-yaml.md`, `templating.md`. `make docs-check` passes.
+
+### Item 4 — adoption
+
+- [ ] Tests first: `extract_repository`; `margo_yaml_to_dict` (order, omissions, loads back);
+  `plan_migration` over `complex.yaml`, `minimal.yaml`, `missing-required.yaml` and new
+  fixtures (float version, missing description, name with spaces / separators / empty).
+- [ ] Implement domain, infra helpers, `services/migrate.py` (local, remote, in-place move,
+  copy, already-laid-out case, staging/commit, `--force`, `--dry-run`).
+- [ ] Integration: pulled dir in place (no leftovers), `--output` elsewhere (source
+  untouched), remote URI via the Sprint 9 fakes, every error row, failure before commit
+  leaves the folder unchanged.
+- [ ] Round trip: `load_project` works; `verify` verdict equals verifying the source
+  `app.yaml`; `build -t margo` yields an `app.yaml` byte-identical to the source.
+- [ ] Docs: adoption section, mapping table, `pull -r` → `migrate` workflow.
+
+### Item 5 — components
+
+- [ ] Tests first: planning rules 1–5 (incl. default one-repository vs `--all-repositories`,
+  `--all-repositories` without `--components`); local-archive discovery (0/1/many files,
+  non-tar); registry fallback with type mismatch; unsafe name; hostile-archive extraction;
+  fail-soft drop; in-place cleanup rules.
+- [ ] Implement planning, extraction helper, service flow, both flags.
+- [ ] Integration (faked registry + `pull -r`-shaped dir): compose + quadlet + helm manifest
+  across two repositories → default skips and warns; `--all-repositories` organises all,
+  variants carry `repository`; helm warned.
+- [ ] Round trip: `build -t all` succeeds and each built component's
+  `version.replace("+","_")` equals its `revision` in `app.yaml`; `push --dry-run` resolves
+  each variant's own repository.
+- [ ] Docs: `--components`, `--all-repositories`, helm note.
 
 ---
 
 ## 5. Definition of Done
 
 - [ ] All checkable steps completed.
-- [ ] `make check` passes without helm installed.
-- [ ] `test-helm` CI job green on Helm 3 and Helm 4 (or the local equivalent run, results quoted).
-- [ ] `--plain-http` verified end-to-end against a real local non-TLS registry (zot or
-  `registry:2`), on both the helm push path and at least one oras-py path (e.g. `push`/`pull`).
-- [ ] Both container images build; the helm one reports its helm version.
-- [ ] Docs updated and `make docs-check` passes.
-- [ ] No TODOs left (or deferred with `# TODO(kiro): ...` and a ROADMAP entry).
-- [ ] Each task committed as one or more commits on the feature branch — no bulk commit.
-- [ ] Handed back for review (Gate 2). The agent does not push, open PRs, or manage branches.
+- [ ] `make check` passes (lint + unit + integration, coverage threshold).
+- [ ] E2E: `pull --recursive` (faked registry) → `migrate --components` → `verify`,
+  `describe`, `build -t all` run cleanly in the same folder.
+- [ ] Docs updated; `make docs-check` passes.
+- [ ] No bare TODOs (`# TODO(kiro): ...` with a ROADMAP entry only).
+- [ ] Close-out: ROADMAP Completed table; backlog trimmed (per-variant repository and pull
+  fix done; keep legacy-removal-at-1.0.0 chore and identifier rename); `product.md` command
+  list; sprint file deleted in `chore(sprint): close out sprint-14 — margot.yaml and migrate`.
+- [ ] Each task committed on its branch — no bulk commit.
+- [ ] Handed back for review (Gate 2); the agent does not push, open PRs, or manage worktrees.
 
 ---
 
 ## 6. Close-out Note
 
-```text
+```
 (filled in after merge)
 ```
 
 ---
 
-## 7. Decisions
+## 7. Decisions (all settled by owner)
 
-- **D2 — settled (owner, 2026-10-15): helm is the source of truth; no pre-push chart-name rule.**
-  Because `helm push` cannot be given a name (it infers name and tag from the archive), a mismatch
-  does not make helm fail. Error handling is therefore after the fact: margot compares helm's own
-  `Pushed:` reference with the expected `repository:tag` and reports the difference (§3.5). Rejected
-  alternatives: validating the last segment against `Chart.yaml` before pushing; making
-  `repository` the parent path and appending the chart name.
-- **D3 — settled (owner, 2026-10-15): the component-name check lives in `describe`** (Item 6), as the
-  first project-level check beyond the manifest.
-- **D4 — settled (owner, 2026-10-15/16): the check is also added to `verify`** (Item 7), with
-  severity **ERROR**: project coherence must pass, so a finding fails `verify` by default.
-  Output layout confirmed (owner, 2026-10-16): `Project checks` block is positioned **after the
-  schema blocks, before the final `verify: PASS/FAIL` line**; **always printed** regardless of
-  applicability — `PASS`/`FAIL` when the check ran, `advisory`/`skipped` (orange3, reusing the
-  existing `console.verdict` advisory path) when it did not apply, with a short reason. **`--only-
-  recommend` also runs the project check** — project coherence is orthogonal to which schema flavor
-  is active. No new `console.verdict` variant is needed.
-- **D5 — settled (owner, 2026-10-16): `--plain-http` is in scope for Sprint 14, not a follow-up**
-  (Item 8, §3.11). Raised by the S3 spike (helm needs `--plain-http` against a non-TLS registry);
-  initially proposed by the planner as a cross-cutting follow-up sprint/backlog item, rejected by
-  the owner: without it, Sprint 14's own helm integration tests have no honest way to exercise a
-  real push/pull against a local registry, and a throwaway test-only workaround would be worse
-  engineering than the real flag. Scope: global flag + `MARGOT_PLAIN_HTTP` env var + `settings.toml`
-  field, applied uniformly to the oras-py path and the helm path — not `--insecure` (TLS-skip),
-  which is a different, still out-of-scope capability.
+1. `app.yaml` stays static.
+2. Default is in place in the current folder; `--output` selects another folder.
+3. `--components` is its own item in this sprint.
+4. Project file becomes `margot.yaml`, same content, renamed by `migrate`; legacy
+   `margo.yaml` read with a deprecation warning and dropped at 1.0.0.
+5. No copy left behind when migrating in place.
+6. `pull --recursive` sanitisation fix is included, first.
+7. One sprint.
+8. `name` = `metadata.name` verbatim (safe fallback only when unusable as a file name).
+9. Components: one repository per type by default; `--all-repositories` lifts the limit,
+   which requires per-variant `repository` (Item 3).
 
 ---
 
@@ -505,7 +408,6 @@ real capability, rather than as a throwaway test-only workaround.
 
 - [sprint-workflow skill](../skills/sprint-workflow/SKILL.md)
 - [ROADMAP.md](../../ROADMAP.md)
-- [sprint-13.md](./sprint-13.md) — project file rename this sprint builds on.
-- [sprint-15.md](./sprint-15.md) — pull side of helm charts.
-- [code-conventions.md](../steering/code-conventions.md), [rich-rendering.md](../steering/rich-rendering.md),
-  [structure.md](../steering/structure.md)
+- [sprint-11.md](./sprint-11.md), [sprint-12.md](./sprint-12.md) — prerequisites.
+- Steering: `code-conventions.md`, `rich-rendering.md`, `oci-media-types.md`,
+  `documentation.md`.
