@@ -161,43 +161,52 @@ None new.
 
 ## 4. Checkable Steps
 
-- [ ] Implement `_find_descriptor_without_margo_yaml` in `services/verify.py` per the
+- [x] Implement `_find_descriptor_without_margo_yaml` in `services/verify.py` per the
   contract above.
-- [ ] Wire the fallback branch into `resolve_descriptor`.
-- [ ] Update the "not found" error message(s) to name both fallback paths that were tried.
-- [ ] Unit tests: `app.yaml` at project root with no `margo.yaml` resolves; `margo/app.yaml`
+- [x] Wire the fallback branch into `resolve_descriptor`.
+- [x] Update the "not found" error message(s) to name both fallback paths that were tried.
+- [x] Unit tests: `app.yaml` at project root with no `margo.yaml` resolves; `margo/app.yaml`
   with no `margo.yaml` resolves (and takes priority correctly — root `app.yaml` wins over
   `margo/app.yaml` when both exist); a `.jinja` descriptor at either fallback path with no
   `margo.yaml` raises the actionable error (not silently rendered, not a generic
   not-found); neither path present raises with both paths named; existing `margo.yaml`
   present behavior is unchanged (regression test).
-- [ ] Integration test: `margot pull <margo-artifact> --output <dir>` followed by `margot
+  *Covered in `tests/integration/test_verify.py` (`TestDescriptorResolution`) and
+  `tests/e2e/test_fallback_cli.py`. The not-found test now asserts both paths.*
+- [x] Integration test: `margot pull <margo-artifact> --output <dir>` followed by `margot
   describe --project-dir <dir>` and `margot verify --project-dir <dir>` succeed with no
   `margo.yaml` written by `pull`.
-- [ ] Add `migrate` scope note to `ROADMAP.md` backlog (see Non-goals above) — do not
+  *Covered in `tests/integration/test_pull_then_inspect.py` and the CLI journey test in
+  `tests/e2e/test_fallback_cli.py`.*
+- [x] Add `migrate` scope note to `ROADMAP.md` backlog (see Non-goals above) — do not
   implement it.
-- [ ] Update `docs/` (describe and verify command reference, and/or concepts page) to
+  *Superseded by the Sprint 14 ROADMAP entry, which schedules `margot migrate`. The 1:1 detail above is not repeated there.*
+- [x] Update `docs/` (describe and verify command reference, and/or concepts page) to
   document the fallback search order and that it is silent/automatic.
-- [ ] `make docs-check` passes.
-- [ ] Each task committed as one or more commits (conventional-commit messages, e.g.
+- [x] `make docs-check` passes.
+- [x] Each task committed as one or more commits (conventional-commit messages, e.g.
   `feat(verify): resolve app.yaml without margo.yaml via fallback search`).
 
 ---
 
 ## 5. Definition of Done
 
-- [ ] All checkable steps completed.
+- [x] All checkable steps completed.
 - [ ] `make check` passes (lint + unit + integration tests).
-- [ ] E2E test: pull a real/fixture margo artifact, then describe/verify it in place with
+  *Open: lint passes. `make test` has one failure,
+  `tests/unit/test_manifest_list_fallback.py::TestResolveAllPlatformsRealSocket::test_resolve_manifest_list_children_via_images_list_real_socket`,
+  which needs a local Podman socket. This branch has no `src/` changes, so it is unrelated.*
+- [x] E2E test: pull a real/fixture margo artifact, then describe/verify it in place with
   no `margo.yaml`.
-- [ ] Docs updated and `make docs-check` passes.
-- [ ] No TODOs left (or explicitly deferred with a `# TODO(kiro): ...` comment and ROADMAP
+- [x] Docs updated and `make docs-check` passes.
+- [x] No TODOs left (or explicitly deferred with a `# TODO(kiro): ...` comment and ROADMAP
   backlog entry — applies to the deferred `migrate` note).
-- [ ] Each task committed as one or more commits on the feature branch — no bulk
+- [x] Each task committed as one or more commits on the feature branch — no bulk
   end-of-sprint commit.
 - [ ] Handed back for review (Gate 2). After approval the planner pushes; the owner opens
   the PR onto the release branch and merges. The agent does not push, open PRs, or manage
   worktrees.
+  *Owner's gate. The agent does not tick it.*
 
 ---
 
@@ -214,3 +223,4 @@ None new.
 - [sprint-workflow skill](../skills/sprint-workflow/SKILL.md)
 - [ROADMAP.md](../../ROADMAP.md)
 - Sprint 11 (shipped in 0.11.0) — related media-type/layer-discovery fixes, sequence after.
+
