@@ -131,6 +131,25 @@ def is_debug() -> bool:
     return _debug
 
 
+def confirm(question: str) -> bool:
+    """Ask a yes/no question on stderr and read one line from stdin.
+
+    Only ``y`` and ``yes`` (any case) confirm. Anything else, including an empty line and EOF,
+    is a no.
+    """
+    _get_stderr().print(question, end=" ", markup=False, highlight=False)
+    answer = sys.stdin.readline()
+    return answer.strip().lower() in {"y", "yes"}
+
+
+def is_interactive() -> bool:
+    """True when stdin is a terminal."""
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def success(message: str) -> None:
     """Print a green success message to stdout. Always shown."""
     _get_stdout().print(f"[green]{message}[/green]", highlight=False)
