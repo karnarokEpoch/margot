@@ -44,7 +44,7 @@ Dependencies — land first, then branch from the release branch:
   driven by `app.yaml` fields (picks the files belonging to the margo artifact).
 - **Sprint 12** — `resolve_descriptor` fallback (`<dir>/app.yaml`, then
   `<dir>/margo/app.yaml`). Item 2 updates that code and its tests to the new filename.
-- **Sprint 13** — `margot install` (see [sprint-13.md](./sprint-13.md)) is built against the
+- **Sprint 13** — `margot install` is built against the
   legacy `margo.yaml` name through the existing `load_margo_yaml`, at a single call site. Item 2
   includes `install` in the filename sweep (code, tests, docs). `install` does **not** rely on
   `pull --recursive` (Item 1) — it pulls components itself.
