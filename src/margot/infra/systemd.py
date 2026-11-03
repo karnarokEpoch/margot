@@ -109,13 +109,17 @@ def check_units(unit_dir: Path, binary: str, environ: Mapping[str, str]) -> Gene
 
     The generator replaces the default search path with ``unit_dir``. Its generated services stay on
     stdout and are not shown. The environment is the caller's, plus ``QUADLET_UNIT_DIRS``.
-    A non-zero exit or any error output fails the check; the detail is the trimmed error text.
+
+    The exit status decides. Quadlet also logs progress (``Loading source unit file ...``) on stderr for
+    a valid tree (spike S1 on the host), so stderr alone is not an error. The failure detail keeps only the
+    error lines; if there are none, the whole stderr is used.
     """
     result = run([binary, "-dryrun", "-user"], env={**environ, "QUADLET_UNIT_DIRS": str(unit_dir)})
-    if result.returncode == 0 and not result.stderr.strip():
+    if result.returncode == 0:
         console.debug("Quadlet generator accepted the staged units.")
         return GeneratorCheck(passed=True, detail="")
-    detail = _trim(result.stderr) or f"generator exited with status {result.returncode}"
+    errors = [line for line in result.stderr.splitlines() if line.strip() and "Loading source" not in line]
+    detail = _trim("\n".join(errors) or result.stderr) or f"generator exited with status {result.returncode}"
     return GeneratorCheck(passed=False, detail=detail)
 
 

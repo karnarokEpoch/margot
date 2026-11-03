@@ -175,13 +175,29 @@ class TestGeneratorCheck:
 
         assert "SECRET" not in check.detail
 
-    def test_error_output_with_zero_exit_fails(self, mocker: Any, tmp_path: Path) -> None:
-        """Should treat error output on stderr as a failure even when the exit status is 0."""
-        mocker.patch("margot.infra.systemd.run", return_value=_completed(0, "", "warning: something"))
+    def test_zero_exit_passes_even_when_quadlet_logs_progress_on_stderr(self, mocker: Any, tmp_path: Path) -> None:
+        """Should pass on exit 0: quadlet logs 'Loading source ...' lines on stderr for every valid tree (host check)."""
+        progress = "quadlet-generator[1]: Loading source unit file /x/verify-mqtt.container"
+        mocker.patch("margot.infra.systemd.run", return_value=_completed(0, "", progress))
+
+        check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
+
+        assert check.passed is True
+
+    def test_failure_detail_leaves_out_the_progress_lines(self, mocker: Any, tmp_path: Path) -> None:
+        """Should keep only the error lines of a failed run, not the 'Loading source' progress lines."""
+        stderr = (
+            "quadlet-generator[1]: Loading source unit file /x/verify-bad.container\n"
+            "quadlet-generator[1]: converting \"verify-bad.container\": unsupported key 'NoSuchKey'\n"
+            "quadlet-generator[1]: processing encountered some errors"
+        )
+        mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "", stderr))
 
         check = systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
 
         assert check.passed is False
+        assert "unsupported key 'NoSuchKey'" in check.detail
+        assert "Loading source" not in check.detail
 
     def test_argv_is_the_dry_run_user_command_and_environment_keeps_the_user_env(
         self, mocker: Any, tmp_path: Path
