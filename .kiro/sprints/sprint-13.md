@@ -994,18 +994,43 @@ the owner's zot units compared by sha256 before and after, `systemd-zot` unchang
   `scratch-missing-network.service`. C was not reinstalled.
 - (c) E ships `scratch-a.network`: exit 3 with `--dry-run` and with `--yes`; nothing written.
 
-**Open limitation (found on the host, not fixed; owner decision needed).** The generator reports only the first
-unresolved reference of a unit. F (`Network=scratch-a.network` present, `Volume=scratch-missing.volume` missing)
-passed the dry run, because the network was reported and the volume never was. The files were written, and
-guard 3 then stopped the install with exit 1 (`systemd does not know scratch-f.service`). Two options:
-(1) repeat the dry run, copying only the referenced host units that exist into the staged copy (not the whole
-search path), until no new reference appears; a broken host unit would then fail this install; (2) read the
-`Network=`/`Volume=`/`Pod=`/`Image=` values of the staged units with a pure parser and treat them as references
-before the dry run; this duplicates a part of Quadlet's rules.
+**Gap closed (`9578559`).** The open limitation above is fixed as the planner chose: when a service is unknown after
+`daemon-reload`, guard 3 runs the Quadlet generator once more with the real search path (`QUADLET_UNIT_DIRS` removed,
+same binary and environment). A unit whose only generator problems are unresolved references gives the warning of
+guard 2 and its service is deferred. Any other unknown service is exit 1, with that unit's generator lines (trimmed to
+600 characters) and the same hint and "nothing was rolled back" text as before. The warnings travel in
+`InstallResult.warnings` and the command prints them. The happy path still runs the staged dry run, `show-environment`,
+`daemon-reload` and one `cat` per service; the host run happens only when a service is unknown.
 
-Verification: `make check` lint clean; 1753 passed, 3 skipped, 1 failed (the known
-`TestResolveAllPlatformsRealSocket`); coverage 94.18%. `install` issues only the generator dry run,
-`show-environment`, `daemon-reload` and `cat`; no `start`, `enable`, `restart` or `stop`.
+Host results (reference host, Podman 5.8.2; scratch projects built in `/tmp`, removed afterwards; the owner's unit
+files compared by sha256 before and after, `systemd-zot` unchanged, same container and start time):
+
+- (a) `scratch-a.network` installed: exit 0, no warning.
+- (b) F (`Network=scratch-a.network` present, `Volume=scratch-missing.volume` missing): exit 0 with exactly one warning,
+  `scratch-f.container references scratch-missing.volume, which is not installed on this host. scratch-f.service is
+  generated once scratch-missing.volume is installed and systemd is reloaded.` `scratch-f.service` is not generated.
+- (c) The app shipping `scratch-missing.volume` installed: exit 0, `scratch-missing-volume.service` known, and
+  `scratch-f.service` known after that reload.
+- (d) M (`Network=scratch-missing-m.network` plus `NoSuchKey=1`): exit 3 with `--yes`, nothing written. The generator
+  line names only the unsupported key.
+- (e) Reinstall of the volume app with `--debug`: exec lines are the generator dry run, `show-environment`,
+  `daemon-reload` and `cat scratch-missing-volume.service`. No start, enable, restart or stop.
+- Cleanup: the three scratch application directories removed, `daemon-reload` run, no scratch service, container,
+  network or volume left.
+
+Remaining limitations:
+
+- The generator names one unresolved reference per run for each unit. A unit with two missing references gets one
+  warning, for the first one. Only the mocked tests cover this; not checked on the host.
+- A real error hidden behind an unresolved reference (the case the owner expected as exit 1 after the write) was not
+  reproduced. The generator printed parse errors (unsupported key) before it looked at references, so such a unit fails
+  in guard 2 with exit 3 and nothing written. A value error that the generator reports only after resolving a
+  reference was not found in the probes. If one exists, the unit gets a warning and exit 0, not exit 1. This is the
+  residual risk of the chosen approach.
+- Generator lines that do not start with `converting "<unit>"` belong to no unit and do not decide the verdict.
+
+Verification: `make check` lint clean; 1776 passed, 3 skipped, 1 failed (the known
+`TestResolveAllPlatformsRealSocket`, untouched); coverage 94.28%.
 
 ### Docs (docs-writer) and close-out
 
