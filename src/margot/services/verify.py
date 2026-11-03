@@ -50,8 +50,11 @@ def resolve_descriptor(project_dir: str = ".", manifest_path: str | None = None)
     descriptor is resolved directly, and a template is rendered to a temporary file with
     the same context and `StrictUndefined` behavior `build` uses.
 
+    When no explicit manifest_path is given and no margo.yaml is present, searches for
+    an app.yaml in fallback locations (root and margo/ subdir).
+
     Args:
-        project_dir: Directory holding `margo.yaml`.
+        project_dir: Directory holding `margo.yaml`, or starting point for fallback search.
         manifest_path: Explicit `app.yaml` / `app.yaml.jinja` path, bypassing `margo.yaml`
             resolution.
 
@@ -69,8 +72,14 @@ def resolve_descriptor(project_dir: str = ".", manifest_path: str | None = None)
         if not source.is_file():
             raise ValueError(f"Application description not found: {manifest_path}")
     else:
-        meta = load_margo_yaml(str(Path(project_dir) / "margo.yaml"))
-        source = _find_descriptor(Path(project_dir) / meta.directory)
+        margo_yaml_path = Path(project_dir) / "margo.yaml"
+        if margo_yaml_path.is_file():
+            meta = load_margo_yaml(str(margo_yaml_path))
+            source = _find_descriptor(Path(project_dir) / meta.directory)
+        else:
+            # No margo.yaml — try fallback search for a static descriptor
+            source = _find_descriptor_without_margo_yaml(Path(project_dir))
+            # meta stays None
     console.info(f"Application description resolved: {source}")
 
     if source.name.endswith(".jinja"):
@@ -173,3 +182,42 @@ def _find_descriptor(source_dir: Path) -> Path:
     if static_file.exists():
         return static_file
     raise ValueError("No app.yaml or app.yaml.jinja found in margo source directory.")
+
+
+def _find_descriptor_without_margo_yaml(project_dir: Path) -> Path:
+    """Locate a static app.yaml when no margo.yaml is present.
+
+    Candidate directories are tried in order: <project_dir>, then <project_dir>/margo.
+    Within each directory, in order:
+    1. app.yaml exists there -> returned immediately.
+    2. app.yaml.jinja exists there -> ValueError immediately; the next directory is not
+       searched. Rendering requires margo.yaml's context, which is not available here.
+
+    If neither directory contains either file, raises naming both static candidate paths.
+
+    Args:
+        project_dir: Directory to search in.
+
+    Returns:
+        Path to the located app.yaml.
+
+    Raises:
+        ValueError: If a candidate directory holds only a .jinja descriptor, or if
+            neither candidate directory holds a descriptor.
+    """
+    candidate_dirs = [project_dir, project_dir / "margo"]
+
+    for directory in candidate_dirs:
+        static_file = directory / STATIC_DESCRIPTOR
+        if static_file.is_file():
+            return static_file
+        jinja_file = directory / JINJA_DESCRIPTOR
+        if jinja_file.is_file():
+            raise ValueError(
+                f"Found {jinja_file} but no margo.yaml is present. "
+                "Jinja2 templates require margo.yaml context for rendering — "
+                "either provide a static app.yaml or add margo.yaml to the directory."
+            )
+
+    paths_tried = ", ".join(str(directory / STATIC_DESCRIPTOR) for directory in candidate_dirs)
+    raise ValueError(f"No app.yaml found. Searched: {paths_tried}")

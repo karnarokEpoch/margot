@@ -7,8 +7,10 @@ from unittest.mock import MagicMock
 from pytest import raises
 
 from margot import console
+from margot.domain.layers import MARGO_DESCRIPTION_MEDIA_TYPE
 from margot.domain.models import PackageType
 from margot.infra.credentials import CredentialsExpiredError
+from margot.infra.oci import OrasClient
 from margot.services import pull as pull_service
 from margot.services.pull import _available_layer_types
 
@@ -19,6 +21,16 @@ def _make_manifest(
     annotations: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a minimal OCI manifest dict for testing."""
+    # Default layers include the descriptor layer for margo artifacts if not specified
+    if layers is None and artifact_type == "application/vnd.margo.app.v1+json":
+        layers = [
+            {
+                "mediaType": MARGO_DESCRIPTION_MEDIA_TYPE,
+                "digest": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                "size": 1000,
+            }
+        ]
+
     manifest: dict[str, Any] = {
         "schemaVersion": 2,
         "mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -818,8 +830,9 @@ deploymentProfiles:
         warning_mock.assert_any_call("Skipping component 'incomplete-component': missing repository or revision properties.")
 
     def test_recursive_pull_margo_app_yaml_missing(self, mocker: Any, tmp_path: Any) -> None:
-        """recursive=True when app.yaml is missing should emit warning and return root paths only."""
-        root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json")
+        """recursive=True when app.yaml (descriptor layer) is missing should emit warning and return root paths only."""
+        # Create manifest with NO descriptor layer
+        root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json", layers=[])
 
         # Pulled paths without app.yaml
         root_paths = [str(tmp_path / "README.md"), str(tmp_path / "resources.tar.gz")]
@@ -850,9 +863,10 @@ deploymentProfiles:
 
     def test_recursive_pull_margo_app_yaml_unparseable(self, mocker: Any, tmp_path: Any) -> None:
         """recursive=True when app.yaml is unparseable should emit warning and return root paths only."""
+        # Create manifest with descriptor layer at index 0
         root_manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json")
 
-        # Create invalid YAML
+        # Create invalid YAML file
         app_yaml_path = tmp_path / "app.yaml"
         app_yaml_path.write_text("{ invalid: yaml: content:")
 
@@ -1005,3 +1019,200 @@ deploymentProfiles:
         assert any("good" in path for path in result)
         # Should have warned about bad-comp
         assert any("bad-comp" in str(call) for call in warning_mock.call_args_list)
+
+
+_ROOT_APP_YAML_WITH_COMPONENT = """\
+apiVersion: v1
+kind: ApplicationDescription
+id: test-app
+metadata:
+  name: Test App
+  version: 1.0.0
+deploymentProfiles:
+  - type: helm
+    id: default
+    components:
+      - name: database
+        properties:
+          repository: oci://quay.io/charts/postgres
+          revision: 14.0.0
+"""
+
+_POSTGRES_COMPOSE_LAYERS = [
+    {
+        "mediaType": "application/vnd.org.margo.component.compose.tar+gzip",
+        "digest": "sha256:postgres",
+        "annotations": {"org.opencontainers.image.title": "postgres-14.0.0.tgz"},
+    }
+]
+
+
+def _descriptor_layer(title: str, digest: str) -> dict[str, Any]:
+    """Build a descriptor-mediaType layer with the given title annotation."""
+    return {
+        "mediaType": MARGO_DESCRIPTION_MEDIA_TYPE,
+        "digest": digest,
+        "annotations": {"org.opencontainers.image.title": title},
+    }
+
+
+class TestPullDescriptorByMediaType:
+    """Recursive pull locates the descriptor layer by mediaType, not by the name app.yaml."""
+
+    def test_recursive_pull_recurses_when_descriptor_layer_is_named_manifest_yaml(
+        self, mocker: Any, tmp_path: Any
+    ) -> None:
+        """Should pull declared components when the descriptor layer is titled manifest.yaml and is not first."""
+        icon_layer = {
+            "mediaType": "application/vnd.margo.app.icon.v1+png",
+            "digest": "sha256:icon",
+            "annotations": {"org.opencontainers.image.title": "resources/icon.png"},
+        }
+        root_manifest = _make_manifest(
+            artifact_type="application/vnd.margo.app.v1+json",
+            layers=[icon_layer, _descriptor_layer("manifest.yaml", "sha256:descriptor")],
+        )
+        component_manifest = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=_POSTGRES_COMPOSE_LAYERS,
+        )
+
+        mock_client = MagicMock()
+        mock_client.get_manifest.side_effect = lambda uri: component_manifest if "postgres" in uri else root_manifest
+
+        def download_blob_side_effect(_uri: str, _digest: str, outfile: str) -> None:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake archive")
+
+        mock_client.download_blob.side_effect = download_blob_side_effect
+
+        def pull_side_effect(uri: str, outdir: str) -> list[str]:
+            if uri != "public.ecr.aws/g2n4p2m7/margo:1.0.0":
+                return []
+            icon = Path(outdir) / "resources" / "icon.png"
+            icon.parent.mkdir(parents=True, exist_ok=True)
+            icon.write_bytes(b"png")
+            descriptor = Path(outdir) / "manifest.yaml"
+            descriptor.write_text(_ROOT_APP_YAML_WITH_COMPONENT)
+            return [str(icon), str(descriptor)]
+
+        mock_client.pull.side_effect = pull_side_effect
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            recursive=True,
+        )
+
+        # Root paths (icon, descriptor) followed by the one component file.
+        assert len(result) == 3
+        assert result[1] == str(tmp_path / "manifest.yaml")
+        assert result[2].startswith(str(tmp_path / "database"))
+        assert any("postgres" in str(call.args[0]) for call in mock_client.get_manifest.call_args_list)
+
+    def test_two_descriptor_layers_warn_naming_both_and_recurse_into_first(
+        self, mocker: Any, tmp_path: Any
+    ) -> None:
+        """Should warn with every descriptor layer title and use the first layer, in manifest order, for recursion."""
+        root_manifest = _make_manifest(
+            artifact_type="application/vnd.margo.app.v1+json",
+            layers=[
+                _descriptor_layer("app.yaml", "sha256:aaaaaaaaaaaaaaaaaa"),
+                _descriptor_layer("manifest.yaml", "sha256:bbbbbbbbbbbbbbbbbb"),
+            ],
+        )
+        component_manifest = _make_manifest(
+            artifact_type="application/vnd.org.margo.component.compose+json",
+            layers=_POSTGRES_COMPOSE_LAYERS,
+        )
+
+        mock_client = MagicMock()
+        mock_client.get_manifest.side_effect = lambda uri: component_manifest if "postgres" in uri else root_manifest
+
+        def download_blob_side_effect(_uri: str, _digest: str, outfile: str) -> None:
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(b"fake archive")
+
+        mock_client.download_blob.side_effect = download_blob_side_effect
+
+        def pull_side_effect(uri: str, outdir: str) -> list[str]:
+            if uri != "public.ecr.aws/g2n4p2m7/margo:1.0.0":
+                return []
+            first = Path(outdir) / "app.yaml"
+            first.write_text(_ROOT_APP_YAML_WITH_COMPONENT)
+            second = Path(outdir) / "manifest.yaml"
+            second.write_text("kind: SomethingElse\n")
+            return [str(first), str(second)]
+
+        mock_client.pull.side_effect = pull_side_effect
+        mocker.patch("margot.services.pull.credentials.check_credentials")
+        mocker.patch("margot.services.pull.OrasClient", return_value=mock_client)
+        warning_mock = mocker.patch("margot.services.pull.console.warning")
+
+        result = pull_service.pull_artifact(
+            "public.ecr.aws/g2n4p2m7/margo:1.0.0",
+            outdir=str(tmp_path),
+            recursive=True,
+        )
+
+        # The first descriptor (app.yaml) declares the component, so recursion pulls it.
+        assert len(result) == 3
+        assert result[2].startswith(str(tmp_path / "database"))
+        warning_mock.assert_called_once()
+        message = warning_mock.call_args[0][0]
+        assert "app.yaml (digest: sha256:aaaa" in message
+        assert "manifest.yaml (digest: sha256:bbbb" in message
+
+
+class TestOrasPullPathOrder:
+    """Guards the manifest-index to pulled-path mapping used by remote.py and pull.py.
+
+    Both services find the descriptor layer by its index in manifest["layers"], then read the
+    pulled path at that same index. That is only correct because oras-py's Registry.pull appends
+    exactly one path per layer, in manifest order (overwrite=True is the default). This test runs
+    the real OrasClient.pull loop and fakes only the registry calls (get_manifest and
+    download_blob), so a change to that ordering in oras-py or in the margot override fails here.
+    """
+
+    def test_pull_returns_one_path_per_layer_in_manifest_order(self, mocker: Any, tmp_path: Any) -> None:
+        """Should return exactly one path per manifest layer, 1:1 and in manifest layer order."""
+        layers = [
+            {
+                "mediaType": "application/vnd.margo.app.icon.v1+png",
+                "digest": "sha256:icon",
+                "annotations": {"org.opencontainers.image.title": "resources/icon.png"},
+            },
+            _descriptor_layer("manifest.yaml", "sha256:descriptor"),
+            {
+                "mediaType": "application/octet-stream",
+                "digest": "sha256:extra",
+                "annotations": {"org.opencontainers.image.title": "resources/screenshots/a.png"},
+            },
+        ]
+        manifest = _make_manifest(artifact_type="application/vnd.margo.app.v1+json", layers=layers)
+        downloaded_digests: list[str] = []
+
+        def download_blob_side_effect(_container: Any, digest: str, outfile: str) -> str:
+            downloaded_digests.append(digest)
+            Path(outfile).parent.mkdir(parents=True, exist_ok=True)
+            Path(outfile).write_bytes(digest.encode())
+            return outfile
+
+        mocker.patch.object(OrasClient, "auth", MagicMock(), create=True)
+        mocker.patch.object(OrasClient, "get_manifest", return_value=manifest)
+        mocker.patch.object(OrasClient, "download_blob", side_effect=download_blob_side_effect)
+
+        client = OrasClient()
+        paths = client.pull("public.ecr.aws/g2n4p2m7/margo:1.0.0", str(tmp_path))
+
+        resolved_root = tmp_path.resolve()
+        # Services map a manifest layer index to paths[index]; this list only holds if oras-py keeps layer order.
+        assert [Path(path).resolve().relative_to(resolved_root).as_posix() for path in paths] == [
+            "resources/icon.png",
+            "manifest.yaml",
+            "resources/screenshots/a.png",
+        ]
+        assert downloaded_digests == [layer["digest"] for layer in layers]
+        assert len(paths) == len(layers)

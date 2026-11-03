@@ -11,10 +11,11 @@ No Rich rendering or terminal output — pure data and exceptions.
 """
 
 from dataclasses import dataclass
-from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
 from margot import console
+from margot.domain.layers import MARGO_DESCRIPTION_MEDIA_TYPE
 from margot.domain.models import PackageType
 from margot.services import pull as pull_service
 
@@ -40,8 +41,8 @@ def resolve_remote_descriptor(uri: str) -> ResolvedRemoteDescriptor:
     Uses the shared prepare_oci_retrieval from services/pull to centralize URI validation,
     credential checks, and manifest fetching. Verifies that the artifact is a Margo
     application descriptor (rejects compose/quadlet/unknown), pulls the artifact
-    with recursive=False, and locates the root app.yaml. The temporary directory
-    remains live; cleanup is the caller's responsibility.
+    with recursive=False, and locates the descriptor layer by mediaType. The temporary
+    directory remains live; cleanup is the caller's responsibility.
 
     Args:
         uri: Full OCI reference, optionally with 'oci://' scheme prefix.
@@ -52,8 +53,8 @@ def resolve_remote_descriptor(uri: str) -> ResolvedRemoteDescriptor:
         app.yaml, and a live TemporaryDirectory handle.
 
     Raises:
-        ValueError: If URI is malformed, artifact is not Margo, or app.yaml is not found
-            in the pulled layers.
+        ValueError: If URI is malformed, artifact is not Margo, or descriptor layer is not found
+            in the pulled manifest.
         CredentialsExpiredError: If credentials for the registry have expired.
         Exception: If manifest fetch, pull, or other registry operation fails.
 
@@ -87,22 +88,27 @@ def resolve_remote_descriptor(uri: str) -> ResolvedRemoteDescriptor:
         pulled_paths = pull_service.pull_prepared_context(prepared, temp_dir.name, recursive=False)
         console.info(f"Pulled {len(pulled_paths)} layer(s).")
 
-        # Locate app.yaml in pulled paths
-        app_yaml_path = None
-        for path in pulled_paths:
-            if Path(path).name == "app.yaml":
-                app_yaml_path = path
-                break
+        # Locate descriptor layer by mediaType, matching to pulled paths
+        # Layers and pulled_paths are in the same order from oras-py's pull
+        descriptor_layer_index = _find_descriptor_layer_index(prepared.manifest)
 
-        if app_yaml_path is None:
+        if descriptor_layer_index is None:
             # Clean up before raising
             temp_dir.cleanup()
             msg = (
                 f"Artifact at {prepared.normalized_uri} is a Margo application descriptor "
-                f"but has no root app.yaml layer. Verify the artifact is valid."
+                f"but has no layer with mediaType={MARGO_DESCRIPTION_MEDIA_TYPE}. "
+                "Verify the artifact is valid."
             )
             raise ValueError(msg)  # noqa: TRY301
 
+        # Get the path for this layer (same order as manifest layers)
+        if descriptor_layer_index >= len(pulled_paths):
+            temp_dir.cleanup()
+            msg = "Internal error: descriptor layer index exceeds pulled paths count."
+            raise ValueError(msg)  # noqa: TRY301
+
+        app_yaml_path = pulled_paths[descriptor_layer_index]
         console.info(f"Application description located: {app_yaml_path}")
         return ResolvedRemoteDescriptor(
             normalized_uri=prepared.normalized_uri,
@@ -113,3 +119,41 @@ def resolve_remote_descriptor(uri: str) -> ResolvedRemoteDescriptor:
         # Clean up on any exception
         temp_dir.cleanup()
         raise
+
+
+def _find_descriptor_layer_index(manifest: dict[str, Any]) -> int | None:
+    """Find the index of the descriptor layer in a manifest's layers list.
+
+    Locates the first layer with mediaType == MARGO_DESCRIPTION_MEDIA_TYPE.
+    If more than one layer matches, logs a warning with all matching layers
+    and returns the index of the first match.
+
+    Args:
+        manifest: OCI manifest dict.
+
+    Returns:
+        The index of the first descriptor layer, or None if no matching layer.
+    """
+    layers: list[dict[str, Any]] = manifest.get("layers", [])
+    matching_indices: list[int] = []
+
+    for idx, layer in enumerate(layers):
+        if layer.get("mediaType") == MARGO_DESCRIPTION_MEDIA_TYPE:
+            matching_indices.append(idx)
+
+    if not matching_indices:
+        return None
+
+    if len(matching_indices) > 1:
+        # Warn about multiple matches, but use the first
+        layer_descriptions: list[str] = []
+        for idx in matching_indices:
+            layer = layers[idx]
+            annotations = layer.get("annotations") or {}
+            title = annotations.get("org.opencontainers.image.title", layer.get("digest", "unknown")[:12])
+            layer_descriptions.append(f"  - {title} (digest: {layer.get('digest', 'unknown')[:12]})")
+        console.warning(
+            "Multiple descriptor layers found in manifest; using first match:\n" + "\n".join(layer_descriptions)
+        )
+
+    return matching_indices[0]

@@ -13,15 +13,22 @@ optional supporting resources.
 - **Output:** OCI artifact tagged with the top-level `version`
 - **`artifactType`:** `application/vnd.margo.app.v1+json`
 
-Layers and their media types:
+Layer media types:
 
-| File                         | Media type                                              |
-| ---------------------------- | ------------------------------------------------------- |
-| `app.yaml`                   | `application/vnd.margo.app.description.v1+yaml`         |
-| `resources/icon.png`         | `application/vnd.margo.app.icon.v1+png`                 |
-| `resources/license.txt`      | `application/vnd.margo.app.license.v1+plain`            |
-| `resources/release-notes.md` | `application/vnd.margo.app.releaseNotes.v1+markdown`    |
-| `resources/description.md`   | `application/vnd.margo.app.descriptionFile.v1+markdown` |
+| Layer / source                    | Media type                                              |
+| --------------------------------- | ------------------------------------------------------- |
+| `app.yaml` (descriptor)           | `application/vnd.margo.app.description.v1+yaml`        |
+| `icon` field reference            | `application/vnd.margo.app.icon.v1+{format}`           |
+| `descriptionFile` field reference | `application/vnd.margo.app.descriptionFile.v1+{format}` |
+| `licenseFile` field reference     | `application/vnd.margo.app.licenseFile.v1+{format}`    |
+| `releaseNotes` field reference    | `application/vnd.margo.app.releaseNotes.v1+{format}`   |
+| any other file under `resources/` | `application/octet-stream`                             |
+
+`{format}` is derived from the file extension: `jpg`/`jpeg` → `jpeg`; `tif`/`tiff` → `tiff`;
+`md`/`markdown` → `markdown`; no extension → `bin`; any other extension used as-is.
+The four references are read from `metadata.catalog.application` in `app.yaml`.
+Every resource layer carries `org.margo.app.resource: "true"`. See
+[`margot push` — OCI media types](commands/push.md#oci-media-types) for the full reference.
 
 Build step: copy source → output dir, render `app.yaml` from `app.yaml.jinja` if present,
 or copy `app.yaml` verbatim. Both files present is a hard error.
@@ -97,7 +104,7 @@ A Margo application project that margot operates on:
 
 ```tree
 <project-root>/
-├── margo.yaml                     # project descriptor (required)
+├── margo.yaml                     # project descriptor (required by build and push)
 ├── margo/                         # margo artifact source (default: margo/)
 │   ├── app.yaml                   # Margo app descriptor — static
 │   ├── app.yaml.jinja             # Margo app descriptor — Jinja2 template (use one, not both)

@@ -1,5 +1,6 @@
 """OCI registry adapter: oras-py wrapper."""
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from logging import DEBUG, INFO, WARNING, Formatter, Handler, LogRecord, getLogger
 from pathlib import Path
@@ -10,13 +11,24 @@ from oras.client import OrasClient as OrasClientLib
 from oras.container import Container
 from oras.defaults import annotation_title
 from oras.oci import ManifestConfig, NewLayer, NewManifest
+from yaml import safe_load
 
 from margot import console
+from margot.domain.layers import (
+    MARGO_DESCRIPTION_MEDIA_TYPE,
+    MARGO_RESOURCE_ANNOTATION,
+    MARGO_RESOURCE_ANNOTATION_VALUE,
+    resolve_margo_resource_files,
+)
 from margot.domain.uri import extract_hostname, normalize_registry_hostname
 from margot.infra import credentials
 
 # HTTP status code constants
 _HTTP_ACCEPTED = 202
+
+# One layer to push: (path, media_type, title) or (path, media_type, title, extra_annotations).
+# extra_annotations are merged next to the title annotation (e.g. org.margo.app.resource).
+_LayerEntry = tuple[Path, str, str] | tuple[Path, str, str, Mapping[str, str]]
 
 
 class OciRegistryError(Exception):
@@ -350,7 +362,8 @@ class OrasClient(OrasClientLib):
         Push a margo artifact to OCI registry.
 
         Reads files from: <build_dir>/<version>/margo/
-        Only includes files that actually exist in the build_dir (skip missing optional ones).
+        Resource files are discovered from app.yaml field references (icon, descriptionFile,
+        licenseFile, releaseNotes) plus any additional files under resources/.
 
         Args:
             build_dir: Root build output directory.
@@ -365,27 +378,33 @@ class OrasClient(OrasClientLib):
 
         margo_dir = Path(build_dir) / version / "margo"
 
-        # Build file list: (path, media_type, annotation_title)
-        file_entries: list[tuple[Path, str, str]] = [
-            (margo_dir / "app.yaml", "application/vnd.margo.app.description.v1+yaml", "app.yaml"),
+        # Load app.yaml to extract resource references
+        app_yaml_path = margo_dir / "app.yaml"
+        try:
+            app_yaml_content = app_yaml_path.read_text(encoding="utf-8")
+            app_yaml_dict = safe_load(app_yaml_content) or {}
+        except Exception as e:  # noqa: BLE001
+            console.warning(f"Failed to load app.yaml for resource resolution: {e}; pushing only descriptor.")
+            app_yaml_dict = {}
+
+        # Resolve resource files based on app.yaml references and resources/ directory
+        resource_files, missing_fields = resolve_margo_resource_files(app_yaml_dict, margo_dir)
+
+        # Emit warnings for missing referenced files
+        for field_name, referenced_value in missing_fields:
+            console.warning(f"'{field_name}' references '{referenced_value}' but the file was not found; skipping.")
+
+        # Build file list: descriptor first, then resources. Every resource layer carries the
+        # org.margo.app.resource annotation; the descriptor layer does not.
+        resource_annotations = {MARGO_RESOURCE_ANNOTATION: MARGO_RESOURCE_ANNOTATION_VALUE}
+        file_entries: list[_LayerEntry] = [
+            (app_yaml_path, MARGO_DESCRIPTION_MEDIA_TYPE, "app.yaml"),
         ]
-        optional = [
-            (margo_dir / "resources" / "icon.png", "application/vnd.margo.app.icon.v1+png", "resources/icon.png"),
-            (margo_dir / "resources" / "license.txt", "application/vnd.margo.app.license.v1+plain", "resources/license.txt"),
-            (
-                margo_dir / "resources" / "release-notes.md",
-                "application/vnd.margo.app.releaseNotes.v1+markdown",
-                "resources/release-notes.md",
-            ),
-            (
-                margo_dir / "resources" / "description.md",
-                "application/vnd.margo.app.descriptionFile.v1+markdown",
-                "resources/description.md",
-            ),
-        ]
-        for path, mt, title in optional:
-            if path.exists():
-                file_entries.append((path, mt, title))
+
+        # Add resolved resource files
+        file_entries.extend(
+            (resource.path, resource.media_type, resource.title, resource_annotations) for resource in resource_files
+        )
 
         self._push_artifact(
             target=target,
@@ -473,7 +492,7 @@ class OrasClient(OrasClientLib):
         self,
         target: str,
         artifact_type: str,
-        file_entries: list[tuple[Path, str, str]],
+        file_entries: list[_LayerEntry],
         manifest_annotations: dict[str, str],
     ) -> None:
         """Low-level OCI artifact push with artifactType support.
@@ -481,7 +500,10 @@ class OrasClient(OrasClientLib):
         Args:
             target: Full OCI reference (e.g. public.ecr.aws/g2n4p2m7/margo:1.0.0).
             artifact_type: The artifactType to set in the manifest.
-            file_entries: List of (path, media_type, annotation_title) tuples for layers.
+            file_entries: Layers as (path, media_type, title) tuples, or
+                (path, media_type, title, extra_annotations) tuples when a layer needs
+                annotations beyond its title (e.g. org.margo.app.resource). Each layer's
+                annotations are {title annotation: title} merged with extra_annotations.
             manifest_annotations: Annotations to set on the manifest.
         """
         container = self.get_container(target)
@@ -499,9 +521,10 @@ class OrasClient(OrasClientLib):
 
         # Build and upload layers
         layers = []
-        for file_path, media_type, title in file_entries:
+        for file_path, media_type, title, *optional in file_entries:
+            extra_annotations = optional[0] if optional else {}
             layer = NewLayer(blob_path=str(file_path), media_type=media_type)
-            layer["annotations"] = {annotation_title: title}
+            layer["annotations"] = {annotation_title: title, **extra_annotations}
             console.debug(f"  layer: {title} [{media_type}] ({layer['size']} bytes, {layer['digest']})")
             response = self.upload_blob(blob=str(file_path), container=container, layer=layer)
             self._check_200_response(response)

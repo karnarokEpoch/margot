@@ -48,14 +48,16 @@ Only applies to margo artifacts. Has no effect on compose, quadlet, or unknown a
 
 When `--recursive` is set for a margo artifact:
 
-1. Locate `app.yaml` in the pulled layers.
+1. Locate the descriptor layer by `mediaType == application/vnd.margo.app.description.v1+yaml` in the
+    manifest — not by filename. If multiple layers share that media type, a warning names them and the
+    first (manifest order) is used.
 2. Parse `deploymentProfiles[].components[]` to extract component OCI references:
     `properties.repository` (strip `oci://` scheme) + `properties.revision` → OCI ref.
     Components missing either field are skipped with a warning.
 3. Deduplicate by `(repository, tag)`, preserving first-seen order.
 4. Pull each component into `--output/<component-name>/`.
 
-If `app.yaml` cannot be found, parsed, or a component pull fails, a warning is logged but
+If the descriptor layer cannot be found, parsed, or a component pull fails, a warning is logged but
 the root pull succeeds.
 
 ### Recursive output structure
