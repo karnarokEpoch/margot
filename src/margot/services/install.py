@@ -81,8 +81,6 @@ class InstallResult:
     start_services: tuple[str, ...]
     wanted_services: tuple[str, ...]
     files: tuple[str, ...]
-    upgraded: bool
-    parameters: tuple[str, ...]
 
 
 def detect_source(uri: str | None, project_dir: str | None) -> str:
@@ -170,8 +168,6 @@ def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
         start_services=tuple(domain.start_targets(plan.units)),
         wanted_services=tuple(unit.service for unit in plan.units if unit.default_target),
         files=plan.files,
-        upgraded=existing is not None,
-        parameters=plan.parameters,
     )
 
 

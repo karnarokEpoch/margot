@@ -331,7 +331,7 @@ class TestInstall:
 
 
 class TestResultReport:
-    """The printed result: directory on its own line, start timing for WantedBy=default.target, upgrade restart."""
+    """The printed result: directory on its own line, the start/status commands, the WantedBy=default.target timing."""
 
     def test_installed_directory_is_printed_on_its_own_line(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should print the application directory as a whole line, never folded into the message."""
@@ -376,8 +376,8 @@ class TestResultReport:
         assert result.exit_code == 0, result.output
         assert "systemctl --user restart" not in result.output
 
-    def test_upgrade_prints_restart_command_for_running_services(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
-        """Should explain that running services keep the old units and print the restart command on upgrade."""
+    def test_upgrade_prints_no_restart_hint(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should not print the old-unit or restart tip on upgrade, and print no restart command."""
         args, _ = _project_args(tmp_path)
         first = runner.invoke(app, ["install", *args, "--yes"])
         assert first.exit_code == 0, first.output
@@ -385,8 +385,19 @@ class TestResultReport:
         second = runner.invoke(app, ["install", *args, "--yes"])
 
         assert second.exit_code == 0, second.output
-        assert "keep the old unit files until restarted" in second.output
-        assert "systemctl --user restart mosquitto.service" in second.output
+        assert "keep the old unit files" not in second.output
+        assert "systemctl --user restart" not in second.output
+        assert "systemctl --user start mosquitto.service" in second.output
+
+    def test_result_prints_no_startup_timeout_tip(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should not print the first-start timeout tip; that belongs in the docs, not the command output."""
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert "90 s" not in result.output
+        assert "first start" not in result.output
 
 
 PARAMETER_PORT = """parameters:
@@ -497,17 +508,18 @@ class TestParameters:
         assert "not applied" in result.output
         assert "mqttPort" in result.output
 
-    def test_install_with_set_writes_the_dropin_and_names_the_visibility_commands(
+    def test_install_with_set_writes_the_dropin_and_prints_no_visibility_tip(
         self, tmp_path: Path, systemctl: Any, xdg: Path
     ) -> None:
-        """Should apply --set through the drop-in and say how to inspect the value."""
+        """Should apply --set through the drop-in and print no tip about inspecting parameter values."""
         args = _project_with(tmp_path, PARAMETER_PORT)
 
         result = runner.invoke(app, ["install", *args, "--set", "mqttPort=1884", "--yes"])
 
         assert result.exit_code == 0, result.output
         assert 'Environment="MQTT_PORT=1884"' in _mosquitto_dropin(xdg)
-        assert "systemctl --user show -p Environment" in " ".join(result.output.split())
+        assert "systemctl --user show" not in result.output
+        assert "systemctl --user cat" not in result.output
 
     def test_dry_run_with_set_changes_nothing(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should show the value in the plan and leave the host untouched."""

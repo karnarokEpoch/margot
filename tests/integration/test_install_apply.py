@@ -244,20 +244,10 @@ class TestFailurePhases:
 
 
 class TestResultHints:
-    """What the result reports for the printed hints: upgrade and WantedBy=default.target (sprint-13 §3.7)."""
+    """What the result reports for the printed WantedBy=default.target hint (sprint-13 §3.7)."""
 
-    def test_fresh_install_is_not_an_upgrade(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
-        """Should report upgraded=False when no marker existed before."""
-        prepared = _prepare(tmp_path)
-        try:
-            result = install_service.apply_install(prepared, root=xdg)
-        finally:
-            prepared.cleanup()
-
-        assert result.upgraded is False
-
-    def test_second_install_is_an_upgrade(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
-        """Should report upgraded=True when a margot marker of the same profile already exists."""
+    def test_second_install_is_applied_over_the_first(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should accept a second install of the same profile over an existing margot marker."""
         first = _prepare(tmp_path / "a")
         try:
             install_service.apply_install(first, root=xdg)
@@ -265,11 +255,11 @@ class TestResultHints:
             first.cleanup()
         second = _prepare(tmp_path / "b")
         try:
-            result = install_service.apply_install(second, root=xdg)
+            install_service.apply_install(second, root=xdg)
         finally:
             second.cleanup()
 
-        assert result.upgraded is True
+        assert json.loads((xdg / "com-belden-mosquitto" / MARKER_FILENAME).read_text(encoding="utf-8"))["state"] == "installed"
 
     def test_unit_wanted_by_default_target_is_reported(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should list the service whose unit file declares WantedBy=default.target."""

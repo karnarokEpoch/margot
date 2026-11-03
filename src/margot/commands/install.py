@@ -208,21 +208,4 @@ def _next_steps(result: InstallResult) -> list[Text]:
         )
         for service in result.wanted_services
     )
-    if result.upgraded and result.start_services:
-        lines.append(Text("Running services keep the old unit files until restarted. Restart them with:", style="bold"))
-        lines.extend(Text(f"  systemctl --user restart {service}") for service in result.start_services)
-    lines.append(
-        Text(
-            "A first start may pull images and exceed systemd's 90 s start timeout.",
-            style="dim",
-        )
-    )
-    if result.parameters:
-        lines.append(
-            Text(
-                "Parameter values are visible through: systemctl --user show -p Environment <service>, "
-                "or systemctl --user cat <service>.",
-                style="dim",
-            )
-        )
     return lines
