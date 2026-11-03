@@ -15,7 +15,7 @@ from pytest import mark, raises
 from margot.domain.install import MARKER_FILENAME
 from margot.infra.systemd import GeneratorRun, SystemdError
 from margot.services import install as install_service
-from tests.integration._install_helpers import build_project, quadlet_payload
+from tests.integration._install_helpers import answer_by_run, build_project, quadlet_payload
 
 pytestmark = mark.usefixtures("install_host")
 
@@ -463,3 +463,183 @@ class TestDeferredVerification:
         message = str(info.value)
         assert "other.service" in message
         assert "mosquitto.service" not in message
+
+
+F_UNIT = b"[Container]\nImage=docker.io/library/eclipse-mosquitto:2\nNetwork=owner.network\nVolume=owner.volume:/data\n"
+VOLUME_WARNING = (
+    "mosquitto.container references owner.volume, which is not installed on this host. "
+    "mosquitto.service is generated once owner.volume is installed and systemd is reloaded."
+)
+
+
+def _host_runs(generator: Any) -> list[Any]:
+    """The calls of check_units that used the real search path (unit directory None)."""
+    return [call for call in generator.call_args_list if call.args[0] is None]
+
+
+class TestMissingServiceAfterReload:
+    """Guard 3 asks the host generator why a service is unknown after reload (sprint-13 §3.10, principle).
+
+    The staged dry run reports only the first unresolved reference of a unit, so a unit with a second
+    missing reference passes guard 2 and is absent after reload. The host run, with the real search path,
+    names the reference. A reference-only diagnosis is a warning; anything else is exit 1.
+    """
+
+    def test_a_missing_second_reference_is_a_warning_and_the_install_succeeds(
+        self, tmp_path: Path, install_host: Any, mocker: Any
+    ) -> None:
+        """Should write the files, return one warning for the missing volume and not require the service."""
+        _unit(install_host.root, "handmade", "owner.network", "[Network]\n")
+        install_host.generator.side_effect = answer_by_run(
+            staged=GeneratorRun(returncode=1, stderr=_generator_lines(("mosquitto.container", "owner.network"))),
+            host=GeneratorRun(returncode=1, stderr=_generator_lines(("mosquitto.container", "owner.volume"))),
+        )
+        _systemctl(mocker, missing=frozenset({"mosquitto.service"}))
+        prepared = _prepare_members(tmp_path, _members({"mosquitto.container": F_UNIT}))
+        try:
+            result = install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        assert prepared.warnings == ()
+        assert result.warnings == (VOLUME_WARNING,)
+        assert result.services == ()
+        assert result.start_services == ()
+        assert (install_host.root / APP / "mosquitto.container").is_file()
+        assert len(_host_runs(install_host.generator)) == 1
+
+    def test_a_real_error_behind_the_reference_is_exit_1_after_the_write(
+        self, tmp_path: Path, install_host: Any, mocker: Any
+    ) -> None:
+        """Should refuse with the error line of that unit and keep the written files."""
+        error = "quadlet-generator[1]: converting \"mosquitto.container\": unsupported key 'NoSuchKey' in group 'Container'"
+        install_host.generator.side_effect = answer_by_run(
+            staged=GeneratorRun(returncode=0, stderr=""),
+            host=GeneratorRun(returncode=1, stderr=_generator_lines(("mosquitto.container", "owner.volume"), errors=(error,))),
+        )
+        _systemctl(mocker, missing=frozenset({"mosquitto.service"}))
+        prepared = _prepare_members(tmp_path, _members({"mosquitto.container": F_UNIT}))
+        try:
+            with raises(SystemdError) as info:
+                install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        message = str(info.value)
+        assert "NoSuchKey" in message
+        assert "owner.volume" not in message
+        assert "nothing was rolled back" in message.lower()
+        assert (install_host.root / APP / "mosquitto.container").is_file()
+
+    def test_a_missing_service_with_no_generator_line_is_exit_1(self, tmp_path: Path, install_host: Any, mocker: Any) -> None:
+        """Should fail when the host generator says nothing about the missing unit."""
+        install_host.generator.side_effect = answer_by_run(
+            staged=GeneratorRun(returncode=0, stderr=""), host=GeneratorRun(returncode=0, stderr="")
+        )
+        _systemctl(mocker, missing=frozenset({"mosquitto.service"}))
+        prepared = _prepare(tmp_path)
+        try:
+            with raises(SystemdError, match=r"systemd does not know mosquitto\.service"):
+                install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+    def test_a_missing_generator_binary_is_exit_1_and_no_host_run_is_made(
+        self, tmp_path: Path, install_host: Any, mocker: Any
+    ) -> None:
+        """Should fail, with the usual message, when the generator cannot be found for the diagnosis."""
+        install_host.binary.return_value = None
+        _systemctl(mocker, missing=frozenset({"mosquitto.service"}))
+        prepared = _prepare(tmp_path)
+        try:
+            with raises(SystemdError, match=r"systemd does not know mosquitto\.service"):
+                install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        assert _host_runs(install_host.generator) == []
+
+    def test_a_host_run_that_cannot_be_done_is_exit_1(self, tmp_path: Path, install_host: Any, mocker: Any) -> None:
+        """Should fail with the usual message when the diagnosing run itself fails."""
+        install_host.generator.side_effect = answer_by_run(
+            staged=GeneratorRun(returncode=0, stderr=""),
+            host=SystemdError("The Quadlet generator could not run: Exec format error"),
+        )
+        _systemctl(mocker, missing=frozenset({"mosquitto.service"}))
+        prepared = _prepare(tmp_path)
+        try:
+            with raises(SystemdError, match=r"systemd does not know mosquitto\.service") as info:
+                install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        assert "nothing was rolled back" in str(info.value).lower()
+
+    def test_two_missing_services_are_diagnosed_in_one_host_run(self, tmp_path: Path, install_host: Any, mocker: Any) -> None:
+        """Should run the host generator once for all missing services and warn for each, in unit order."""
+        install_host.generator.side_effect = answer_by_run(
+            staged=GeneratorRun(returncode=0, stderr=""),
+            host=GeneratorRun(
+                returncode=1,
+                stderr=_generator_lines(("mosquitto.container", "owner.volume"), ("other.container", "owner.network")),
+            ),
+        )
+        _systemctl(mocker, missing=frozenset({"mosquitto.service", "other.service"}))
+        members = _members({"mosquitto.container": F_UNIT, "other.container": NETWORK_UNIT})
+        prepared = _prepare_members(tmp_path, members)
+        try:
+            result = install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        assert len(_host_runs(install_host.generator)) == 1
+        assert result.warnings == (
+            VOLUME_WARNING,
+            "other.container references owner.network, which is not installed on this host. "
+            "other.service is generated once owner.network is installed and systemd is reloaded.",
+        )
+
+    def test_happy_path_runs_no_host_run_and_issues_the_expected_systemctl_calls(
+        self, tmp_path: Path, install_host: Any, mocker: Any
+    ) -> None:
+        """Should make one generator run (the staged tree) and exactly show-environment, daemon-reload and cat."""
+        run = _systemctl(mocker)
+        prepared = _prepare(tmp_path)
+        try:
+            result = install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        assert len(install_host.generator.call_args_list) == 1
+        assert install_host.generator.call_args.args[0] is not None
+        assert [call.args[0][2:] for call in run.call_args_list] == [
+            ["show-environment"],
+            ["daemon-reload"],
+            ["cat", "mosquitto.service"],
+        ]
+        assert result.warnings == ()
+        assert result.services == ("mosquitto.service",)
+
+
+class TestMissingServiceMessage:
+    """The exit-1 message keeps the generator lines short."""
+
+    def test_a_long_generator_error_is_trimmed_in_the_message(self, tmp_path: Path, install_host: Any, mocker: Any) -> None:
+        """Should trim a very long error line of the failing unit, so the message stays readable."""
+        long_error = 'quadlet-generator[1]: converting "mosquitto.container": ' + "x" * 2000
+        install_host.generator.side_effect = answer_by_run(
+            staged=GeneratorRun(returncode=0, stderr=""),
+            host=GeneratorRun(returncode=1, stderr=_generator_lines(errors=(long_error,))),
+        )
+        _systemctl(mocker, missing=frozenset({"mosquitto.service"}))
+        prepared = _prepare(tmp_path)
+        try:
+            with raises(SystemdError) as info:
+                install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        message = str(info.value)
+        assert "x" * 500 in message
+        assert "x" * 700 not in message
+        assert "x..." in message

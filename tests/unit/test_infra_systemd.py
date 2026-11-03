@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
-from pytest import fixture, raises
+from pytest import fixture, mark, raises
 
 from margot.infra import systemd
 
@@ -195,6 +195,26 @@ class TestGeneratorRun:
         systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", environ)
 
         assert "QUADLET_UNIT_DIRS" not in environ
+
+    def test_without_a_unit_dir_the_real_search_path_is_used(self, mocker: Any) -> None:
+        """Should run the dry run with the default search path: no QUADLET_UNIT_DIRS, even if the caller has one."""
+        run = mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "", "bad unit"))
+
+        result = systemd.check_units(None, "/usr/libexec/podman/quadlet", {**ENVIRON, "QUADLET_UNIT_DIRS": "/stale"})
+
+        assert run.call_args.args[0] == ["/usr/libexec/podman/quadlet", "-dryrun", "-user"]
+        env = run.call_args.kwargs["env"]
+        assert "QUADLET_UNIT_DIRS" not in env
+        assert env["PATH"] == "/usr/bin:/bin"
+        assert result == systemd.GeneratorRun(returncode=1, stderr="bad unit")
+
+    @mark.parametrize("error", [OSError("Exec format error"), subprocess.TimeoutExpired(cmd="quadlet", timeout=120)])
+    def test_a_generator_that_cannot_run_is_a_systemd_error(self, mocker: Any, tmp_path: Path, error: Exception) -> None:
+        """Should raise SystemdError, not the raw OS or timeout error, so the caller can exit with the install message."""
+        mocker.patch("margot.infra.systemd.run", side_effect=error)
+
+        with raises(systemd.SystemdError, match=r"could not run the Quadlet generator"):
+            systemd.check_units(tmp_path, "/usr/libexec/podman/quadlet", ENVIRON)
 
 
 class TestUnitKnown:

@@ -107,14 +107,23 @@ def quadlet_binary() -> str | None:
     return which("quadlet")
 
 
-def check_units(unit_dir: Path, binary: str, environ: Mapping[str, str]) -> GeneratorRun:
-    """Run `<binary> -dryrun -user` with ``QUADLET_UNIT_DIRS`` pointing at the staged tree (sprint-13 §3.10).
+def check_units(unit_dir: Path | None, binary: str, environ: Mapping[str, str]) -> GeneratorRun:
+    """Run `<binary> -dryrun -user` and return its exit status and stderr (sprint-13 §3.10, guards 2 and 3).
 
-    The generator replaces the default search path with ``unit_dir``, so the dry run sees only the staged
-    files. Its generated services stay on stdout and are not returned. The environment is the caller's,
-    plus ``QUADLET_UNIT_DIRS``. The exit status and the raw stderr are returned; the domain layer judges them.
+    With ``unit_dir``, ``QUADLET_UNIT_DIRS`` replaces the search path, so the dry run sees only the staged
+    tree (guard 2). With None, the variable is removed and the generator scans the real Quadlet search path
+    (guard 3). The generated services on stdout are not kept; the domain layer judges the stderr.
+
+    Raises:
+        SystemdError: If the generator cannot be started or does not finish in time.
     """
-    result = run([binary, "-dryrun", "-user"], env={**environ, "QUADLET_UNIT_DIRS": str(unit_dir)})
+    env = {key: value for key, value in environ.items() if key != "QUADLET_UNIT_DIRS"}
+    if unit_dir is not None:
+        env["QUADLET_UNIT_DIRS"] = str(unit_dir)
+    try:
+        result = run([binary, "-dryrun", "-user"], env=env)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise SystemdError(f"margot could not run the Quadlet generator ({binary}): {error}") from error
     console.debug(f"Quadlet generator dry run exited with status {result.returncode}.")
     return GeneratorRun(returncode=result.returncode, stderr=result.stderr)
 

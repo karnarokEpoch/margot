@@ -18,6 +18,7 @@ from margot.infra.systemd import GeneratorRun
 from margot.main import app
 from tests.integration._install_helpers import (
     REPOSITORY,
+    answer_by_run,
     app_description,
     build_project,
     build_static_folder,
@@ -764,3 +765,65 @@ class TestUnresolvedReferences:
         assert "owner.network was not found" not in result.output
         assert not (xdg / "com-belden-mosquitto").exists()
         systemctl.assert_not_called()
+
+
+VOLUME_WARNING_START = "mosquitto.container references owner.volume, which is not installed on this host."
+
+
+class TestMissingServiceAfterWrite:
+    """A unit whose second reference is missing is installed with a warning; a real error is exit 1 (sprint-13 §3.10)."""
+
+    @fixture
+    def cat_fails_for_mosquitto(self, mocker: Any) -> Any:
+        """systemctl --user: `cat mosquitto.service` fails (systemd does not know it); other calls succeed."""
+        mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
+
+        def run(argv: list[str], **_kwargs: Any) -> Any:
+            if argv[2] == "cat" and argv[3] == "mosquitto.service":
+                return _completed(1, "No files found for mosquitto.service.")
+            return _completed(0)
+
+        return mocker.patch("margot.infra.systemd.run", side_effect=run)
+
+    def test_missing_second_reference_exits_0_and_prints_one_warning(
+        self, tmp_path: Path, xdg: Path, install_host: Any, cat_fails_for_mosquitto: Any
+    ) -> None:
+        """Should exit 0 and print one warning naming the missing volume; the service is not required."""
+        existing = xdg / "handmade" / "owner.network"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("[Network]\n", encoding="utf-8")
+        install_host.generator.side_effect = answer_by_run(
+            staged=GeneratorRun(returncode=1, stderr=_unresolved_stderr(("mosquitto.container", "owner.network"))),
+            host=GeneratorRun(returncode=1, stderr=_unresolved_stderr(("mosquitto.container", "owner.volume"))),
+        )
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 0
+        text = _flat(result.output)
+        assert text.count(VOLUME_WARNING_START) == 1
+        assert "mosquitto.service is generated once owner.volume is installed" in text
+        assert "nothing was rolled back" not in text.lower()
+        assert (xdg / "com-belden-mosquitto" / "mosquitto.container").is_file()
+
+    def test_real_error_behind_the_reference_exits_1_and_shows_the_error(
+        self, tmp_path: Path, xdg: Path, install_host: Any, cat_fails_for_mosquitto: Any
+    ) -> None:
+        """Should exit 1 with the real error line, and say that the files were kept."""
+        error = "quadlet-generator[1]: converting \"mosquitto.container\": unsupported key 'NoSuchKey' in group 'Container'"
+        install_host.generator.side_effect = answer_by_run(
+            staged=GeneratorRun(returncode=0, stderr=""),
+            host=GeneratorRun(
+                returncode=1, stderr=_unresolved_stderr(("mosquitto.container", "owner.volume"), errors=(error,))
+            ),
+        )
+        args, _ = _project_args(tmp_path)
+
+        result = runner.invoke(app, ["install", *args, "--yes"])
+
+        assert result.exit_code == 1
+        assert "NoSuchKey" in result.output
+        assert "owner.volume" not in result.output
+        assert "nothing was rolled back" in _flat(result.output).lower()
+        assert (xdg / "com-belden-mosquitto" / "mosquitto.container").is_file()

@@ -82,7 +82,11 @@ class PreparedInstall:
 
 @dataclass(frozen=True)
 class InstallResult:
-    """What apply_install did. ``services`` are the services generated now; deferred ones are not listed."""
+    """What apply_install did. ``services`` are the services generated now; deferred ones are not listed.
+
+    ``warnings`` are the messages found after the write (a unit whose reference is missing on the host).
+    The command prints them.
+    """
 
     app_dir: Path
     unit_files: tuple[str, ...]
@@ -90,6 +94,7 @@ class InstallResult:
     start_services: tuple[str, ...]
     wanted_services: tuple[str, ...]
     files: tuple[str, ...]
+    warnings: tuple[str, ...] = ()
 
 
 def detect_source(uri: str | None, project_dir: str | None) -> str:
@@ -170,9 +175,10 @@ def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
         raise systemd.SystemdError(
             f"{error} Files were written to {app_dir} and nothing was rolled back. Fix the cause and run install again."
         ) from error
-    _verify_services(app_dir, plan, prepared.deferred)
+    warnings, deferred_now = _verify_services(app_dir, plan, prepared.deferred)
 
-    generated = tuple(unit for unit in plan.units if unit.service not in prepared.deferred)
+    not_generated = set(prepared.deferred) | set(deferred_now)
+    generated = tuple(unit for unit in plan.units if unit.service not in not_generated)
     return InstallResult(
         app_dir=app_dir,
         unit_files=tuple(unit.relpath for unit in plan.units),
@@ -180,6 +186,7 @@ def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
         start_services=tuple(domain.start_targets(generated)),
         wanted_services=tuple(unit.service for unit in generated if unit.default_target),
         files=plan.files,
+        warnings=warnings,
     )
 
 
@@ -432,12 +439,17 @@ def _guard_generator(staging: Path, file_sources: dict[str, Path], found: list[s
         if reference.name in on_host:
             continue
         service = domain.unit_service_name(reference.unit)
-        warnings.append(
-            f"{reference.unit} references {reference.name}, which is not installed on this host. "
-            f"{service} is generated once {reference.name} is installed and systemd is reloaded."
-        )
+        warnings.append(_reference_warning(reference.unit, reference.name, service))
         deferred.append(service)
     return tuple(dict.fromkeys(warnings)), tuple(dict.fromkeys(deferred))
+
+
+def _reference_warning(unit: str, name: str, service: str) -> str:
+    """The one warning for a unit that refers to a unit the host does not have (sprint-13 §3.10)."""
+    return (
+        f"{unit} references {name}, which is not installed on this host. "
+        f"{service} is generated once {name} is installed and systemd is reloaded."
+    )
 
 
 def _trimmed(text: str) -> str:
@@ -447,27 +459,78 @@ def _trimmed(text: str) -> str:
     return cleaned[:_MAX_DETAIL_CHARS] + "..."
 
 
-def _verify_services(app_dir: Path, plan: InstallPlan, deferred: tuple[str, ...]) -> None:
+def _verify_services(
+    app_dir: Path, plan: InstallPlan, deferred: tuple[str, ...]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Every expected service must be known to systemd after daemon-reload (sprint-13 §3.10, guard 3).
 
-    Services deferred by an unresolved reference are not checked; their warning explains them. Nothing else
-    is exempt.
+    A service that systemd does not know is explained by the host generator. It runs once, with the real
+    search path, for all such services. A unit whose only generator problems are unresolved references is a
+    warning, and its service is deferred: it is generated once the referenced unit is installed. Any other
+    unknown service fails the install, and the message shows the generator lines of its unit when there are any.
+
+    Args:
+        deferred: Services already deferred by guard 2. They are not checked.
+
+    Returns:
+        The warnings to print, and the services deferred by this check.
 
     Raises:
-        systemd.SystemdError: At least one service is unknown, so the generator rejected its unit file (exit 1).
+        systemd.SystemdError: At least one unknown service has no reference-only explanation (exit 1).
     """
     missing = [unit for unit in plan.units if unit.service not in deferred and not systemd.unit_is_known(unit.service)]
     if not missing:
-        return
+        return (), ()
+    diagnosis = _host_diagnosis()
+    warnings: list[str] = []
+    deferred_now: list[str] = []
+    failing: list[domain.UnitFile] = []
+    for unit in missing:
+        references = domain.reference_only(diagnosis.get(Path(unit.relpath).name))
+        if not references:
+            failing.append(unit)
+            continue
+        warnings.extend(_reference_warning(reference.unit, reference.name, unit.service) for reference in references)
+        deferred_now.append(unit.service)
+    if failing:
+        raise systemd.SystemdError(_missing_message(app_dir, failing, diagnosis))
+    return tuple(dict.fromkeys(warnings)), tuple(deferred_now)
+
+
+def _host_diagnosis() -> dict[str, domain.UnitDiagnosis]:
+    """Run the Quadlet generator once with the real search path and group its output by unit file.
+
+    Returns an empty mapping when the generator is not found or cannot run; every missing service then fails.
+    """
+    binary = systemd.quadlet_binary()
+    if binary is None:
+        return {}
+    try:
+        run = systemd.check_units(None, binary, os.environ)
+    except systemd.SystemdError:
+        return {}
+    return domain.group_generator_output(run.stderr)
+
+
+def _missing_message(app_dir: Path, failing: list[domain.UnitFile], diagnosis: dict[str, domain.UnitDiagnosis]) -> str:
+    """The exit-1 message for services that systemd does not know, with the generator lines of their units."""
     lines = [
-        f"systemd does not know {unit.service} after daemon-reload (unit file {app_dir / unit.relpath})." for unit in missing
+        f"systemd does not know {unit.service} after daemon-reload (unit file {app_dir / unit.relpath})." for unit in failing
     ]
+    details = [line for unit in failing for line in _errors_of(diagnosis, unit)]
+    if details:
+        lines.append(_trimmed("\n".join(details)))
     lines.append(
         f"The Quadlet generator probably rejected the file. Check it with: QUADLET_UNIT_DIRS={app_dir} "
         "/usr/libexec/podman/quadlet -dryrun -user, or read journalctl --user -b -t quadlet-generator."
     )
     lines.append(f"Files were written to {app_dir} and nothing was rolled back. Fix the cause and run install again.")
-    raise systemd.SystemdError("\n".join(lines))
+    return "\n".join(lines)
+
+
+def _errors_of(diagnosis: dict[str, domain.UnitDiagnosis], unit: domain.UnitFile) -> tuple[str, ...]:
+    found = diagnosis.get(Path(unit.relpath).name)
+    return found.errors if found is not None else ()
 
 
 def _read_text(path: Path) -> str:

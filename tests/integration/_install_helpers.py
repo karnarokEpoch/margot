@@ -4,6 +4,9 @@ import io
 from pathlib import Path
 import re
 import tarfile
+from typing import Any
+
+from margot.infra.systemd import GeneratorRun
 
 MOSQUITTO_QUADLET_REVISION = "1.0.2+mosquitto-quadlet"
 MOSQUITTO_QUADLET_TAG = "1.0.2_mosquitto-quadlet"
@@ -116,3 +119,21 @@ def build_static_folder(root: Path, *, descriptor: str | None = None, members: d
     component_dir = folder / "mosquitto-quadlet"
     write_tar(component_dir / "bundle.tgz", members if members is not None else quadlet_payload())
     return folder
+
+
+def answer_by_run(staged: GeneratorRun, host: GeneratorRun | BaseException) -> Any:
+    """A stand-in for ``systemd.check_units`` that answers the two kinds of run differently.
+
+    A call with a unit directory is the staged-tree dry run (guard 2) and gets ``staged``. A call with
+    ``None`` is the host run that uses the real search path (guard 3) and gets ``host``, or raises it when
+    ``host`` is an exception.
+    """
+
+    def check(unit_dir: Path | None, _binary: str, _environ: Any) -> GeneratorRun:
+        if unit_dir is not None:
+            return staged
+        if isinstance(host, BaseException):
+            raise host
+        return host
+
+    return check

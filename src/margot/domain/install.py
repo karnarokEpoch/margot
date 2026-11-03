@@ -403,6 +403,7 @@ _UNRESOLVED_REFERENCE = re.compile(
     r'converting "(?P<unit>[^"]+)": requested Quadlet (?:unit|source|image) (?P<name>\S+) was not found$'
 )
 _UNRESOLVED_POD = re.compile(r'converting "(?P<unit>[^"]+)": quadlet pod unit (?P<name>\S+) does not exist$')
+_UNIT_LINE = re.compile(r'converting "(?P<unit>[^"]+)": ')
 
 
 @dataclass(frozen=True)
@@ -473,6 +474,47 @@ def judge_generator(returncode: int, report: GeneratorReport) -> GeneratorVerdic
     if report.unresolved:
         return GeneratorVerdict(passed=True, errors=(), unresolved=report.unresolved)
     return GeneratorVerdict(passed=False, errors=(f"quadlet generator exited with status {returncode}",), unresolved=())
+
+
+@dataclass(frozen=True)
+class UnitDiagnosis:
+    """What the generator printed about one unit file: its unresolved references and its other error lines."""
+
+    references: tuple[UnresolvedReference, ...]
+    errors: tuple[str, ...]
+
+
+def group_generator_output(text: str) -> dict[str, UnitDiagnosis]:
+    """Sort generator stderr by the unit file each line names (``converting "<unit>": …``).
+
+    Progress lines, the closing summary and lines that name no unit are left out: nothing ties them to a unit.
+    Keys are the unit file names as the generator prints them (base names).
+    """
+    references: dict[str, list[UnresolvedReference]] = {}
+    errors: dict[str, list[str]] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        named = _UNIT_LINE.search(line)
+        if named is None:
+            continue
+        unit = named.group("unit")
+        found = _UNRESOLVED_REFERENCE.search(line) or _UNRESOLVED_POD.search(line)
+        if found is None:
+            errors.setdefault(unit, []).append(line)
+        else:
+            references.setdefault(unit, []).append(UnresolvedReference(unit=unit, name=found.group("name")))
+    units = dict.fromkeys([*references, *errors])
+    return {
+        unit: UnitDiagnosis(references=tuple(references.get(unit, ())), errors=tuple(errors.get(unit, ())))
+        for unit in units
+    }
+
+
+def reference_only(diagnosis: UnitDiagnosis | None) -> tuple[UnresolvedReference, ...]:
+    """The unresolved references of a unit whose only generator problems are references; () otherwise."""
+    if diagnosis is None or diagnosis.errors:
+        return ()
+    return diagnosis.references
 
 
 def check_payload(component_name: str, relpaths: list[str]) -> None:

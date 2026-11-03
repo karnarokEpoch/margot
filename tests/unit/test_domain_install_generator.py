@@ -7,7 +7,7 @@ ones the host printed; they are not significant.
 
 from pytest import mark
 
-from margot.domain.install import judge_generator, parse_generator_stderr
+from margot.domain.install import group_generator_output, judge_generator, parse_generator_stderr, reference_only
 
 PROGRESS_A = "quadlet-generator[811023]: Loading source unit file /tmp/gen-ref/app/a.container"
 PROGRESS_B = "quadlet-generator[811023]: Loading source unit file /tmp/gen-ref/app/b.container"
@@ -148,3 +148,61 @@ class TestJudgeGenerator:
         assert verdict.passed is False
         assert verdict.errors == ("quadlet generator exited with status 1",)
         assert verdict.unresolved == ()
+
+
+SYNTAX_A = 'quadlet-generator[811023]: converting "a.container": unsupported key \'NoSuchKey\' in group \'Container\''
+
+
+class TestGroupGeneratorOutput:
+    """Generator output sorted by the unit file each line names (sprint-13 §3.10, guard 3 diagnosis)."""
+
+    def test_references_and_errors_are_grouped_by_their_unit(self) -> None:
+        """Should keep each unit's references and error lines under its unit file name."""
+        grouped = group_generator_output(_stderr(PROGRESS_A, NETWORK_A, VOLUME, SYNTAX_C, SUMMARY))
+
+        assert set(grouped) == {"a.container", "v.container", "c.container"}
+        assert [ref.name for ref in grouped["a.container"].references] == ["nothere.network"]
+        assert grouped["a.container"].errors == ()
+        assert grouped["c.container"].references == ()
+        assert grouped["c.container"].errors == (SYNTAX_C,)
+
+    def test_a_unit_with_a_reference_and_an_error_has_both(self) -> None:
+        """Should record both kinds for one unit, so the verdict can refuse it."""
+        grouped = group_generator_output(_stderr(NETWORK_A, SYNTAX_A, SUMMARY))
+
+        assert [ref.name for ref in grouped["a.container"].references] == ["nothere.network"]
+        assert grouped["a.container"].errors == (SYNTAX_A,)
+
+    def test_lines_that_name_no_unit_are_not_grouped(self) -> None:
+        """Should leave out lines that name no unit, because they cannot be tied to a missing service."""
+        assert group_generator_output(_stderr("quadlet-generator[1]: something new went wrong", SUMMARY)) == {}
+
+    def test_empty_text_gives_no_groups(self) -> None:
+        """Should return an empty mapping for empty stderr."""
+        assert group_generator_output("") == {}
+
+
+class TestReferenceOnly:
+    """A missing service may be explained by references alone; any other error line keeps it a failure."""
+
+    def test_a_unit_with_only_references_returns_them(self) -> None:
+        """Should return the references of a unit whose only problems are unresolved references."""
+        diagnosis = group_generator_output(_stderr(NETWORK_A))["a.container"]
+
+        assert [ref.name for ref in reference_only(diagnosis)] == ["nothere.network"]
+
+    def test_a_reference_beside_an_error_returns_nothing(self) -> None:
+        """Should return nothing when the same unit also has a real error."""
+        diagnosis = group_generator_output(_stderr(NETWORK_A, SYNTAX_A))["a.container"]
+
+        assert reference_only(diagnosis) == ()
+
+    def test_a_unit_with_only_an_error_returns_nothing(self) -> None:
+        """Should return nothing for a unit that has no reference."""
+        diagnosis = group_generator_output(_stderr(SYNTAX_C))["c.container"]
+
+        assert reference_only(diagnosis) == ()
+
+    def test_no_diagnosis_returns_nothing(self) -> None:
+        """Should return nothing when the unit does not appear in the generator output at all."""
+        assert reference_only(None) == ()

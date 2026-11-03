@@ -281,6 +281,22 @@ class TestMergeComponents:
             )
 
 
+    def test_same_file_name_in_two_directories_of_one_component_is_refused(self) -> None:
+        """Should refuse a/x.container and b/x.container in one component: Quadlet would load only one of them."""
+        with raises(ValueError, match=r"both generate 'x.service'"):
+            merge_components([ComponentFiles(name="a", source_key="k1", files=("a/x.container", "b/x.container"))])
+
+    def test_same_file_name_in_two_directories_of_two_components_is_refused(self) -> None:
+        """Should refuse x.container from two components even when one sits in a sub-directory."""
+        with raises(ValueError, match=r"both generate 'x.service'"):
+            merge_components(
+                [
+                    ComponentFiles(name="a", source_key="k1", files=("a/x.container",)),
+                    ComponentFiles(name="b", source_key="k2", files=("x.container",)),
+                ]
+            )
+
+
 class TestStartTargets:
     """Only workloads get a printed start command (sprint-13 §3.7, decision note in §4)."""
 
