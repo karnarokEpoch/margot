@@ -42,9 +42,6 @@ served with a private or self-signed CA:
 REQUESTS_CA_BUNDLE=./ca.crt margot push --registry 127.0.0.1:15000 ...
 ```
 
-A later release will read CA files from the standard containers `certs.d` directories,
-removing the need for this environment variable.
-
 ## Flags
 
 | Flag            | Default                    | Description                                                    |
