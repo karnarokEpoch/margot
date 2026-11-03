@@ -14,6 +14,37 @@ margot push [--type margo|compose|quadlet|all] [--project-dir PATH]
 - Registry credentials must be active. Run [`margot auth login`](auth.md) if needed.
 - The version tag must be valid SemVer. `push` validates this before doing anything else.
 
+## Registry authentication
+
+### Basic authentication
+
+Registries that use HTTP Basic auth (RFC 7617) — such as a self-hosted zot or a
+`registry:2` image with htpasswd — are supported. Log in once, then push works without
+extra steps:
+
+```bash
+margot auth login 127.0.0.1:15000
+margot push --registry 127.0.0.1:15000
+```
+
+margot answers the Basic challenge automatically. The first request to a fresh session
+may take a few seconds if the registry delays unauthenticated responses.
+
+Missing or rejected credentials exit 4 with a `margot auth login <host>` hint.
+
+### Private CA
+
+margot uses Python `requests` for registry HTTP. The CA set is `REQUESTS_CA_BUNDLE` or
+`CURL_CA_BUNDLE` if either is set, otherwise the bundled `certifi` store. For a registry
+served with a private or self-signed CA:
+
+```bash
+REQUESTS_CA_BUNDLE=./ca.crt margot push --registry 127.0.0.1:15000 ...
+```
+
+A later release will read CA files from the standard containers `certs.d` directories,
+removing the need for this environment variable.
+
 ## Flags
 
 | Flag            | Default                    | Description                                                    |
@@ -38,7 +69,7 @@ The probe opens an OCI blob-upload session (`POST /v2/<repository>/blobs/uploads
 resolved credentials. No content is sent:
 
 - `202 Accepted` → write access confirmed. The upload session is immediately cancelled.
-- `401` / `403` → no write access. Error, exit 1.
+- `401` / `403` → no write access. Error, exit 4.
 - Any other status → surfaced as-is, exit 1.
 
 The probe runs once per unique `(registry, repository)` pair per invocation — a single
@@ -78,12 +109,12 @@ The descriptor is always the first layer:
 Resource layers are discovered in two steps:
 
 1. **Referenced files** — the `app.yaml` fields `metadata.catalog.application.icon`,
-   `.descriptionFile`, `.licenseFile`, and `.releaseNotes` (paths relative to the margo build dir,
-   any extension, a leading `./` is ignored). Each found file is pushed with a semantically typed
-   media type. A value that is an `http://` or `https://` URL is not a local file: it is left
-   as-is in the descriptor and nothing is pushed or warned for it.
+    `.descriptionFile`, `.licenseFile`, and `.releaseNotes` (paths relative to the margo build dir,
+    any extension, a leading `./` is ignored). Each found file is pushed with a semantically typed
+    media type. A value that is an `http://` or `https://` URL is not a local file: it is left
+    as-is in the descriptor and nothing is pushed or warned for it.
 2. **Extra files** — any other file under `resources/` (including sub-folders) not already pushed
-   in step 1, each with `application/octet-stream`.
+    in step 1, each with `application/octet-stream`.
 
 A referenced file is pushed exactly once. If a field is set but the file is missing from the
 build output, margot emits a warning to stderr and continues — the push is not blocked:
@@ -94,8 +125,8 @@ build output, margot emits a warning to stderr and continues — the push is not
 
 #### Media types for referenced files
 
-| `app.yaml` field  | Media type template                                      |
-| ----------------- | -------------------------------------------------------- |
+| `app.yaml` field  | Media type template                                     |
+| ----------------- | ------------------------------------------------------- |
 | `icon`            | `application/vnd.margo.app.icon.v1+{format}`            |
 | `descriptionFile` | `application/vnd.margo.app.descriptionFile.v1+{format}` |
 | `licenseFile`     | `application/vnd.margo.app.licenseFile.v1+{format}`     |
@@ -106,32 +137,32 @@ build output, margot emits a warning to stderr and continues — the push is not
 Derived from the file extension, following the Margo spec
 ([Application Registry](https://docs.margo.org/specification/applications/application-registry)):
 
-| Extension(s)        | Token                               |
-| ------------------- | ----------------------------------- |
-| `jpg`, `jpeg`       | `jpeg`                              |
-| `tif`, `tiff`       | `tiff`                              |
-| `md`, `markdown`    | `markdown`                          |
-| any other extension | lowercased as-is (`svg`, `png`, …)  |
-| (no extension)      | `bin`                               |
+| Extension(s)        | Token                              |
+| ------------------- | ---------------------------------- |
+| `jpg`, `jpeg`       | `jpeg`                             |
+| `tif`, `tiff`       | `tiff`                             |
+| `md`, `markdown`    | `markdown`                         |
+| any other extension | lowercased as-is (`svg`, `png`, …) |
+| (no extension)      | `bin`                              |
 
 Examples:
 
-| File                         | Field           | Media type                                             |
-| ---------------------------- | --------------- | ------------------------------------------------------ |
-| `resources/icon.svg`         | `icon`          | `application/vnd.margo.app.icon.v1+svg`               |
-| `resources/photo.JPG`        | `icon`          | `application/vnd.margo.app.icon.v1+jpeg`              |
-| `resources/release-notes.md` | `releaseNotes`  | `application/vnd.margo.app.releaseNotes.v1+markdown`  |
-| `resources/license.txt`      | `licenseFile`   | `application/vnd.margo.app.licenseFile.v1+txt`        |
+| File                         | Field          | Media type                                           |
+| ---------------------------- | -------------- | ---------------------------------------------------- |
+| `resources/icon.svg`         | `icon`         | `application/vnd.margo.app.icon.v1+svg`              |
+| `resources/photo.JPG`        | `icon`         | `application/vnd.margo.app.icon.v1+jpeg`             |
+| `resources/release-notes.md` | `releaseNotes` | `application/vnd.margo.app.releaseNotes.v1+markdown` |
+| `resources/license.txt`      | `licenseFile`  | `application/vnd.margo.app.licenseFile.v1+txt`       |
 
 #### Layer annotations
 
 Every resource layer (referenced and extra) carries both annotations.
 The descriptor layer (`app.yaml`) does not carry `org.margo.app.resource`.
 
-| Annotation                       | Value                                                                     |
-| -------------------------------- | ------------------------------------------------------------------------- |
+| Annotation                       | Value                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------ |
 | `org.opencontainers.image.title` | path relative to the margo build dir, e.g. `resources/screenshots/a.png` |
-| `org.margo.app.resource`         | `"true"`                                                                  |
+| `org.margo.app.resource`         | `"true"`                                                                 |
 
 ### compose / quadlet artifact
 
@@ -153,14 +184,19 @@ Annotations pushed with compose/quadlet:
 
 ## Exit codes
 
-| Code | Meaning                                                                                                          |
-| ---- | ---------------------------------------------------------------------------------------------------------------- |
-| 0    | All artifacts pushed (or dry run passed).                                                                        |
-| 1    | SemVer validation failed, artifact not built, credentials expired, registry error, or no write access (dry run). |
+| Code | Meaning                                                                                      |
+| ---- | -------------------------------------------------------------------------------------------- |
+| 0    | All artifacts pushed (or dry run passed).                                                    |
+| 2    | Invalid flag value detected before any work begins (e.g. unknown `--type`).                  |
+| 3    | SemVer validation failed, or a required artifact was not found on disk.                      |
+| 4    | Credentials missing or expired, registry rejected credentials, or no write access (dry run). |
+| 1    | Unexpected failure.                                                                          |
 
 ## Common errors
 
 - **`Credentials expired`** — run `margot auth login public.ecr.aws`.
+- **`Registry requires authentication`** — run `margot auth login <host>`.
+- **`Registry rejected the stored credentials`** — run `margot auth login <host>` to replace them.
 - **`Invalid tag`** — version from `margo.yaml` or `--version` is not valid SemVer.
 - **Artifact not found on disk** — run `margot build` first.
 
