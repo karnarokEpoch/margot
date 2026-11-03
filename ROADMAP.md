@@ -80,6 +80,9 @@ Unordered within groups; sequencing decided at sprint planning.
   `--password` (insecure, warns; mutually exclusive with `--password-stdin`) and a hidden prompt on a
   terminal. Full plan at
   [`.kiro/sprints/fix-auth-login-password.md`](.kiro/sprints/fix-auth-login-password.md).
+- **fix:** registry HTTP 401 without a `WWW-Authenticate` header exits 3, not 4. oras-py raises a plain
+  `ValueError` before `_check_200_response`, so the shared remote path maps it to exit 3 (429 responses
+  fail the same way). Fix in `infra/oci.py`.
 
 ### Display UX
 
@@ -159,6 +162,10 @@ Known, accepted limitations of the first version — documented in `docs/command
 - **Install a bare compose/quadlet component by URI** (no application, no profile).
 - **`--json` for `install`**: fold into the action-commands `--json` item under Display UX.
 - **Runtime selection** (`--runtime`), if a host with both Podman and Docker needs a choice.
+- **Errors hidden behind an unresolved reference.** The Quadlet generator names one unresolved reference per
+  unit. A real error that it reports only after that reference resolves is not caught before the write: the
+  unit gets the reference warning and install exits 0. Not reproduced on the host; not yet in
+  `docs/commands/install.md`.
 
 ---
 
