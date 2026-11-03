@@ -32,10 +32,12 @@ the registry returns is shown as-is.
 
 ## Exit codes
 
-| Code | Meaning                                                |
-| ---- | ------------------------------------------------------ |
-| 0    | Manifest fetched and printed.                          |
-| 1    | Invalid URI, manifest fetch failed, or registry error. |
+| Code | Meaning                                                                                                                                  |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Manifest fetched and printed.                                                                                                            |
+| 1    | Unexpected failure.                                                                                                                      |
+| 3    | Invalid URI or other semantic input failure.                                                                                             |
+| 4    | Registry or authentication failure, including an HTTP error status such as 429, a 5xx, or a 404 for a missing tag.                      |
 
 ## Example
 

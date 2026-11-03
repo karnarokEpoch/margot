@@ -153,10 +153,12 @@ Annotations pushed with compose/quadlet:
 
 ## Exit codes
 
-| Code | Meaning                                                                                                          |
-| ---- | ---------------------------------------------------------------------------------------------------------------- |
-| 0    | All artifacts pushed (or dry run passed).                                                                        |
-| 1    | SemVer validation failed, artifact not built, credentials expired, registry error, or no write access (dry run). |
+| Code | Meaning                                                                                                                                  |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | All artifacts pushed (or dry run passed).                                                                                                |
+| 1    | Unexpected failure.                                                                                                                      |
+| 3    | SemVer validation failed or artifact not built.                                                                                          |
+| 4    | Credentials expired, registry error (including an HTTP error status such as 429 or a 5xx on an upload), or no write access.             |
 
 ## Common errors
 
