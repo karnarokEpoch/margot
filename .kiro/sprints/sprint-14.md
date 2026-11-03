@@ -408,6 +408,6 @@ TDD throughout. Each task is one or more conventional commits on its item's bran
 
 - [sprint-workflow skill](../skills/sprint-workflow/SKILL.md)
 - [ROADMAP.md](../../ROADMAP.md)
-- [sprint-11.md](./sprint-11.md), [sprint-12.md](./sprint-12.md) — prerequisites.
+- Sprint 11 (shipped in 0.11.0), [sprint-12.md](./sprint-12.md) — prerequisites.
 - Steering: `code-conventions.md`, `rich-rendering.md`, `oci-media-types.md`,
   `documentation.md`.
