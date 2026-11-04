@@ -33,6 +33,32 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
 
+      - name: Start podman API socket
+        run: |
+          set -euo pipefail
+          # Give this job its own runtime dir and export it, so the service below and the
+          # code under test (_resolve_podman_socket_uri reads XDG_RUNTIME_DIR first) agree.
+          runtime_dir="${RUNNER_TEMP}/podman-runtime"
+          mkdir -p "${runtime_dir}/podman"
+          chmod 700 "${runtime_dir}"
+          echo "XDG_RUNTIME_DIR=${runtime_dir}" >> "$GITHUB_ENV"
+
+          socket="${runtime_dir}/podman/podman.sock"
+          log="${RUNNER_TEMP}/podman-service.log"
+          XDG_RUNTIME_DIR="${runtime_dir}" setsid nohup \
+            podman system service --time=0 "unix://${socket}" >"${log}" 2>&1 </dev/null &
+
+          for _ in $(seq 1 20); do
+            if curl -fsS --unix-socket "${socket}" http://localhost/_ping >/dev/null 2>&1; then
+              echo "podman API socket ready at ${socket}"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "podman API socket did not become ready at ${socket}" >&2
+          cat "${log}" >&2
+          exit 1
+
       - name: pytest
         if: matrix.python-version != '3.12'
         run: make test
