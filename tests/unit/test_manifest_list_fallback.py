@@ -535,9 +535,10 @@ class TestResolveAllPlatformsRealSocket:
         if PodmanClient is None:
             skip("PodmanClient SDK not available")
 
+        # PodmanClient() is lazy and never touches the socket, so the request must be explicit.
         socket_uri = package_service._resolve_podman_socket_uri()
         try:
-            PodmanClient(base_url=socket_uri).close()
+            PodmanClient(base_url=socket_uri).version()
         except Exception as e:  # noqa: BLE001
             skip(f"Podman socket not reachable at {socket_uri}: {e}")
 
