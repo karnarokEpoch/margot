@@ -3,7 +3,9 @@ name: Container
 # Reusable multi-arch (linux/amd64 + linux/arm64) container build.
 #   release: true  -> use the release wheel artifact, push to GHCR (:<version> and :latest)
 #   release: false -> build the wheel here, push to a throwaway local registry (check only)
-# The caller must grant `packages: write` when release is true.
+# Permissions are inherited from the caller (no job-level `permissions:` here, since a called
+# workflow cannot request more than its caller grants). The caller must grant `contents: read`,
+# and `packages: write` when release is true.
 
 on:
   workflow_call:
@@ -16,9 +18,6 @@ on:
 jobs:
   container:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write # only exercised when inputs.release is true; the caller grants it
 
     steps:
       - uses: actions/checkout@v4
