@@ -1,9 +1,11 @@
 """Pure-Python filesystem helpers for build operations."""
 
+from hashlib import sha256
 from os import fdopen
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from re import findall
 from shutil import copytree, ignore_patterns, rmtree
+from tarfile import FilterError, ReadError, TarInfo
 from tarfile import open as tar_open
 from tempfile import mkstemp
 
@@ -140,3 +142,63 @@ def write_temp_text(text: str, suffix: str = "") -> str:
         temp_file.write(text)
     console.debug(f"Wrote temp file: {temp_path}")
     return temp_path
+
+
+def sha256_file(path: str) -> str:
+    """Return the hex sha256 digest of a file, read in chunks."""
+    digest = sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def extract_tar_archive(archive: Path, destination: Path) -> None:
+    """Extract a tar archive safely into an empty directory.
+
+    Entries are checked for absolute or parent-relative paths, then extracted with
+    ``tarfile``'s ``data`` filter, which also refuses links that escape the destination and
+    device files. When the archive has exactly one top-level directory, that directory is
+    stripped (margot's build layout). Other archives keep their paths.
+
+    Raises:
+        ValueError: If the destination is not empty, the file is not a readable tar archive,
+            or an entry is unsafe.
+    """
+    if destination.exists() and any(destination.iterdir()):
+        raise ValueError(f"Extraction directory {destination} is not empty.")
+    destination.mkdir(parents=True, exist_ok=True)
+    try:
+        with tar_open(archive, "r:*") as tar:
+            members = tar.getmembers()
+            for member in members:
+                _check_entry_name(member.name)
+            prefix = _single_top_level_directory(members)
+            for member in members:
+                parts = PurePosixPath(member.name).parts
+                if prefix is not None:
+                    if len(parts) == 1:
+                        continue
+                    member.name = "/".join(parts[1:])
+                tar.extract(member, destination, filter="data")
+    except ReadError as error:
+        raise ValueError(f"{archive.name} is not a readable tar archive.") from error
+    except FilterError as error:
+        raise ValueError(f"{archive.name} contains an unsafe entry: {error}") from error
+    console.debug(f"Extracted archive {archive.name} into {destination}")
+
+
+def _check_entry_name(name: str) -> None:
+    path = PurePosixPath(name)
+    if name.startswith("/") or path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"Archive entry '{name}' is unsafe (absolute or parent-relative path).")
+
+
+def _single_top_level_directory(members: list[TarInfo]) -> str | None:
+    """Return the one top-level directory to strip, or None when the archive has none."""
+    tops = {PurePosixPath(member.name).parts[0] for member in members if PurePosixPath(member.name).parts}
+    if len(tops) != 1:
+        return None
+    if not any(len(PurePosixPath(member.name).parts) > 1 for member in members):
+        return None
+    return tops.pop()

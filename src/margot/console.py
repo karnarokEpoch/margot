@@ -16,6 +16,7 @@ import sys
 
 from rich.console import Console, RenderableType
 from rich.table import Table
+from rich.text import Text
 from typer import Exit
 
 # Module-level console instances (for testing, may be replaced with mocks)
@@ -131,6 +132,25 @@ def is_debug() -> bool:
     return _debug
 
 
+def confirm(question: str) -> bool:
+    """Ask a yes/no question on stderr and read one line from stdin.
+
+    Only ``y`` and ``yes`` (any case) confirm. Anything else, including an empty line and EOF,
+    is a no.
+    """
+    _get_stderr().print(question, end=" ", markup=False, highlight=False)
+    answer = sys.stdin.readline()
+    return answer.strip().lower() in {"y", "yes"}
+
+
+def is_interactive() -> bool:
+    """True when stdin is a terminal."""
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def success(message: str) -> None:
     """Print a green success message to stdout. Always shown."""
     _get_stdout().print(f"[green]{message}[/green]", highlight=False)
@@ -156,6 +176,14 @@ def print_table(table: Table) -> None:
 def print_renderable(renderable: RenderableType) -> None:
     """Print a rich renderable (Panel, Tree, Group, etc.) to stdout. Always shown."""
     _get_stdout().print(renderable)
+
+
+def print_line(text: str) -> None:
+    """Print one plain line to stdout, never wrapped, cropped or read as markup. Always shown.
+
+    For values that must stay whole on one line, such as a directory a user copies.
+    """
+    _get_stdout().print(Text(text), no_wrap=True, overflow="ignore", crop=False)
 
 
 def warning(message: str) -> None:
@@ -186,16 +214,21 @@ def debug(message: str) -> None:
     _get_stderr().print(f"[dim]{_now_ms()} debug: [{_caller_location()}] {message}[/dim]", highlight=False)
 
 
-def fatal(message: str, code: int = 1) -> None:
+def fatal(message: str, code: int = 1, *, verbatim: bool = False) -> None:
     """Print an error to stderr and immediately exit with ``code``.
 
     JSON mode emits the stable machine-readable envelope; normal invocations retain
-    the historical Rich-formatted ``Error:`` message.
+    the historical Rich-formatted ``Error:`` message. ``verbatim=True`` keeps each line of the message
+    whole (no folding), for messages that carry paths a user must copy.
     """
     if _json:
         envelope = {"error": True, "code": code, "message": message}
         _get_stderr().print(
             dumps(envelope), markup=False, highlight=False, no_wrap=True, overflow="ignore", crop=False
+        )
+    elif verbatim:
+        _get_stderr().print(
+            f"[red]Error:[/red] {message}", highlight=False, no_wrap=True, overflow="ignore", crop=False
         )
     else:
         _get_stderr().print(f"[red]Error:[/red] {message}", highlight=False)

@@ -4,13 +4,13 @@
 exit with code `0`. Scripts can branch on the code without parsing the human-readable error
 message written to stderr.
 
-| Code | Meaning | Typical causes |
-| --- | --- | --- |
-| `0` | Success | The command completed successfully. |
-| `1` | Generic or unexpected failure | An uncategorized exception or an internal failure. |
-| `2` | Usage error | An invalid flag value or an incompatible flag combination detected before work begins. |
-| `3` | Validation or semantic input failure | A malformed or semantically invalid URI, descriptor, version, package selection, or local build output. |
-| `4` | Remote or authentication failure | Registry access, credential expiry or rejection, authentication, or permission failures. |
+| Code | Meaning                              | Typical causes                                                                                          |
+| ---- | ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `0`  | Success                              | The command completed successfully.                                                                     |
+| `1`  | Generic or unexpected failure        | An uncategorized exception or an internal failure.                                                      |
+| `2`  | Usage error                          | An invalid flag value or an incompatible flag combination detected before work begins.                  |
+| `3`  | Validation or semantic input failure | A malformed or semantically invalid URI, descriptor, version, package selection, or local build output. |
+| `4`  | Remote or authentication failure     | Registry access, credential expiry or rejection, authentication, or permission failures.                |
 
 Errors retain the normal human-readable form and are written to stderr, prefixed with
 `Error:`. The exit code is the machine-readable part of the failure contract; messages may
@@ -32,6 +32,30 @@ margot --no-color describe
 margot also honors the [`NO_COLOR` convention](https://no-color.org/): if the `NO_COLOR`
 environment variable is present, regardless of its value, color is disabled. These controls
 affect both stdout and stderr while preserving the normal output text and stream routing.
+
+## install
+
+| Code | Situation                                                                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Successful install, or `--dry-run` completed                                                                                          |
+| `1`  | User declined confirmation ("Aborted: nothing was installed")                                                                         |
+| `1`  | systemd user session is unusable                                                                                                      |
+| `1`  | `daemon-reload` failed                                                                                                                |
+| `1`  | Expected service unknown to systemd after `daemon-reload`                                                                             |
+| `2`  | `URI` given with `--project-dir` or `--build-dir`                                                                                     |
+| `2`  | `--build-dir` given outside project mode                                                                                              |
+| `2`  | `--set NAME` without `=`                                                                                                              |
+| `2`  | No terminal and neither `--yes` nor `--dry-run`                                                                                       |
+| `3`  | No descriptor found (lists the paths tried)                                                                                           |
+| `3`  | Unknown, non-installable, or ambiguous profile                                                                                        |
+| `3`  | Component problem: no OCI coordinates, `packageLocation`, or unsafe name                                                              |
+| `3`  | Archive missing, not a tar, no quadlet unit at root, or hostile archive                                                               |
+| `3`  | Two components ship the same relative path                                                                                            |
+| `3`  | Application directory exists without margot marker, or holds a different profile                                                      |
+| `3`  | Parameter error: unknown `--set` name, reserved pointer, same pointer on two parameters, array value, or forbidden character in value |
+| `3`  | Unit-name collision (file name or generated service name)                                                                             |
+| `3`  | Quadlet generator rejected the unit files                                                                                             |
+| `4`  | Registry or credential failure                                                                                                        |
 
 ## Examples
 

@@ -98,6 +98,8 @@ $ margot --help
 │           schema.                                                            │
 │ describe  Describe a Margo application description in rich, structured      │
 │           output.                                                           │
+│ install   Install one quadlet deployment profile of a Margo application on  │
+│           this host.                                                        │
 │ auth      Manage OCI registry credentials.                                  │
 ╰────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -189,6 +191,19 @@ margot fetch public.ecr.aws/g2n4p2m7/margo:1.0.0
 
 `pull` writes the artifact's layers to disk as-is (no extraction). `fetch` prints the
 raw manifest JSON for a quick remote inspection, without pulling anything.
+
+### Install a quadlet application on this host
+
+```bash
+margot install --dry-run public.ecr.aws/g2n4p2m7/margo:1.0.0   # show the plan, change nothing
+margot install public.ecr.aws/g2n4p2m7/margo:1.0.0             # place the quadlet files, reload systemd
+```
+
+`install` takes a built project, a `pull --recursive` folder or a remote artifact. It places the quadlet
+files of one deployment profile under `~/.config/containers/systemd/<application-id>/`, applies the
+application parameters (`--set NAME=VALUE`) as systemd unit environment variables, and prints the
+`systemctl --user start` commands. It never starts anything itself. See the
+[install page](https://karnarokepoch.github.io/margot/commands/install/) for the full contract.
 
 ### Shell completion
 

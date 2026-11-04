@@ -628,3 +628,21 @@ class TestNoColor:
 
         assert "dynamic stdout" in stdout.getvalue()
         assert "dynamic stderr" in stderr.getvalue()
+
+
+class TestPrintLine:
+    """print_line() prints one plain line to stdout that is neither wrapped nor cropped."""
+
+    def test_print_line_writes_to_stdout_unchanged(self, capture_console, reset_console):
+        """print_line() should write the text to stdout, not stderr, without markup interpretation."""
+        out, err = capture_console
+        _console.print_line("/home/user/[Container] %x")
+        assert out.getvalue() == "/home/user/[Container] %x\n"
+        assert err.getvalue() == ""
+
+    def test_print_line_keeps_a_line_longer_than_the_terminal(self, capture_console, reset_console):
+        """print_line() should keep a path longer than the console width on a single line."""
+        out, _err = capture_console
+        path = "/" + "segment/" * 40 + "end"
+        _console.print_line(path)
+        assert out.getvalue() == path + "\n"

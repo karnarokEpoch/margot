@@ -70,8 +70,8 @@ quadlet:
 
 Variant `version` is omitted — margot derives it as `<component-version>+<type>-<variant-name>`:
 
-| Variant | Derived version | OCI tag |
-| --------- | ----------------- | --------- |
+| Variant         | Derived version         | OCI tag                 |
+| --------------- | ----------------------- | ----------------------- |
 | compose/default | `2.1.0+compose-default` | `2.1.0_compose-default` |
 | compose/minimal | `2.1.0+compose-minimal` | `2.1.0_compose-minimal` |
 | quadlet/default | `2.1.0+quadlet-default` | `2.1.0_quadlet-default` |
@@ -163,8 +163,8 @@ automatically. At build time, the context resolves to:
 - `{{ v.component }}` → `com-example-web-platform-compose-default`, etc. (derived: `<id>-<type>-<variant-name>`)
 - `{{ v.tag }}` → `2.1.0_compose-default`, etc. (OCI-safe form of the derived version)
 - `{{ v.repository }}` → `public.ecr.aws/g2n4p2m7/margo` (bare registry/repository — the `oci://`
-  scheme required by `deploymentProfiles[].components[].properties.repository` is prepended in
-  the template, not part of the context value)
+    scheme required by `deploymentProfiles[].components[].properties.repository` is prepended in
+    the template, not part of the context value)
 
 ## Inspect with describe
 
@@ -330,9 +330,10 @@ The minimal variant ships only nginx, no apache.
 
 ## Quadlet files
 
-Note: `${NGINX_PORT}` in the quadlet `PublishPort=` is resolved by the deploying Margo device at deploy time (not by
-margot during build), and the `Environment=NGINX_PORT=8080` in the `[Service]` section supplies the default value if not
-overridden by the device.
+Note: `${NGINX_PORT}` in `PublishPort=` is resolved by systemd at start time, not by margot at build time.
+When installed with [`margot install`](../commands/install.md), a `50-margot-parameters.conf` drop-in sets
+`NGINX_PORT` from the descriptor default or `--set nginxPort=…`, overriding the `[Service]` line. The
+`Environment=NGINX_PORT=8080` in `[Service]` acts as a fallback when the unit is run without margot's drop-in.
 
 ### default
 
@@ -447,9 +448,9 @@ margot push
 
 This produces five OCI artifacts at `public.ecr.aws/g2n4p2m7/margo`:
 
-| Tag | Artifact type |
-| ----- | --------------- |
-| `1.0.0` | `application/vnd.margo.app.v1+json` |
+| Tag                     | Artifact type                                      |
+| ----------------------- | -------------------------------------------------- |
+| `1.0.0`                 | `application/vnd.margo.app.v1+json`                |
 | `2.1.0_compose-default` | `application/vnd.org.margo.component.compose+json` |
 | `2.1.0_compose-minimal` | `application/vnd.org.margo.component.compose+json` |
 | `2.1.0_quadlet-default` | `application/vnd.org.margo.component.quadlet+json` |

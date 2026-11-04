@@ -19,12 +19,12 @@ exactly like a static `app.yaml`.
 
 - Use `app.yaml.jinja` or `app.yaml` — never both. Both present is a hard error.
 - Every variable reference uses `StrictUndefined`: an unresolved variable is a build
-  failure, never a silently empty string. Typos are caught immediately.
+    failure, never a silently empty string. Typos are caught immediately.
 - `margot build` writes the rendered `app.yaml` to the build output directory (`.dist/`
-  by default) alongside the other artifact files. The `app.yaml.jinja` source on disk
-  is never modified.
+    by default) alongside the other artifact files. The `app.yaml.jinja` source on disk
+    is never modified.
 - `margot verify` and `margot describe` render the template to a temporary file and
-  discard it after the command completes — nothing is written to `.dist/`.
+    discard it after the command completes — nothing is written to `.dist/`.
 
 ## Template context reference
 
@@ -73,34 +73,34 @@ manifest
 
 All fields live under the `manifest` namespace.
 
-| Variable | Type | Value |
-| --- | --- | --- |
-| `manifest.id` | string | `id` from `margo.yaml` |
-| `manifest.name` | string | `name` from `margo.yaml` |
-| `manifest.version` | string | `version` from `margo.yaml` |
-| `manifest.appVersion` | string | `appVersion` from `margo.yaml`, or `""` if absent |
-| `manifest.description` | string | `description` from `margo.yaml` |
-| `manifest.directory` | string | `directory` (margo artifact source dir, default `margo`) |
-| `manifest.repository` | string | Top-level `repository`, or `""` if not set |
-| `manifest.annotations` | dict | `annotations` key/value pairs, or `{}` if absent |
-| `manifest.author` | list | List of `{name, email}` objects |
-| `manifest.organization` | list | List of `{name, site}` objects |
+| Variable                | Type   | Value                                                    |
+| ----------------------- | ------ | -------------------------------------------------------- |
+| `manifest.id`           | string | `id` from `margo.yaml`                                   |
+| `manifest.name`         | string | `name` from `margo.yaml`                                 |
+| `manifest.version`      | string | `version` from `margo.yaml`                              |
+| `manifest.appVersion`   | string | `appVersion` from `margo.yaml`, or `""` if absent        |
+| `manifest.description`  | string | `description` from `margo.yaml`                          |
+| `manifest.directory`    | string | `directory` (margo artifact source dir, default `margo`) |
+| `manifest.repository`   | string | Top-level `repository`, or `""` if not set               |
+| `manifest.annotations`  | dict   | `annotations` key/value pairs, or `{}` if absent         |
+| `manifest.author`       | list   | List of `{name, email}` objects                          |
+| `manifest.organization` | list   | List of `{name, site}` objects                           |
 
 ### Component fields
 
 `manifest.compose` and `manifest.quadlet` are present when the corresponding component is
 declared in `margo.yaml`. Both expose the same shape:
 
-| Variable | Type | Value |
-| --- | --- | --- |
-| `manifest.<type>.directory` | string | Component source directory |
+| Variable                     | Type   | Value                                                                 |
+| ---------------------------- | ------ | --------------------------------------------------------------------- |
+| `manifest.<type>.directory`  | string | Component source directory                                            |
 | `manifest.<type>.repository` | string | Component OCI repository (inherited from top-level if not overridden) |
-| `manifest.<type>.version` | string | Component base version (derivation base for variants) |
-| `manifest.<type>.tag` | string | `version` with `+` replaced by `_` (OCI-safe) |
-| `manifest.<type>.ref` | string | `<repository>:<tag>`, or `""` if either is empty |
-| `manifest.<type>.component` | string | Margo component name (flat layout only) |
-| `manifest.<type>.variants` | list | Ordered list of variant objects (empty list in flat layout) |
-| `manifest.<type>.<name>` | dict | Direct access to a variant by name (e.g. `manifest.compose.default`) |
+| `manifest.<type>.version`    | string | Component base version (derivation base for variants)                 |
+| `manifest.<type>.tag`        | string | `version` with `+` replaced by `_` (OCI-safe)                         |
+| `manifest.<type>.ref`        | string | `<repository>:<tag>`, or `""` if either is empty                      |
+| `manifest.<type>.component`  | string | Margo component name (flat layout only)                               |
+| `manifest.<type>.variants`   | list   | Ordered list of variant objects (empty list in flat layout)           |
+| `manifest.<type>.<name>`     | dict   | Direct access to a variant by name (e.g. `manifest.compose.default`)  |
 
 If a component is not declared in `margo.yaml`, `manifest.compose` / `manifest.quadlet`
 resolves to an empty dict `{}`.
@@ -109,14 +109,14 @@ resolves to an empty dict `{}`.
 
 Each object in `manifest.<type>.variants` (and each `manifest.<type>.<name>`) exposes:
 
-| Field | Type | Derivation |
-| --- | --- | --- |
-| `name` | string | As declared in `margo.yaml` |
-| `version` | string | Authored value, or `<component-version>+<type>-<name>` if omitted |
-| `tag` | string | `version` with `+` replaced by `_` — OCI-safe. **Computed, not authorable** |
-| `repository` | string | Inherited from component, or overridden per variant |
-| `ref` | string | `<repository>:<tag>`. **Computed, not authorable** |
-| `component` | string | Authored value, or `<id>-<type>-<name>` if omitted |
+| Field        | Type   | Derivation                                                                  |
+| ------------ | ------ | --------------------------------------------------------------------------- |
+| `name`       | string | As declared in `margo.yaml`                                                 |
+| `version`    | string | Authored value, or `<component-version>+<type>-<name>` if omitted           |
+| `tag`        | string | `version` with `+` replaced by `_` — OCI-safe. **Computed, not authorable** |
+| `repository` | string | Inherited from component, or overridden per variant                         |
+| `ref`        | string | `<repository>:<tag>`. **Computed, not authorable**                          |
+| `component`  | string | Authored value, or `<id>-<type>-<name>` if omitted                          |
 
 !!! note
     `tag` and `ref` are derived fields — they cannot be set in `margo.yaml`. They exist
@@ -397,17 +397,19 @@ metadata:
 
 ## Error behavior
 
-| Situation | Behavior |
-| --- | --- |
+| Situation                                                 | Behavior                                                |
+| --------------------------------------------------------- | ------------------------------------------------------- |
 | Undefined variable (e.g. typo in `{{ manifest.vesion }}`) | Hard error at build/verify/describe time. Never silent. |
-| Both `app.yaml` and `app.yaml.jinja` present | Hard error. |
-| Only `app.yaml` present | Copied verbatim — no rendering. |
-| `app.yaml.jinja` absent and `app.yaml` absent | Hard error. |
+| Both `app.yaml` and `app.yaml.jinja` present              | Hard error.                                             |
+| Only `app.yaml` present                                   | Copied verbatim — no rendering.                         |
+| `app.yaml.jinja` absent and `app.yaml` absent             | Hard error.                                             |
 
 ## See also
 
 - [margo.yaml reference](margo-yaml.md) — all `margo.yaml` fields and their semantics.
 - [Image search-and-replace](examples/image-search-replace.md) — the `image.replace` field in `compose` and `quadlet`
-  components also uses the same template context.
+    components also uses the same template context.
 - [Full example](examples/full.md) — a complete multi-component project with variants, Helm, compose, and quadlet in a
-  single `app.yaml.jinja`.
+    single `app.yaml.jinja`.
+- [margot install](commands/install.md) — how a quadlet unit consumes a `pointer` variable at start time and how
+    `margot install` supplies its value through a systemd drop-in.
