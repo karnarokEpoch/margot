@@ -5,6 +5,7 @@ Exit codes follow the taxonomy in docs/exit-codes.md: 2 usage, 3 validation, 4 r
 
 import json
 from pathlib import Path
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -28,7 +29,14 @@ from tests.integration._install_helpers import (
 
 runner = CliRunner()
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
 pytestmark = mark.usefixtures("install_host")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text for plain-string assertions."""
+    return _ANSI_RE.sub("", text)
 
 
 def _completed(returncode: int = 0, stderr: str = "") -> Any:
@@ -75,10 +83,11 @@ class TestHelp:
         result = runner.invoke(app, ["install", "--help"])
 
         assert result.exit_code == 0
-        assert "--dry-run" in result.output
-        assert "--yes" in result.output
-        assert "--profile" in result.output
-        assert "--set" in result.output
+        plain = _strip_ansi(result.output)
+        assert "--dry-run" in plain
+        assert "--yes" in plain
+        assert "--profile" in plain
+        assert "--set" in plain
 
 
 class TestUsageErrors:
