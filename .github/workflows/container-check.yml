@@ -1,22 +1,54 @@
 name: Container Check
 
-# Exercises the exact release container code path (multi-arch build, push,
-# platform verification, smoke test) against a throwaway local registry.
-# Nothing is published.
+# TEST ONLY — builds and verifies the multi-arch image against local registries; publishes nothing.
+#
+# Runs the shared build-verify action, then rehearses the release promote step against a
+# second local registry (port 5001, a stand-in for GHCR). Only the login and the
+# destination host differ from the real release.
 
 on:
   pull_request:
-    paths:
-      - Containerfile
-      - .github/workflows/container.yml
-      - .github/workflows/container-check.yml
-      - .github/workflows/release.yml
-      - pyproject.toml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  container:
-    uses: ./.github/workflows/container.yml
-    with:
-      release: false
-    permissions:
-      contents: read
+  container-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build wheel
+        run: uv build
+
+      - name: Build and verify image
+        id: image
+        uses: ./.github/actions/build-verify-image
+
+      - name: Start stand-in release registry (port 5001)
+        run: |
+          docker run -d -p 5001:5000 --name registry-release registry:2
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:5001/v2/ && exit 0
+            sleep 1
+          done
+          echo "::error::release stand-in registry did not become ready"
+          exit 1
+
+      - name: Dry-run promote (same script as release)
+        env:
+          REF: ${{ steps.image.outputs.ref }}
+        run: |
+          .github/scripts/promote-image.sh "$REF" \
+            localhost:5001/margot:check \
+            localhost:5001/margot:check-latest
