@@ -17,6 +17,8 @@ from tempfile import mkdtemp
 
 from pytest import mark, skip
 
+from margot.services.package import _resolve_podman_socket_uri
+
 try:
     from podman import PodmanClient
 except ImportError:
@@ -24,17 +26,12 @@ except ImportError:
 
 
 def _podman_socket_exists() -> bool:
-    """Check if Podman socket is accessible."""
-    for socket_path in [
-        "/run/user/1000/podman/podman.sock",
-        "/var/run/podman/podman.sock",
-    ]:
-        try:
-            if Path(socket_path).exists():
-                return True
-        except PermissionError:
-            pass
-    return False
+    """Check if the Podman socket margot resolves is present on the filesystem."""
+    socket_path = _resolve_podman_socket_uri().removeprefix("unix://")
+    try:
+        return Path(socket_path).exists()
+    except PermissionError:
+        return False
 
 
 @mark.skipif(PodmanClient is None, reason="Podman SDK not available")
@@ -42,7 +39,7 @@ def _podman_socket_exists() -> bool:
 class TestMultiplatformManifestListBug:
     """Real Podman reproduction of the duplicate manifest digest bug."""
 
-    def test_multiplatform_manifest_list_distinct_digests(  # noqa: C901, PLR0912, PLR0915
+    def test_multiplatform_manifest_list_distinct_digests(  # noqa: PLR0915
         self, tmp_path: Path
     ) -> None:
         """Reproduce and verify fix for duplicate manifest digest bug.
@@ -58,17 +55,13 @@ class TestMultiplatformManifestListBug:
         if PodmanClient is None:
             skip("Podman SDK not available")
 
-        socket_path = None
-        if Path("/run/user/1000/podman/podman.sock").exists():
-            socket_path = "unix:///run/user/1000/podman/podman.sock"
-        elif Path("/var/run/podman/podman.sock").exists():
-            socket_path = "unix:///var/run/podman/podman.sock"
-        else:
-            skip("Podman socket not found")
+        socket_path = _resolve_podman_socket_uri()
+        if not Path(socket_path.removeprefix("unix://")).exists():
+            skip(f"Podman socket not found at {socket_path}")
 
-        # Only establish connection to verify socket is accessible
+        # PodmanClient() is lazy and never touches the socket, so the request must be explicit.
         try:
-            PodmanClient(base_url=socket_path).close()
+            PodmanClient(base_url=socket_path).version()
         except Exception as e:  # noqa: BLE001
             skip(f"Podman socket not accessible: {e}")
 
