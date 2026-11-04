@@ -1,0 +1,87 @@
+name: Build and verify multi-arch image
+description: >
+  Builds the multi-arch (linux/amd64 + linux/arm64) margot image from the wheel in dist/,
+  pushes it to a throwaway local registry, and verifies it. Never publishes anywhere.
+
+# What it does: QEMU + buildx, a local registry:2 on :5000, build+push of
+# localhost:5000/margot:candidate, index platform assertion, and a
+# `margot --version` smoke test per platform.
+# It NEVER publishes: the only registry touched is the local one on the runner.
+# Caller contract: the repo is already checked out and exactly one wheel is in dist/.
+# The tested image is exposed via the `ref` and `digest` outputs so that a later step
+# can promote exactly those bytes (see .github/scripts/promote-image.sh).
+
+outputs:
+  ref:
+    description: Reference of the verified image in the local registry
+    value: ${{ steps.vars.outputs.ref }}
+  digest:
+    description: Digest of the verified multi-arch index
+    value: ${{ steps.build.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm64
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: network=host # lets buildx push to the localhost registry
+
+    - name: Start local registry
+      shell: bash
+      run: |
+        docker run -d -p 5000:5000 --name registry registry:2
+        for _ in $(seq 1 30); do
+          curl -fsS http://localhost:5000/v2/ && exit 0
+          sleep 1
+        done
+        echo "::error::local registry did not become ready"
+        exit 1
+
+    - name: Define candidate reference
+      id: vars
+      shell: bash
+      run: echo "ref=localhost:5000/margot:candidate" >> "$GITHUB_OUTPUT"
+
+    - name: Build and push multi-arch image (local registry)
+      id: build
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ./Containerfile
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.vars.outputs.ref }}
+
+    - name: Verify image index platforms
+      shell: bash
+      env:
+        REF: ${{ steps.vars.outputs.ref }}
+      run: |
+        docker buildx imagetools inspect "$REF"
+        PLATFORMS=$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' \
+          | jq -r '.manifests[]?.platform | select(. != null) | "\(.os)/\(.architecture)"')
+        echo "Platforms in index:"
+        echo "$PLATFORMS"
+        for P in linux/amd64 linux/arm64; do
+          if ! echo "$PLATFORMS" | grep -qx "$P"; then
+            echo "::error::platform $P missing from $REF"
+            exit 1
+          fi
+        done
+
+    - name: Smoke test each platform
+      shell: bash
+      env:
+        REF: ${{ steps.vars.outputs.ref }}
+      run: |
+        for P in linux/amd64 linux/arm64; do
+          echo "::group::margot --version on $P"
+          docker run --rm --platform "$P" "$REF" --version
+          echo "::endgroup::"
+        done
