@@ -24,27 +24,48 @@ jobs:
       id-token: write # required for PyPI trusted publishing
 
     steps:
+      # Automatic (workflow_run) path: never publish SemVer pre-releases to PyPI
+      # (irreversible). Manual workflow_dispatch is explicit operator intent and
+      # publishes whatever version was typed, even a pre-release.
       - name: Resolve release tag
         id: tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            VERSION="${{ inputs.version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+            PRERELEASE=$(gh release view "$VERSION" --repo "$REPO" --json isPrerelease --jq .isPrerelease)
           else
-            VERSION=$(gh release view --repo ${{ github.repository }} --json tagName --jq .tagName)
+            # `gh release view` without a tag skips pre-releases; `release list`
+            # (newest first) includes them.
+            read -r VERSION PRERELEASE < <(gh release list --repo "$REPO" --limit 1 \
+              --json tagName,isPrerelease --jq '.[0] | "\(.tagName) \(.isPrerelease)"')
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Skip pre-release
+        if: github.event_name != 'workflow_dispatch' && steps.tag.outputs.prerelease == 'true'
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          echo "::notice::Skipping PyPI: $VERSION is a pre-release"
 
       - name: Download release artifacts
+        if: github.event_name == 'workflow_dispatch' || steps.tag.outputs.prerelease != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          gh release download ${{ steps.tag.outputs.version }} \
-            --repo ${{ github.repository }} \
+          gh release download "$VERSION" \
+            --repo "$REPO" \
             --pattern '*.whl' \
             --pattern '*.tar.gz' \
             --dir dist/
 
       - name: Publish to PyPI
+        if: github.event_name == 'workflow_dispatch' || steps.tag.outputs.prerelease != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
