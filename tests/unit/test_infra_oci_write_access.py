@@ -16,6 +16,8 @@ class TestCheckWriteAccess:
         mocker.patch("margot.infra.oci.OrasClientLib.__init__", return_value=None)
 
         client = OrasClient()
+        # The stubbed base constructor does not set the scheme oras-py uses for its own requests.
+        client.prefix = "https"
 
         # Mock auth as a property
         auth_mock = MagicMock()
@@ -137,7 +139,7 @@ class TestCheckWriteAccess:
         client, _auth_mock, _ = self._setup_client_mocks(mocker)
 
         container_mock = MagicMock()
-        container_mock.upload_blob_url.return_value = "v2/g2n4p2m7/margo/blobs/uploads/"
+        container_mock.upload_blob_url.return_value = "public.ecr.aws/v2/g2n4p2m7/margo/blobs/uploads/"
         mocker.patch.object(client, "get_container", return_value=container_mock)
 
         response_mock = MagicMock()
@@ -148,10 +150,10 @@ class TestCheckWriteAccess:
 
         client.check_write_access("public.ecr.aws", "g2n4p2m7/margo")
 
-        # First do_request call should be to upload_blob_url with POST
+        # First do_request call should be to upload_blob_url with POST, as an absolute https URL
         do_request_mock.assert_called()
         first_call = do_request_mock.call_args_list[0]
-        assert first_call[0][0] == "v2/g2n4p2m7/margo/blobs/uploads/"
+        assert first_call[0][0] == "https://public.ecr.aws/v2/g2n4p2m7/margo/blobs/uploads/"
         assert first_call[0][1] == "POST"
 
     def test_check_write_access_emits_debug_logs(self, mocker: Any) -> None:

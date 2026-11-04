@@ -1,5 +1,7 @@
 # margot auth
 
+<!-- markdownlint-disable-file MD024 -->
+
 Manage OCI registry credentials.
 
 ```text
@@ -142,10 +144,12 @@ margot auth status
 
 ## Exit codes
 
-| Code | Meaning                                                            |
-| ---- | ------------------------------------------------------------------ |
-| 0    | Login/logout/status succeeded.                                     |
-| 1    | Authentication failed, registry unreachable, or invalid arguments. |
+| Code | Meaning                                        |
+| ---- | ---------------------------------------------- |
+| 0    | Login/logout/status succeeded.                 |
+| 4    | Authentication failed or registry unreachable. |
+| 2    | Invalid arguments.                             |
+| 1    | Unexpected failure.                            |
 
 ## Example
 

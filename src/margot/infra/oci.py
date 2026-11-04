@@ -6,11 +6,13 @@ from logging import DEBUG, INFO, WARNING, Formatter, Handler, LogRecord, getLogg
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from oras.client import OrasClient as OrasClientLib
 from oras.container import Container
 from oras.defaults import annotation_title
 from oras.oci import ManifestConfig, NewLayer, NewManifest
+from requests import Response
 from yaml import safe_load
 
 from margot import console
@@ -22,8 +24,11 @@ from margot.domain.layers import (
 )
 from margot.domain.uri import extract_hostname, normalize_registry_hostname
 from margot.infra import credentials
+from margot.infra.oci_auth import access_denied, challenge_aware_from, mount_default_timeouts
 
 # HTTP status code constants
+_HTTP_OK = 200
+_HTTP_MULTIPLE_CHOICES = 300
 _HTTP_ACCEPTED = 202
 
 # One layer to push: (path, media_type, title) or (path, media_type, title, extra_annotations).
@@ -33,6 +38,21 @@ _LayerEntry = tuple[Path, str, str] | tuple[Path, str, str, Mapping[str, str]]
 
 class OciRegistryError(Exception):
     """Raised when an OCI registry returns an unexpected error response."""
+
+
+def _describe_registry_reply(response: Response) -> str:
+    """Summarise a failed registry reply as status, method and URL.
+
+    The query string and any userinfo are dropped from the URL, and no headers or
+    body are included, so the message cannot carry credentials or upload tokens.
+    """
+    raw_url = response.url or (response.request.url if response.request is not None else "") or ""
+    parts = urlsplit(raw_url)
+    url = urlunsplit((parts.scheme, parts.netloc.rpartition("@")[2], parts.path, "", ""))
+    method = response.request.method if response.request is not None else None
+    reason = f" {response.reason}" if response.reason else ""
+    method_part = f"{method} " if method else ""
+    return f"Registry returned {response.status_code}{reason} for {method_part}{url}"
 
 
 class _OrasLogHandler(Handler):
@@ -139,6 +159,13 @@ class OrasClient(OrasClientLib):
                 anonymous-only (no credential loading).
         """
         super().__init__()
+        # Replace the stock Bearer-only auth backend with one that answers Basic challenges, and
+        # give the session a default timeout. Both must happen before load_configs() runs below.
+        # oras-py's constructor creates session and auth; a test double that stubs that constructor
+        # has no backend to wrap, so the swap is skipped there.
+        if hasattr(self, "session"):
+            self.auth = challenge_aware_from(self.auth)
+            mount_default_timeouts(self.session)
         # Per-client manifest cache: keyed by string URI, scoped to this client instance
         self._manifest_cache: dict[str, dict[str, Any]] = {}
         if hostname is not None:
@@ -319,6 +346,34 @@ class OrasClient(OrasClientLib):
         resolved_container = self.get_container(container) if isinstance(container, str) else container
         super().download_blob(resolved_container, digest, outfile)
         return outfile
+
+    def _check_200_response(self, response: Response) -> None:
+        """Map every non-2xx registry reply to exit 4; accept 2xx through oras-py.
+
+        oras-py calls this helper from its manifest GET, its upload and PUT paths, and its
+        pull loop. Its own version raises a bare ValueError, which margot's commands map to
+        exit 3 (invalid input). A registry failure is a remote failure and maps to exit 4:
+
+        - 401 and 403 raise AuthenticationException with the login hint (basic-auth branch).
+        - Any other non-2xx status raises OciRegistryError with the status, method and URL.
+
+        The signature matches the base class exactly, because oras-py dispatches to this
+        method polymorphically from inside its own methods.
+
+        Args:
+            response: The registry reply to check.
+
+        Raises:
+            AuthenticationException: If the registry answers 401 or 403.
+            OciRegistryError: If any other status is outside the 2xx range.
+            ValueError: Raised by oras-py for a 2xx status it does not accept (for example 204).
+        """
+        if response.status_code in (401, 403):
+            raise access_denied(response)
+        if not _HTTP_OK <= response.status_code < _HTTP_MULTIPLE_CHOICES:
+            self._parse_response_errors(response)
+            raise OciRegistryError(_describe_registry_reply(response))
+        super()._check_200_response(response)
 
     def login(self, hostname: str, username: str, password: str) -> None:
         """
@@ -580,7 +635,7 @@ class OrasClient(OrasClientLib):
         self.auth.load_configs(container)
 
         # Initiate blob upload session (POST to upload endpoint)
-        upload_url = container.upload_blob_url()
+        upload_url = f"{self.prefix}://{container.upload_blob_url()}"
         console.debug(f"  POST {upload_url}")
 
         response = self.do_request(upload_url, "POST")
