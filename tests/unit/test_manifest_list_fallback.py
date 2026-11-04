@@ -14,7 +14,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, Mock, patch
 from uuid import uuid4
 
-from pytest import mark, raises, skip
+from pytest import fail, mark, raises, skip
 
 try:
     from podman import PodmanClient
@@ -466,14 +466,25 @@ class TestResolveAllPlatformsRealSocket:
 
     @staticmethod
     def _run_podman(*args: str, timeout: int = 30, check: bool = False) -> subprocess.CompletedProcess[str]:
-        """Run a podman subcommand and capture its output."""
-        return subprocess.run(  # noqa: S603
+        """Run a podman subcommand and capture its output.
+
+        With ``check=True`` a non-zero exit fails the test with podman's stderr in the
+        message. ``subprocess.CalledProcessError`` hides that output, which made CI
+        failures show only an exit code.
+        """
+        completed = subprocess.run(  # noqa: S603
             ["podman", *args],  # noqa: S607
             capture_output=True,
             text=True,
             timeout=timeout,
-            check=check,
+            check=False,
         )
+        if check and completed.returncode != 0:
+            fail(
+                f"podman {' '.join(args)} failed (exit {completed.returncode}): {completed.stderr.strip()}",
+                pytrace=False,
+            )
+        return completed
 
     @staticmethod
     def _write_single_file_tar(tar_path: Path, content: bytes) -> None:
@@ -555,10 +566,32 @@ class TestResolveAllPlatformsRealSocket:
             manifest_created = True
             console.info(f"Created manifest list: {manifest_list}")
 
-            self._run_podman("manifest", "add", manifest_list, image_amd64, "--os", "linux", "--arch", "amd64", check=True)
+            # The containers-storage: transport makes podman read the local image. Without it,
+            # podman 4.9 (ubuntu-24.04 CI) treats a bare localhost/... ref as a registry pull.
+            self._run_podman(
+                "manifest",
+                "add",
+                manifest_list,
+                f"containers-storage:{image_amd64}",
+                "--os",
+                "linux",
+                "--arch",
+                "amd64",
+                check=True,
+            )
             console.info(f"Added {image_amd64} to manifest as linux/amd64")
 
-            self._run_podman("manifest", "add", manifest_list, image_arm64, "--os", "linux", "--arch", "arm64", check=True)
+            self._run_podman(
+                "manifest",
+                "add",
+                manifest_list,
+                f"containers-storage:{image_arm64}",
+                "--os",
+                "linux",
+                "--arch",
+                "arm64",
+                check=True,
+            )
             console.info(f"Added {image_arm64} to manifest as linux/arm64")
 
             # Now call the real function against the real socket
