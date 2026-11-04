@@ -89,17 +89,28 @@ Releases follow a branch-based flow — no manual tagging.
     - Builds the package (`uv build`)
     - Generates release notes via `git-cliff`
     - Creates a GitHub Release with the built artifacts
-    - Builds and pushes a multi-arch container image (`linux/amd64` and `linux/arm64`) to
-        GHCR (`ghcr.io/karnarokepoch/margot`) via the reusable `.github/workflows/container.yml`
+    - Runs the **"Publish container image"** job: first runs the shared
+        `.github/actions/build-verify-image` action (same action used by Container Check) —
+        builds `linux/amd64` + `linux/arm64` into a throwaway local registry, asserts both
+        platforms are in the image index, and runs `margot --version` on each. Only after
+        that passes does it log in to GHCR and promote the tested image (same digest, copied
+        with `skopeo copy --all --preserve-digests`) to
+        `ghcr.io/karnarokepoch/margot:<version>` and `:latest`. GHCR login and the push are
+        the only steps not exercised before a real release.
 
 ### Container check
 
-The **Container Check** workflow (`.github/workflows/container-check.yml`) runs on pull
-requests that touch `Containerfile`, the container workflows, `release.yml`, or
-`pyproject.toml`. It builds both architectures, pushes to a throwaway local registry
-(nothing is published to GHCR), asserts both platforms are present in the image index,
-and runs `margot --version` on each. Any change to the `Containerfile` or container
-workflows is validated by this check before a real release ships the image.
+The **Container Check** workflow (`.github/workflows/container-check.yml`) is test-only
+and runs on **every pull request** (no path filter, including `release/*` PRs). It:
+
+1. Builds the wheel and runs the shared `.github/actions/build-verify-image` action:
+    builds `linux/amd64` + `linux/arm64` into a throwaway local registry, asserts both
+    platforms are present in the image index, and runs `margot --version` on each.
+2. Rehearses the promote step against a second throwaway local registry (port 5001,
+    stand-in for GHCR), using the same `promote-image.sh` script as the release job.
+
+Nothing is published. The only steps not exercised here are the GHCR login and the
+push to `ghcr.io`.
 
 ### Versioning
 
