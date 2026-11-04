@@ -1,0 +1,22 @@
+name: Container Check
+
+# Exercises the exact release container code path (multi-arch build, push,
+# platform verification, smoke test) against a throwaway local registry.
+# Nothing is published.
+
+on:
+  pull_request:
+    paths:
+      - Containerfile
+      - .github/workflows/container.yml
+      - .github/workflows/container-check.yml
+      - .github/workflows/release.yml
+      - pyproject.toml
+
+jobs:
+  container:
+    uses: ./.github/workflows/container.yml
+    with:
+      release: false
+    permissions:
+      contents: read
