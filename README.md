@@ -1,6 +1,7 @@
 # margot
 
 <!-- markdownlint-disable MD033 -->
+
 <p align="center">
   <img src="https://media.githubusercontent.com/media/karnarokEpoch/margot/refs/heads/main/docs/icon.png" alt="margot" width="240">
 </p>
@@ -50,15 +51,17 @@ pipx install margo-tooling
 
 ### With a container
 
-Every release publishes a container image to GHCR. Mount your project directory into
-`/workspace`:
+Every release publishes a container image to GHCR. The image is built for `linux/amd64`
+and `linux/arm64`; `podman` and `docker` select the right architecture automatically.
+Mount your project directory into `/workspace`:
 
 ```bash
 podman run --rm -v "$PWD":/workspace ghcr.io/karnarokepoch/margot:latest --help
 ```
 
 Pin to a specific version instead of `latest` for reproducible builds, e.g.
-`ghcr.io/karnarokepoch/margot:1.0.0`.
+`ghcr.io/karnarokepoch/margot:1.0.0`. Pass `--platform linux/arm64` (or `linux/amd64`)
+to force a specific architecture.
 
 ### From source
 
@@ -228,7 +231,7 @@ If you curate your own rc includes rather than a raw rc append, use
 ## Learn more
 
 - [Documentation](https://karnarokepoch.github.io/margot/) — full command reference,
-  `margo.yaml` reference, configuration, and worked examples (Helm, Compose, Quadlet, multi-component).
+    `margo.yaml` reference, configuration, and worked examples (Helm, Compose, Quadlet, multi-component).
 - [ROADMAP.md](ROADMAP.md) — planned features, fixes, and ideas.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, testing, release process.
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — community standards.

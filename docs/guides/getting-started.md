@@ -2,12 +2,12 @@
 
 This guide takes you from installation to a complete round trip:
 
-* install margot
-* write a minimal project
-* validate it
-* build it
-* publish it
-* retrieve it
+- install margot
+- write a minimal project
+- validate it
+- build it
+- publish it
+- retrieve it
 
 ## Install
 
@@ -31,8 +31,9 @@ pipx install margo-tooling
 
 ### With a container
 
-Every release publishes a container image to GHCR. Mount your project directory into
-`/workspace`:
+Every release publishes a container image to GHCR. The image is built for `linux/amd64`
+and `linux/arm64`; `podman` and `docker` select the right architecture automatically.
+Mount your project directory into `/workspace`:
 
 ```bash
 podman run --rm -v "$PWD":/workspace ghcr.io/karnarokepoch/margot:latest --help
@@ -43,6 +44,9 @@ Pin to a specific version instead of `latest` for reproducible builds:
 ```bash
 podman run --rm -v "$PWD":/workspace ghcr.io/karnarokepoch/margot:0.9.0 --help
 ```
+
+To force a specific architecture (e.g. on a machine where both are available), pass
+`--platform linux/arm64` or `--platform linux/amd64`.
 
 ### From source
 
@@ -65,7 +69,7 @@ It install it 2 things:
 
     Each tool gets its own dedicated virtualenv here — isolated from your projects and from other tools.
 
-1. The executable (what lands on your PATH):
+2. The executable (what lands on your PATH):
 
     ```bash
     $XDG_BIN_HOME  →  else  ~/.local/bin/
@@ -89,9 +93,10 @@ application descriptor in `margo/app.yaml` (or `margo/app.yaml.jinja`). See
 A minimal `margo.yaml`:
 
 <!-- markdownlint-disable MD046 -->
+
 === "YAML"
 
-    ``` yaml
+    ```yaml
     apiVersion: v1
     id: com-example-app
     name: app
@@ -103,7 +108,7 @@ A minimal `margo.yaml`:
 
 === "bash"
 
-    ``` bash
+    ```bash
     cat > margo.yaml <<EOF
     apiVersion: v1
     id: com-example-app
@@ -119,7 +124,7 @@ A minimal `app.yaml.jinja`:
 
 === "Jinja"
 
-    ``` yaml+jinja
+    ```yaml+jinja
     apiVersion: v1
     kind: ApplicationDescription
     id: {{ manifest.id }}
@@ -136,7 +141,7 @@ A minimal `app.yaml.jinja`:
 
 === "bash"
 
-    ``` bash
+    ```bash
     mkdir margo
     cat > margo/app.yaml.jinja <<EOF
     apiVersion: v1
@@ -153,6 +158,7 @@ A minimal `app.yaml.jinja`:
     deploymentProfiles: []
     EOF
     ```
+
 <!-- markdownlint-enable MD046 -->
 
 Place this at the root of your project. The `id` is the stable machine identifier for

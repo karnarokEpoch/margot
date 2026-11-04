@@ -73,27 +73,39 @@ Releases follow a branch-based flow — no manual tagging.
 
 1. Create a branch named `release/<version>` (e.g. `release/0.2.0`):
 
-   ```bash
-   git checkout -b release/0.2.0
-   ```
+    ```bash
+    git checkout -b release/0.2.0
+    ```
 
 2. Push and open a PR to `main`. The **Release Check** workflow previews
-   the changelog in CI output.
+    the changelog in CI output.
 
 3. Review & merge the PR.
 
 4. On merge, the **Release** workflow automatically:
-   - Extracts the version from the branch name
-   - Tags the merge commit
-   - Builds the package (`uv build`)
-   - Generates release notes via `git-cliff`
-   - Creates a GitHub Release with the built artifacts
+
+    - Extracts the version from the branch name
+    - Tags the merge commit
+    - Builds the package (`uv build`)
+    - Generates release notes via `git-cliff`
+    - Creates a GitHub Release with the built artifacts
+    - Builds and pushes a multi-arch container image (`linux/amd64` and `linux/arm64`) to
+        GHCR (`ghcr.io/karnarokepoch/margot`) via the reusable `.github/workflows/container.yml`
+
+### Container check
+
+The **Container Check** workflow (`.github/workflows/container-check.yml`) runs on pull
+requests that touch `Containerfile`, the container workflows, `release.yml`, or
+`pyproject.toml`. It builds both architectures, pushes to a throwaway local registry
+(nothing is published to GHCR), asserts both platforms are present in the image index,
+and runs `margot --version` on each. Any change to the `Containerfile` or container
+workflows is validated by this check before a real release ships the image.
 
 ### Versioning
 
 - Version is derived from git tags via `hatch-vcs` — no version string in source.
 - Tags pushed by the release workflow follow the branch name exactly
-  (e.g. branch `release/0.2.0` → tag `0.2.0`).
+    (e.g. branch `release/0.2.0` → tag `0.2.0`).
 
 ### No manual tags
 
