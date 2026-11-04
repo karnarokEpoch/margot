@@ -21,7 +21,12 @@ jobs:
         id: version
         run: |
           VERSION=${GITHUB_HEAD_REF#release/}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # SemVer pre-release iff the version contains a "-" (0.12.1-rc0, 1.0.0-beta.1)
+          case "$VERSION" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - uses: astral-sh/setup-uv@v6
 
@@ -53,53 +58,78 @@ jobs:
       - name: Create release and upload artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
-          gh release create ${{ steps.version.outputs.version }} dist/* \
-            --title "${{ steps.version.outputs.version }}" \
-            --notes-file RELEASE_NOTES.md \
-            --target main
+          ARGS=(--title "$VERSION" --notes-file RELEASE_NOTES.md --target main)
+          # Pre-releases must not become the repository's "Latest" release
+          if [ "$PRERELEASE" = "true" ]; then
+            ARGS+=(--prerelease)
+          fi
+          gh release create "$VERSION" dist/* "${ARGS[@]}"
 
+  # Build + verify the image first via the shared action (local registry, nothing published).
+  # Only then are the GHCR tags published, by copying the tested digest (no rebuild).
+  # Stable versions get :<version> and :latest; pre-releases (version contains "-")
+  # get only :<version> so they never take over :latest.
   container:
+    name: Publish container image
     needs: release
     if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       packages: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Extract version from branch name
         id: version
         run: |
           VERSION=${GITHUB_HEAD_REF#release/}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # SemVer pre-release iff the version contains a "-" (0.12.1-rc0, 1.0.0-beta.1)
+          case "$VERSION" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
-      - name: Compute container image tag
+      - name: Compute image name
         id: image
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Download artifacts
+      - name: Download release wheel
         uses: actions/download-artifact@v4
         with:
           name: build-artifacts
           path: dist/
 
-      - name: Log in to GHCR
+      - name: Build and verify image
+        id: tested
+        uses: ./.github/actions/build-verify-image
+
+      - name: "RELEASE ONLY: log in to GHCR"
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push container image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Containerfile
-          push: true
-          tags: |
-            ghcr.io/${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}
-            ghcr.io/${{ steps.image.outputs.name }}:latest
+      - name: "RELEASE ONLY: promote tested image to GHCR"
+        env:
+          REF: ${{ steps.tested.outputs.ref }}
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          TAGS=("ghcr.io/${IMAGE_NAME}:${VERSION}")
+          # Pre-releases never take over :latest
+          if [ "$PRERELEASE" != "true" ]; then
+            TAGS+=("ghcr.io/${IMAGE_NAME}:latest")
+          fi
+          .github/scripts/promote-image.sh "$REF" "${TAGS[@]}"
