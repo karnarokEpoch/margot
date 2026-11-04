@@ -1,0 +1,132 @@
+name: Container
+
+# Reusable multi-arch (linux/amd64 + linux/arm64) container build.
+#   release: true  -> use the release wheel artifact, push to GHCR (:<version> and :latest)
+#   release: false -> build the wheel here, push to a throwaway local registry (check only)
+# The caller must grant `packages: write` when release is true.
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: "Publish to GHCR (true) or only test the build against a local registry (false)"
+        type: boolean
+        required: true
+
+jobs:
+  container:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # only exercised when inputs.release is true; the caller grants it
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release wheel
+        if: ${{ inputs.release }}
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist/
+
+      - name: Set up uv
+        if: ${{ !inputs.release }}
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build wheel
+        if: ${{ !inputs.release }}
+        run: uv build
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host # lets buildx push to the localhost registry
+
+      - name: Compute image name
+        id: image
+        run: |
+          IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: ${{ inputs.release }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start local registry
+        if: ${{ !inputs.release }}
+        run: |
+          docker run -d -p 5000:5000 --name registry registry:2
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:5000/v2/ && exit 0
+            sleep 1
+          done
+          echo "::error::local registry did not become ready"
+          exit 1
+
+      - name: Compute tags
+        id: tags
+        env:
+          RELEASE: ${{ inputs.release }}
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+        run: |
+          if [ "$RELEASE" = "true" ]; then
+            VERSION=${GITHUB_HEAD_REF#release/}
+            FIRST="ghcr.io/${IMAGE_NAME}:${VERSION}"
+            {
+              echo "list<<EOF"
+              echo "$FIRST"
+              echo "ghcr.io/${IMAGE_NAME}:latest"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            FIRST="localhost:5000/margot:check"
+            echo "list=$FIRST" >> "$GITHUB_OUTPUT"
+          fi
+          echo "first=$FIRST" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Containerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
+
+      - name: Verify image index platforms
+        env:
+          REF: ${{ steps.tags.outputs.first }}
+        run: |
+          docker buildx imagetools inspect "$REF"
+          PLATFORMS=$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' \
+            | jq -r '.manifests[]?.platform | select(. != null) | "\(.os)/\(.architecture)"')
+          echo "Platforms in index:"
+          echo "$PLATFORMS"
+          for P in linux/amd64 linux/arm64; do
+            if ! echo "$PLATFORMS" | grep -qx "$P"; then
+              echo "::error::platform $P missing from $REF"
+              exit 1
+            fi
+          done
+
+      - name: Smoke test each platform
+        env:
+          REF: ${{ steps.tags.outputs.first }}
+        run: |
+          for P in linux/amd64 linux/arm64; do
+            echo "::group::margot --version on $P"
+            docker run --rm --platform "$P" "$REF" --version
+            echo "::endgroup::"
+          done
