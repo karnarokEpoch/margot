@@ -204,7 +204,7 @@ upstream spec, and the spec's property set is still in flux.
 | 1    | Unexpected or uncategorized failure.                                                                                                                    |
 | 2    | Usage failure, such as combining a remote URI with `--project-dir` or `--manifest`.                                                                    |
 | 3    | Descriptor loading or semantic failure: missing descriptor, both descriptor forms present, Jinja2 template found without `margo.yaml`, unresolved template, invalid YAML, or wrong `kind`. |
-| 4    | Remote registry or authentication failure.                                                                                                               |
+| 4    | Remote registry or authentication failure, including an HTTP error status from the registry (for example 429, a 5xx, or a 404 for a missing tag). |
 
 On a descriptor failure, the error message points at `margot verify`.
 

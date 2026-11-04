@@ -23,8 +23,9 @@ and descriptor inspection/validation work together through one CLI.
 
 ## Current product surface
 
-The shipped CLI provides `build`, `push`, `pull`, `fetch`, `verify`, `describe`, and `auth`. It supports margo
-application artifacts plus compose and quadlet components. `verify` is a schema-validation gate; `describe` is a
-read-only human review view.
+The shipped CLI provides `build`, `push`, `pull`, `fetch`, `verify`, `describe`, `install`, and `auth`. It supports
+margo application artifacts plus compose and quadlet components. `verify` is a schema-validation gate; `describe` is a
+read-only human review view; `install` places one quadlet deployment profile on the local host (it never starts a
+service).
 
 `docs/` (MkDocs) is the standing source of truth for shipped behavior. `ROADMAP.md` is authoritative for planned work and sequencing. When a release is being built, `.kiro/sprints/sprint-N.md` is the authoritative design for that sprint's features.

@@ -44,6 +44,7 @@ nav:
       - push: commands/push.md
       - pull: commands/pull.md
       - fetch: commands/fetch.md
+      - install: commands/install.md
       - package: commands/package.md
       - verify: commands/verify.md
       - describe: commands/describe.md

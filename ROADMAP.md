@@ -13,29 +13,6 @@ The authority model:
 
 ## Planned Sprints
 
-### Sprint 13 — `margot install`
-
-Installs one **quadlet** deployment profile of a Margo application on the local host (rootless
-Podman + systemd user session is the reference environment). `margot install [URI] [--project-dir]
-[--build-dir] [--profile ID] [--set NAME=VALUE] [--yes] [--dry-run]` takes three sources — a built
-margot project, a static folder (`app.yaml` + component archives, e.g. from `pull --recursive`, not
-adopted by `migrate`), or a remote margo artifact, **including artifacts not produced by margot**
-(resolution relies on the Margo spec and OCI metadata, never on margot-only conventions).
-Everything is resolved, staged and checked (Quadlet generator dry-run) before the host is touched;
-the plan is shown and confirmed (`--yes`, `--dry-run`). Delivered in three reviewed steps. **Step
-1:** the quadlet files are placed in `~/.config/containers/systemd/<application-id>/` (with an
-ownership marker) and systemd is reloaded; `install` never starts anything, it prints the
-`systemctl --user start` commands. **Step 2:** parameters are applied as systemd unit environment
-variables through Quadlet drop-ins (`<unit>.<suffix>.d/50-margot-parameters.conf`, `[Service]
-Environment=`); `pointer` is defined as a unit environment variable name for quadlet, so unit files
-use systemd expansion (`${NAME}`) in `Exec=`, `PublishPort=`, etc.; values come from descriptor
-defaults and `--set`. **Step 3:** final checks: unit-name collisions across the Quadlet search path
-(hard error), Quadlet-generator dry-run of the staged files, post-reload service verification.
-No `--type`, no `--force`, no descriptor schema gate: simple but fully working. Compose and helm
-profiles and `packageLocation` components are refused (see Backlog). Runs against the legacy
-`margo.yaml` name; Sprint 14 sweeps it. Depends on Sprints 11 and 12. Full plan at
-[`.kiro/sprints/sprint-13.md`](.kiro/sprints/sprint-13.md).
-
 ### Sprint 14 — `margot.yaml` project file and `margot migrate`
 
 Five items in one sprint. (1) `fix(pull)`: sanitise component names in `pull --recursive`
@@ -103,6 +80,9 @@ Unordered within groups; sequencing decided at sprint planning.
   `--password` (insecure, warns; mutually exclusive with `--password-stdin`) and a hidden prompt on a
   terminal. Full plan at
   [`.kiro/sprints/fix-auth-login-password.md`](.kiro/sprints/fix-auth-login-password.md).
+- **fix:** registry HTTP 401 without a `WWW-Authenticate` header exits 3, not 4. oras-py raises a plain
+  `ValueError` before `_check_200_response`, so the shared remote path maps it to exit 3 (429 responses
+  fail the same way). Fix in `infra/oci.py`.
 
 ### Display UX
 
@@ -182,6 +162,10 @@ Known, accepted limitations of the first version — documented in `docs/command
 - **Install a bare compose/quadlet component by URI** (no application, no profile).
 - **`--json` for `install`**: fold into the action-commands `--json` item under Display UX.
 - **Runtime selection** (`--runtime`), if a host with both Podman and Docker needs a choice.
+- **Errors hidden behind an unresolved reference.** The Quadlet generator names one unresolved reference per
+  unit. A real error that it reports only after that reference resolves is not caught before the write: the
+  unit gets the reference warning and install exits 0. Not reproduced on the host; not yet in
+  `docs/commands/install.md`.
 
 ---
 
@@ -201,3 +185,4 @@ Known, accepted limitations of the first version — documented in `docs/command
 | Sprint 10 | `--json` output for `describe` and `verify`, stable exit-code taxonomy, structured JSON error envelopes, and explicit `--no-color` / `NO_COLOR` controls; default Rich rendering preserved. | [0.10.0](https://github.com/karnarokEpoch/margot/releases/tag/0.10.0) |
 | Sprint 11 | Resource discovery driven by `app.yaml` fields (`icon`, `descriptionFile`, `licenseFile`, `releaseNotes`, any extension): `push` ships each referenced file with its spec media type (`licenseFile` name, `{file format}` tokens `jpeg` / `tiff` / `markdown`, other extensions as-is, no extension `bin`), sets `org.margo.app.resource` on every resource layer, warns on missing referenced files, and titles nested files with their sub-folder. Other files under `resources/` ship as `application/octet-stream`. `describe`, `verify` and `pull --recursive` locate the descriptor layer by `mediaType` (not the name `app.yaml`), warning with every match and using the first when several match. | [0.11.0](https://github.com/karnarokEpoch/margot/releases/tag/0.11.0) |
 | Sprint 12 | Local descriptor fallback: `describe` and `verify` resolve a static `app.yaml` (`<project-dir>/app.yaml`, then `<project-dir>/margo/app.yaml`) with no `margo.yaml` required, silently and with no new flag. A `.jinja` descriptor without `margo.yaml` is an actionable error (exit 3). `pull` is unchanged. | [0.11.0](https://github.com/karnarokEpoch/margot/releases/tag/0.11.0) |
+| Sprint 13 | `margot install` for **quadlet** profiles only: installs one deployment profile of a Margo application from a built project, a `pull --recursive` folder, or a remote margo artifact (including artifacts not produced by margot). Plan, confirmation and `--dry-run`. Files go to `~/.config/containers/systemd/<application-id>/` with an ownership marker. `--set` values and descriptor defaults become systemd unit environment variables through Quadlet drop-ins; `pointer` names that variable, and margot always sets the reserved `QUADLET_DIR`. Guards: unit-name and service-name collisions across the Quadlet search path, a Quadlet generator dry-run before the host is touched, and a post-reload service check. Never starts or enables anything; prints the `systemctl --user start` commands. Compose, helm and `packageLocation` components are refused. | [0.12.0](https://github.com/karnarokEpoch/margot/releases/tag/0.12.0) |

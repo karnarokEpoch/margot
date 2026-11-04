@@ -2,12 +2,13 @@
 
 from pathlib import Path
 import re
-import tempfile
 from tempfile import TemporaryDirectory
+from typing import Any
 
 from pytest import fixture, raises
 
 from margot.services import describe as describe_service
+from margot.services import verify as verify_service
 
 MARGO_YAML = """apiVersion: v1
 id: hello-world
@@ -144,19 +145,20 @@ class TestDescribeServiceTemplatedDescriptor:
         with raises(ValueError, match="Unresolved Jinja2 variable"):
             describe_service.load_descriptor(str(temp_project))
 
-    def test_load_descriptor_template_cleans_up_temp_file(self, temp_project: Path) -> None:
-        """Should clean up the temporary file after rendering and loading."""
+    def test_load_descriptor_template_cleans_up_temp_file(
+        self, temp_project: Path, isolated_tempdir: Path, mocker: Any
+    ) -> None:
+        """Should render exactly one temp file in its own directory and remove it."""
         (temp_project / "margo" / "app.yaml.jinja").write_text(TEMPLATED_APP_YAML, encoding="utf-8")
-
-        # Get a reference to temp files before the call
-        temp_dir = Path(tempfile.gettempdir())
-        before_temps = set(temp_dir.glob("margot-*.yaml"))
+        write_spy = mocker.spy(verify_service, "write_temp_text")
 
         describe_service.load_descriptor(str(temp_project))
 
-        # After the call, any new temp files should be cleaned up
-        after_temps = set(temp_dir.glob("margot-*.yaml"))
-        assert after_temps == before_temps
+        assert write_spy.call_count == 1
+        rendered_path = Path(write_spy.spy_return)
+        assert rendered_path.parent == isolated_tempdir
+        assert not rendered_path.exists()
+        assert sorted(isolated_tempdir.glob("margot-*.yaml")) == []
 
 
 class TestDescribeServiceManifestFlag:

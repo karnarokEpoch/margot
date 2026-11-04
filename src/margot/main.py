@@ -7,6 +7,7 @@ from margot.commands.build import build_cmd
 from margot.commands.describe import describe_cmd
 from margot.commands.fetch import fetch
 from margot.commands.global_options import global_options
+from margot.commands.install import install_cmd
 from margot.commands.package import package_cmd
 from margot.commands.pull import pull
 from margot.commands.push import push_cmd
@@ -26,6 +27,7 @@ app.command(name="push")(push_cmd)
 app.command(name="package")(package_cmd)
 app.command()(pull)
 app.command(name="verify")(verify_cmd)
+app.command(name="install")(install_cmd)
 app.command(name="describe")(describe_cmd)
 
 # Register subcommand groups

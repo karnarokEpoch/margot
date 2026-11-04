@@ -1,7 +1,10 @@
 """Shared test fixtures."""
 
 from io import StringIO
+from pathlib import Path
 import sys
+import tempfile
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -9,6 +12,8 @@ from pytest import fixture
 from rich.console import Console
 
 import margot.console as _console
+from margot.domain import install as domain_install
+from margot.infra import systemd
 
 
 @fixture(autouse=True)
@@ -24,6 +29,21 @@ def _pin_terminal_width(monkeypatch: Any) -> None:
     fixture takes effect globally across the test suite without requiring code changes.
     """
     monkeypatch.setenv("COLUMNS", "120")
+
+
+@fixture
+def isolated_tempdir(tmp_path: Path, monkeypatch: Any) -> Path:
+    """Route ``tempfile`` into a per-test directory and return it.
+
+    xdist workers share the system temp directory, so a test that snapshots
+    ``margot-*.yaml`` there also sees files created by other workers. Setting
+    ``tempfile.tempdir`` makes ``mkstemp`` default to this folder instead. The
+    monkeypatch restores the original value at teardown.
+    """
+    temp_dir = tmp_path / "tmp"
+    temp_dir.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_dir))
+    return temp_dir
 
 
 @fixture
@@ -77,6 +97,37 @@ def capture_console():
 
     _console._get_stdout = original_get_stdout  # noqa: SLF001
     _console._get_stderr = original_get_stderr  # noqa: SLF001
+
+
+@fixture
+def install_host(tmp_path: Path, monkeypatch: Any, mocker: Any) -> SimpleNamespace:
+    """Isolate `margot install` from the real host: Quadlet roots under tmp_path and a mocked generator check.
+
+    XDG_CONFIG_HOME points at <tmp>/xdg, XDG_RUNTIME_DIR is unset, the four system roots move under
+    <tmp>/system, and the generator is "found" and accepts every tree (``generator`` is its mock).
+    Tests that need the generator to fail, or be absent, change the mock's return value or
+    ``binary``. The systemctl wrapper is not mocked here; each module mocks it as it needs.
+    """
+    xdg = tmp_path / "xdg"
+    system = tmp_path / "system"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setattr(
+        domain_install,
+        "SYSTEM_QUADLET_ROOTS",
+        (
+            f"{system}/etc/{{uid}}",
+            f"{system}/etc",
+            f"{system}/share/{{uid}}",
+            f"{system}/share",
+        ),
+    )
+    binary = mocker.patch("margot.infra.systemd.quadlet_binary", return_value="/usr/libexec/podman/quadlet")
+    generator = mocker.patch(
+        "margot.infra.systemd.check_units",
+        return_value=systemd.GeneratorRun(returncode=0, stderr=""),
+    )
+    return SimpleNamespace(root=xdg / "containers" / "systemd", system=system, binary=binary, generator=generator)
 
 
 @fixture(autouse=False)
