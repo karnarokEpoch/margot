@@ -5,13 +5,14 @@ Install one quadlet deployment profile of a Margo application on this host.
 ```text
 margot install [URI] [--project-dir DIR] [--build-dir DIR] [--profile ID]
                [--set NAME=VALUE]...
-               [--yes|-y] [--dry-run]
+               [--yes|-y] [--dry-run] [--no-reload]
 ```
 
 `install` places the unit files and bundled resources of one quadlet deployment profile into
 `~/.config/containers/systemd/<application-id>/` and reloads systemd. It never starts,
 enables, stops, or restarts any service: after a successful install it prints the
-`systemctl --user start` commands for you to run.
+`systemctl --user start` commands for you to run. With `--no-reload`, systemd is not contacted
+at all.
 
 ## Flags
 
@@ -24,6 +25,7 @@ enables, stops, or restarts any service: after a successful install it prints th
 | `--set NAME=VALUE`  | —       | Value for a descriptor parameter (repeatable; last value wins).                      |
 | `--yes`, `-y`       | off     | Skip the confirmation prompt.                                                        |
 | `--dry-run`         | off     | Resolve, stage, and validate; show the plan; change nothing on the host. Exits 0.    |
+| `--no-reload`       | off     | Place the files only. Do not contact systemd: no session check, no daemon-reload, no service check. |
 
 ## Source detection
 
@@ -303,6 +305,17 @@ lingering (loginctl enable-linger).
 `default.target.wants/` symlink itself; `systemctl --user is-enabled <service>` reports
 `generated`.
 
+With `--no-reload`, `install` does not contact systemd. It places the files and prints the
+daemon-reload command first. Run that command yourself before the start commands, because
+systemd does not know the new units until it reloads:
+
+```text
+Next steps. systemd was not contacted (--no-reload), so reload it first. install did not start anything; run these yourself:
+  systemctl --user daemon-reload
+  systemctl --user start nginx.service
+  systemctl --user status nginx.service
+```
+
 ### Tips (not shown by install)
 
 - A first start may pull images from the registry. If it exceeds systemd's default 90 s start
@@ -379,6 +392,9 @@ margot install --profile com-example-nginx-quadlet
 
 # Non-interactive install (CI / scripts)
 margot install --yes
+
+# Place the files without contacting systemd; run daemon-reload yourself afterwards
+margot install --yes --no-reload
 ```
 
 ## Limitations
@@ -393,6 +409,9 @@ margot install --yes
 - An `${NAME}` in a unit file that has no value expands silently to the empty string at
     start time. The unit still starts and no warning is printed.
 - The descriptor is not schema-validated by `install`. Run `margot verify` first.
+- With `--no-reload`, systemd is not contacted, so the services are unverified: `install` does not
+    check that systemd knows them. Run `systemctl --user daemon-reload` and then
+    `systemctl --user status <service>` to confirm each one.
 - Rootless user session only. Root and system-wide installs are not supported.
 - Parameter values are clear text. There is no secret store.
 - There is no `uninstall`, `list`, or `status` command yet. To remove an installed application:
