@@ -67,7 +67,11 @@ CI must pass before merge.
 
 ## Release process
 
-Releases follow a branch-based flow — no manual tagging.
+The **Release** workflow owns tagging. There are two routes:
+
+- a `release/<version>` branch and PR, for a release that includes new commits (the steps below);
+- a manual run of the **Release** workflow on `main`, for a commit that is already tagged, such as promoting the
+    pre-release `0.12.1-rc0` to `0.12.1` (see [Promoting to a final release](#promoting-to-a-final-release)).
 
 ### Steps
 
@@ -117,13 +121,13 @@ push to `ghcr.io`.
 ### Versioning
 
 - Version is derived from git tags via `hatch-vcs` — no version string in source.
-- Tags pushed by the release workflow follow the branch name exactly
-    (e.g. branch `release/0.2.0` → tag `0.2.0`).
+- Tags pushed by the release workflow follow the version exactly: the branch name for PR releases
+    (branch `release/0.2.0` → tag `0.2.0`), or the `version` input for manual runs.
 
 ### No manual tags
 
-Do not push tags manually. The release workflow owns tagging to ensure the tag
-always points to the merged commit on `main`.
+Do not push tags manually. The release workflow creates the tag: on the merge commit for PR releases, and on
+the current HEAD of `main` for manual runs, so the tag always matches the commit being released.
 
 ### Release candidates and pre-releases
 
@@ -143,14 +147,41 @@ The pipeline detects the `-` and applies the pre-release rules above automatical
 
 #### Promoting to a final release
 
-A pre-release is **never promoted in-place**. The final release is a **new** branch
-(`release/0.12.1`) with its own PR. That PR must contain at least one commit that differs
-from `main` (e.g. a changelog or doc touch-up) — GitHub cannot open an empty PR.
+Use this route when `main` already holds everything the final release needs. The final release is cut from the
+tagged commit: no new branch, commit or PR is required.
 
-Do not push tags manually. Do not re-run the RC pipeline to produce the final release.
+1. Check that `main` is at the commit to release and that the commit already carries the pre-release tag
+    (for example `0.12.1-rc0`).
+2. In GitHub, open **Actions → Release → Run workflow**. Keep the branch on `main` and enter the version without a
+    leading `v`, for example `0.12.1`.
+
+The release jobs run only when the run is on `main`. Before anything is tagged, the guard in
+`.github/scripts/check-tagged-release.sh` requires that:
+
+- the version is SemVer (for example `0.12.1`);
+- HEAD already carries at least one tag. The tag's kind is not checked, so a pre-release tag is enough. An
+    untagged HEAD is rejected: release that commit through the `release/<version>` PR route instead;
+- the requested tag does not exist yet, locally or on `origin`.
+
+When the guard passes, the workflow:
+
+- tags HEAD with the requested version and pushes the tag;
+- builds the wheel with that version and fails if the wheel does not carry it;
+- generates release notes for the commits since the previous release (for `0.12.1`, `0.12.0..HEAD`; for a
+    pre-release, since the previous tag of any kind);
+- creates the GitHub release (a stable version is marked Latest) and publishes the container image as
+    `:<version>` and, for stable versions, `:latest`;
+- for a stable version, publishes to PyPI once the Release workflow succeeds.
+
+Use the `release/<version>` PR route instead when the final release needs new commits, such as a changelog or
+documentation touch-up. Create `release/0.12.1` from `main`, open the PR and merge it. The workflow then tags the
+merge commit.
+
+Do not push tags manually.
 
 #### If only the container job fails
 
 Use **"Re-run failed jobs"** (not "Re-run all jobs"): the tag and GitHub release already
 exist at that point, and the `build-artifacts` artifact is retained for one day.
-Re-running all jobs would attempt to create a duplicate tag and release.
+Re-running all jobs would attempt to create a duplicate tag and release. A manual run's guard
+also refuses to start again once its tag exists, so a re-run cannot repeat the tagging step.
