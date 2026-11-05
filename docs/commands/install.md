@@ -16,15 +16,15 @@ at all.
 
 ## Flags
 
-| Argument / option   | Default | Description                                                                          |
-| ------------------- | ------- | ------------------------------------------------------------------------------------ |
-| `URI`               | —       | OCI reference of a margo artifact (`oci://` optional). Selects remote mode.          |
-| `--project-dir DIR` | `.`     | Project directory. Mutually exclusive with `URI`.                                    |
-| `--build-dir DIR`   | `.dist` | Build output directory for project mode. Rejected with `URI`; exit 2 in static mode. |
-| `--profile ID`      | auto    | Deployment profile `id` to install.                                                  |
-| `--set NAME=VALUE`  | —       | Value for a descriptor parameter (repeatable; last value wins).                      |
-| `--yes`, `-y`       | off     | Skip the confirmation prompt.                                                        |
-| `--dry-run`         | off     | Resolve, stage, and validate; show the plan; change nothing on the host. Exits 0.    |
+| Argument / option   | Default | Description                                                                                         |
+| ------------------- | ------- | --------------------------------------------------------------------------------------------------- |
+| `URI`               | —       | OCI reference of a margo artifact (`oci://` optional). Selects remote mode.                         |
+| `--project-dir DIR` | `.`     | Project directory. Mutually exclusive with `URI`.                                                   |
+| `--build-dir DIR`   | `.dist` | Build output directory for project mode. Rejected with `URI`; exit 2 in static mode.                |
+| `--profile ID`      | auto    | Deployment profile `id` to install.                                                                 |
+| `--set NAME=VALUE`  | —       | Value for a descriptor parameter (repeatable; last value wins).                                     |
+| `--yes`, `-y`       | off     | Skip the confirmation prompt.                                                                       |
+| `--dry-run`         | off     | Resolve, stage, and validate; show the plan; change nothing on the host. Exits 0.                   |
 | `--no-reload`       | off     | Place the files only. Do not contact systemd: no session check, no daemon-reload, no service check. |
 
 ## Source detection
