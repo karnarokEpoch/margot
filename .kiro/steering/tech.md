@@ -44,4 +44,5 @@ media-type values to `oci-media-types.md`, and documentation rules to `documenta
 
 Versioning comes from git tags through Hatch VCS. Release changes use a `release/<version>` branch and PR; merging it to
 `main` triggers the release workflow to create the tag, build artifacts, generate notes, and publish the GitHub release.
+A manual run of that workflow on `main` releases an already-tagged commit instead (e.g. promoting `0.12.1-rc0` to `0.12.1`).
 Do not create or push release tags manually. `CONTRIBUTING.md` owns the complete process.
