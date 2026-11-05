@@ -4,23 +4,46 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+  # Manual release of an already-tagged commit on main (e.g. promoting 0.12.1-rc0 to 0.12.1).
+  # Guarded by .github/scripts/check-tagged-release.sh: HEAD must already carry a tag and the
+  # requested tag must not exist yet.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SemVer version to release, e.g. 0.12.1 (no leading v). HEAD of main must already carry a tag."
+        required: true
+        type: string
 
 jobs:
   release:
-    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/')
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/')) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
 
     steps:
       - uses: actions/checkout@v4
         with:
+          # fetch-depth 0 also fetches all tags, which the manual-run guard and git-cliff need.
           fetch-depth: 0
 
-      - name: Extract version from branch name
+      - name: Resolve version
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          VERSION=${GITHUB_HEAD_REF#release/}
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="${HEAD_REF#release/}"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           # SemVer pre-release iff the version contains a "-" (0.12.1-rc0, 1.0.0-beta.1)
           case "$VERSION" in
@@ -31,22 +54,90 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Validate SemVer
-        run: uvx --from 'semver>=3.0,<4.0' pysemver check ${{ steps.version.outputs.version }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: uvx --from 'semver>=3.0,<4.0' pysemver check "$VERSION"
+
+      - name: Guard manual release (HEAD tagged, tag not yet used)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: .github/scripts/check-tagged-release.sh "$VERSION"
 
       - name: Tag the release commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag ${{ steps.version.outputs.version }}
-          git push origin ${{ steps.version.outputs.version }}
+          # Tags the checked-out commit: the merge commit (PR path) or HEAD of main (manual path, guarded above).
+          git tag "$VERSION"
+          git push origin "refs/tags/$VERSION"
+
+      - name: Pin built version to the requested release (manual path)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        # Pins the version explicitly (hatch-vcs honours this variable over git tags). With both
+        # 0.12.1-rc0 and 0.12.1 on HEAD, hatch-vcs alone also picked 0.12.1 in local tests, but the
+        # pin does not rely on that. The wheel check below verifies the result.
+        run: echo "SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION}" >> "$GITHUB_ENV"
 
       - name: Build
         run: uv build
 
+      - name: Assert built wheel version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          shopt -s nullglob
+          WHEELS=(dist/*.whl)
+          if [ "${#WHEELS[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one wheel in dist/, found ${#WHEELS[@]}"
+            exit 1
+          fi
+          # Wheel names are {name}-{version}-{tags}.whl. The version is PEP 440 normalised
+          # (0.12.1-rc0 -> 0.12.1rc0), so compare with the normalised requested version.
+          BUILT=$(basename "${WHEELS[0]}" | cut -d- -f2)
+          EXPECTED=$(uv run --no-project --with packaging python \
+            -c 'import sys; from packaging.version import Version; print(Version(sys.argv[1]))' "$VERSION")
+          if [ "$BUILT" != "$EXPECTED" ]; then
+            echo "::error::built wheel is ${BUILT}, expected ${EXPECTED} for ${VERSION}"
+            exit 1
+          fi
+          echo "Wheel version OK: ${BUILT}"
+
       - name: Generate changelog
-        run: uvx git-cliff --latest --strip header -o RELEASE_NOTES.md
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # HEAD may carry two tags (e.g. 0.12.1-rc0 and 0.12.1), so --latest is unreliable.
+            # Cover everything since the previous release: the newest tag on an ancestor of HEAD
+            # (--no-contains HEAD drops tags on HEAD itself). Stable releases compare only with
+            # stable tags; pre-releases may compare with any tag. Old v* tags do not match the pattern.
+            if [ "$PRERELEASE" = "true" ]; then
+              PATTERN='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+            else
+              PATTERN='^[0-9]+\.[0-9]+\.[0-9]+$'
+            fi
+            PREV=$(git tag --merged HEAD --no-contains HEAD | grep -E "$PATTERN" | sort -V | tail -n 1 || true)
+            if [ -n "$PREV" ]; then RANGE="${PREV}..HEAD"; else RANGE="HEAD"; fi
+            echo "Changelog range: ${RANGE}"
+            uvx git-cliff "$RANGE" --tag "$VERSION" --strip header -o RELEASE_NOTES.md
+            # git-cliff ignores --tag for commits that already carry a tag and labels the section
+            # with that tag (e.g. 0.12.1-rc0). Rewrite the first release heading to this version.
+            sed -i -E "0,/^## \[/s/^## \[[^]]*\]/## [${VERSION}]/" RELEASE_NOTES.md
+          else
+            uvx git-cliff --latest --strip header -o RELEASE_NOTES.md
+          fi
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::error::RELEASE_NOTES.md is empty"
+            exit 1
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -75,7 +166,9 @@ jobs:
   container:
     name: Publish container image
     needs: release
-    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/')
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/')) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -85,17 +178,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Extract version from branch name
-        id: version
-        run: |
-          VERSION=${GITHUB_HEAD_REF#release/}
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          # SemVer pre-release iff the version contains a "-" (0.12.1-rc0, 1.0.0-beta.1)
-          case "$VERSION" in
-            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
-            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
-          esac
 
       - name: Compute image name
         id: image
@@ -124,8 +206,8 @@ jobs:
         env:
           REF: ${{ steps.tested.outputs.ref }}
           IMAGE_NAME: ${{ steps.image.outputs.name }}
-          VERSION: ${{ steps.version.outputs.version }}
-          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          VERSION: ${{ needs.release.outputs.version }}
+          PRERELEASE: ${{ needs.release.outputs.prerelease }}
         run: |
           TAGS=("ghcr.io/${IMAGE_NAME}:${VERSION}")
           # Pre-releases never take over :latest
