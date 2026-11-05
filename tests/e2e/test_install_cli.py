@@ -1,4 +1,4 @@
-"""E2E tests for `margot install` through the CLI (CliRunner), with systemctl and the registry mocked.
+"""E2E tests for `margot install` through the CLI (CliRunner), with the systemd user manager and the registry mocked.
 
 Exit codes follow the taxonomy in docs/exit-codes.md: 2 usage, 3 validation, 4 registry, 1 host/declined.
 """
@@ -15,7 +15,7 @@ from typer.testing import CliRunner
 from margot.domain.install import MARKER_FILENAME
 from margot.domain.models import PackageType
 from margot.infra.credentials import CredentialsExpiredError
-from margot.infra.systemd import GeneratorRun
+from margot.infra.systemd import GeneratorRun, SystemdError
 from margot.main import app
 from tests.integration._install_helpers import (
     REPOSITORY,
@@ -39,15 +39,23 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
 
-def _completed(returncode: int = 0, stderr: str = "") -> Any:
-    return SimpleNamespace(returncode=returncode, stdout="", stderr=stderr)
+def _systemd_calls(manager: Any) -> list[str]:
+    """The systemd functions called, in order. A service check is written as ``unit_is_known:<service>``."""
+    return [f"unit_is_known:{call.args[0]}" if call[0] == "unit_is_known" else call[0] for call in manager.mock_calls]
 
 
 @fixture
 def systemctl(mocker: Any) -> Any:
-    """systemctl --user is available and succeeds; every call is recorded."""
-    mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
-    return mocker.patch("margot.infra.systemd.run", return_value=_completed(0))
+    """The systemd user manager answers every call. The three systemd functions are children of one mock.
+
+    The order of calls is read with ``_systemd_calls``; an empty ``mock_calls`` means systemd was never contacted.
+    """
+    manager = mocker.Mock()
+    manager.unit_is_known.return_value = True
+    mocker.patch("margot.infra.systemd.ensure_user_session", manager.ensure_user_session)
+    mocker.patch("margot.infra.systemd.daemon_reload", manager.daemon_reload)
+    mocker.patch("margot.infra.systemd.unit_is_known", manager.unit_is_known)
+    return manager
 
 
 @fixture
@@ -184,16 +192,18 @@ class TestExitCodesOfRegistryAndHost:
         assert result.exit_code == 4
         assert _leftovers(staging_tmp) == []
 
-    def test_unusable_user_session_exits_1(self, tmp_path: Path, mocker: Any, xdg: Path) -> None:
-        """Should exit 1 and name the user session when systemctl --user cannot answer."""
-        mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
-        mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "Failed to connect to bus"))
+    def test_unusable_user_session_exits_1(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should exit 1 and name the user session when the systemd user manager cannot be reached."""
+        systemctl.ensure_user_session.side_effect = SystemdError(
+            "The systemd user session is not reachable (tried: /run/user/1000/bus). --no-reload"
+        )
         args, _ = _project_args(tmp_path)
 
         result = runner.invoke(app, ["install", *args, "--yes"])
 
         assert result.exit_code == 1
         assert "user session" in result.output
+        assert "--no-reload" in result.output
         assert not xdg.exists()
 
     def test_declined_confirmation_exits_1_and_writes_nothing(
@@ -222,7 +232,7 @@ class TestDryRun:
         assert result.exit_code == 0
         assert "mosquitto.service" in result.output
         assert not xdg.exists()
-        systemctl.assert_not_called()
+        assert systemctl.mock_calls == []
 
     def test_dry_run_never_asks_even_on_a_terminal(self, tmp_path: Path, mocker: Any, systemctl: Any) -> None:
         """Should not call confirm on a terminal when --dry-run is given."""
@@ -297,12 +307,12 @@ class TestInstall:
         assert _leftovers(staging_tmp) == []
 
     def test_install_never_starts_or_enables(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
-        """Should call systemctl only for show-environment, daemon-reload and one cat per service."""
+        """Should call the session check, daemon-reload and one service check, in that order, and nothing else."""
         args, _ = _project_args(tmp_path)
 
         runner.invoke(app, ["install", *args, "--yes"])
 
-        assert [call.args[0][2] for call in systemctl.call_args_list] == ["show-environment", "daemon-reload", "cat"]
+        assert _systemd_calls(systemctl) == ["ensure_user_session", "daemon_reload", "unit_is_known:mosquitto.service"]
 
     def test_marker_is_written_with_installed_state(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should leave a marker in state 'installed' inside the application directory."""
@@ -542,7 +552,7 @@ class TestParameters:
 
         assert result.exit_code == 0, result.output
         assert not xdg.exists()
-        systemctl.assert_not_called()
+        assert systemctl.mock_calls == []
 
 
 class TestQuadletDirPlan:
@@ -599,7 +609,7 @@ class TestGuards:
         assert str(xdg / "com-belden-mosquitto" / "mosquitto.container") in result.output
         assert "same file name" in result.output
         assert not (xdg / "com-belden-mosquitto").exists()
-        systemctl.assert_not_called()
+        assert systemctl.mock_calls == []
 
     def test_collision_with_yes_exits_3_and_writes_nothing(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should exit 3 with --yes too, and not reload systemd."""
@@ -614,7 +624,7 @@ class TestGuards:
         assert "same service name" in result.output
         assert "mosquitto.service" in result.output
         assert not (xdg / "com-belden-mosquitto").exists()
-        systemctl.assert_not_called()
+        assert systemctl.mock_calls == []
 
     def test_generator_rejection_exits_3_with_its_message_and_writes_nothing(
         self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
@@ -632,7 +642,7 @@ class TestGuards:
         assert result.exit_code == 3
         assert "unknown key 'Imag'" in result.output
         assert not (xdg / "com-belden-mosquitto").exists()
-        systemctl.assert_not_called()
+        assert systemctl.mock_calls == []
 
     def test_generator_output_stays_out_of_stdout(self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any) -> None:
         """Should not print the generator's service blocks on stdout, valid tree or not."""
@@ -657,16 +667,9 @@ class TestGuards:
         assert result.output.count("Quadlet generator") == 1
         assert (xdg / "com-belden-mosquitto" / "mosquitto.container").is_file()
 
-    def test_missing_service_after_reload_exits_1_with_the_hint(self, tmp_path: Path, mocker: Any, xdg: Path) -> None:
+    def test_missing_service_after_reload_exits_1_with_the_hint(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should exit 1 naming the service, the unit file and the diagnostics when systemd does not know it."""
-        mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
-
-        def run(argv: list[str], **_kwargs: Any) -> Any:
-            if argv[2] == "cat":
-                return _completed(1, "No files found for mosquitto.service.")
-            return _completed(0)
-
-        mocker.patch("margot.infra.systemd.run", side_effect=run)
+        systemctl.unit_is_known.side_effect = lambda service: service != "mosquitto.service"
         args, _ = _project_args(tmp_path)
 
         result = runner.invoke(app, ["install", *args, "--yes"])
@@ -719,7 +722,7 @@ class TestUnresolvedReferences:
         assert text.count(WARNING_START) == 1
         assert "mosquitto.service is generated once owner.network is installed" in text
         assert (xdg / "com-belden-mosquitto" / "mosquitto.container").is_file()
-        assert not any(call.args[0][2:4] == ["cat", "mosquitto.service"] for call in systemctl.call_args_list)
+        assert "unit_is_known:mosquitto.service" not in _systemd_calls(systemctl)
 
     def test_missing_reference_dry_run_warns_and_writes_nothing(
         self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
@@ -735,7 +738,7 @@ class TestUnresolvedReferences:
         assert result.exit_code == 0
         assert _flat(result.output).count(WARNING_START) == 1
         assert not (xdg / "com-belden-mosquitto").exists()
-        systemctl.assert_not_called()
+        assert systemctl.mock_calls == []
 
     def test_reference_to_an_installed_unit_prints_no_warning(
         self, tmp_path: Path, systemctl: Any, xdg: Path, install_host: Any
@@ -773,7 +776,7 @@ class TestUnresolvedReferences:
         assert "NoSuchKey" in result.output
         assert "owner.network was not found" not in result.output
         assert not (xdg / "com-belden-mosquitto").exists()
-        systemctl.assert_not_called()
+        assert systemctl.mock_calls == []
 
 
 VOLUME_WARNING_START = "mosquitto.container references owner.volume, which is not installed on this host."
@@ -783,16 +786,10 @@ class TestMissingServiceAfterWrite:
     """A unit whose second reference is missing is installed with a warning; a real error is exit 1."""
 
     @fixture
-    def cat_fails_for_mosquitto(self, mocker: Any) -> Any:
-        """systemctl --user: `cat mosquitto.service` fails (systemd does not know it); other calls succeed."""
-        mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
-
-        def run(argv: list[str], **_kwargs: Any) -> Any:
-            if argv[2] == "cat" and argv[3] == "mosquitto.service":
-                return _completed(1, "No files found for mosquitto.service.")
-            return _completed(0)
-
-        return mocker.patch("margot.infra.systemd.run", side_effect=run)
+    def cat_fails_for_mosquitto(self, systemctl: Any) -> Any:
+        """systemd does not know mosquitto.service after reload; every other service is known."""
+        systemctl.unit_is_known.side_effect = lambda service: service != "mosquitto.service"
+        return systemctl
 
     def test_missing_second_reference_exits_0_and_prints_one_warning(
         self, tmp_path: Path, xdg: Path, install_host: Any, cat_fails_for_mosquitto: Any
