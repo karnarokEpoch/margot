@@ -2,12 +2,11 @@
 
 Guard 1 (unit-name collision) and guard 2 (Quadlet generator dry-run) run in prepare_install, so
 --dry-run exercises them too. Guard 3 (systemd must know every service after daemon-reload) runs in
-apply_install. systemctl and the generator are mocked; Quadlet roots are real directories under tmp_path.
+apply_install. The systemd user manager and the generator are mocked; Quadlet roots are real directories under tmp_path.
 """
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from pytest import mark, raises
@@ -22,20 +21,22 @@ pytestmark = mark.usefixtures("install_host")
 APP = "com-belden-mosquitto"
 
 
-def _completed(returncode: int = 0, stderr: str = "") -> Any:
-    return SimpleNamespace(returncode=returncode, stdout="", stderr=stderr)
-
-
 def _systemctl(mocker: Any, missing: frozenset[str] = frozenset()) -> Any:
-    """systemctl --user: every call succeeds except `cat` of a service listed in ``missing``."""
-    mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
+    """The systemd user manager answers every call. A service listed in ``missing`` is unknown after reload.
 
-    def run(argv: list[str], **_kwargs: Any) -> Any:
-        if argv[2] == "cat" and argv[3] in missing:
-            return _completed(1, f"Unit {argv[3]} could not be found.")
-        return _completed(0)
+    The three systemd functions are children of one mock, so ``_systemd_calls`` reads the order of calls.
+    """
+    manager = mocker.Mock()
+    manager.unit_is_known.side_effect = lambda service: service not in missing
+    mocker.patch("margot.infra.systemd.ensure_user_session", manager.ensure_user_session)
+    mocker.patch("margot.infra.systemd.daemon_reload", manager.daemon_reload)
+    mocker.patch("margot.infra.systemd.unit_is_known", manager.unit_is_known)
+    return manager
 
-    return mocker.patch("margot.infra.systemd.run", side_effect=run)
+
+def _systemd_calls(manager: Any) -> list[str]:
+    """The systemd functions called, in order. A service check is written as ``unit_is_known:<service>``."""
+    return [f"unit_is_known:{call.args[0]}" if call[0] == "unit_is_known" else call[0] for call in manager.mock_calls]
 
 
 def _unit(root: Path, folder: str, name: str, content: str = "[Container]\nImage=x\n") -> Path:
@@ -154,7 +155,7 @@ class TestUnitNameCollision:
 
         assert _tree(install_host.root) == before
         assert not (install_host.root / APP).exists()
-        run.assert_not_called()
+        assert run.mock_calls == []
 
 
 class TestGeneratorValidation:
@@ -197,7 +198,7 @@ class TestGeneratorValidation:
         assert "nothing was written" in str(info.value).lower()
         assert "processing encountered" not in str(info.value)
         assert not install_host.root.exists()
-        run.assert_not_called()
+        assert run.mock_calls == []
 
     def test_a_missing_generator_warns_once_and_the_install_proceeds(
         self, tmp_path: Path, install_host: Any, mocker: Any
@@ -284,7 +285,7 @@ class TestUnresolvedReferences:
         assert prepared.warnings == ()
         assert prepared.deferred == ()
         assert (install_host.root / APP / "mosquitto.container").is_file()
-        assert ["cat", "mosquitto.service"] in [call.args[0][2:] for call in run.call_args_list]
+        assert "unit_is_known:mosquitto.service" in _systemd_calls(run)
 
     def test_reference_to_a_unit_of_the_own_directory_is_silent(self, tmp_path: Path, install_host: Any) -> None:
         """Should accept a reference to a unit the application already has in its own directory (an upgrade)."""
@@ -319,7 +320,7 @@ class TestUnresolvedReferences:
             prepared.cleanup()
 
     def test_deferred_service_is_not_checked_after_reload(self, tmp_path: Path, install_host: Any, mocker: Any) -> None:
-        """Should not require the deferred service to be known, and never call systemctl cat for it."""
+        """Should not require the deferred service to be known, and never check it with systemd."""
         install_host.generator.return_value = GeneratorRun(
             returncode=1, stderr=_generator_lines(("mosquitto.container", "owner.network"))
         )
@@ -332,7 +333,7 @@ class TestUnresolvedReferences:
 
         assert result.services == ()
         assert result.start_services == ()
-        assert [call.args[0][2:] for call in run.call_args_list] == [["show-environment"], ["daemon-reload"]]
+        assert _systemd_calls(run) == ["ensure_user_session", "daemon_reload"]
         assert (install_host.root / APP / "mosquitto.container").is_file()
 
     def test_each_missing_reference_is_one_warning_in_unit_order(self, tmp_path: Path, install_host: Any) -> None:
@@ -406,9 +407,7 @@ class TestPostReloadVerification:
         finally:
             prepared.cleanup()
 
-        verbs = [call.args[0][2] for call in run.call_args_list]
-        assert verbs == ["show-environment", "daemon-reload", "cat"]
-        assert run.call_args_list[-1].args[0][3] == "mosquitto.service"
+        assert _systemd_calls(run) == ["ensure_user_session", "daemon_reload", "unit_is_known:mosquitto.service"]
 
     def test_missing_service_is_exit_1_with_the_hint_and_files_kept(self, tmp_path: Path, install_host: Any, mocker: Any) -> None:
         """Should name the service, the unit file and the diagnostics, and keep what was written."""
@@ -431,13 +430,13 @@ class TestPostReloadVerification:
         assert marker["state"] == "installed"
 
     def test_dry_run_calls_no_systemctl_and_writes_nothing(self, tmp_path: Path, install_host: Any, mocker: Any) -> None:
-        """Should prepare and stop: no systemctl call of any kind, no file under the Quadlet root."""
+        """Should prepare and stop: no systemd call of any kind, no file under the Quadlet root."""
         run = _systemctl(mocker)
 
         prepared = _prepare(tmp_path)
         prepared.cleanup()
 
-        run.assert_not_called()
+        assert run.mock_calls == []
         assert not install_host.root.exists()
 
 
@@ -612,11 +611,7 @@ class TestMissingServiceAfterReload:
 
         assert len(install_host.generator.call_args_list) == 1
         assert install_host.generator.call_args.args[0] is not None
-        assert [call.args[0][2:] for call in run.call_args_list] == [
-            ["show-environment"],
-            ["daemon-reload"],
-            ["cat", "mosquitto.service"],
-        ]
+        assert _systemd_calls(run) == ["ensure_user_session", "daemon_reload", "unit_is_known:mosquitto.service"]
         assert result.warnings == ()
         assert result.services == ("mosquitto.service",)
 
@@ -643,3 +638,23 @@ class TestMissingServiceMessage:
         assert "x" * 500 in message
         assert "x" * 700 not in message
         assert "x..." in message
+
+    def test_without_a_generator_the_message_drops_the_dry_run_command(
+        self, tmp_path: Path, install_host: Any, mocker: Any
+    ) -> None:
+        """Should omit the QUADLET_UNIT_DIRS dry-run command when no generator is installed, and keep the journalctl hint."""
+        install_host.binary.return_value = None
+        _systemctl(mocker, missing=frozenset({"mosquitto.service"}))
+        prepared = _prepare(tmp_path)
+        try:
+            with raises(SystemdError) as info:
+                install_service.apply_install(prepared, root=install_host.root)
+        finally:
+            prepared.cleanup()
+
+        message = str(info.value)
+        assert "mosquitto.service" in message
+        assert "-dryrun -user" not in message
+        assert "QUADLET_UNIT_DIRS" not in message
+        assert "journalctl --user -b -t quadlet-generator" in message
+        assert "nothing was rolled back" in message.lower()

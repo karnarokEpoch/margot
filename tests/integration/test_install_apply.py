@@ -1,4 +1,4 @@
-"""Integration tests for services/install.py::apply_install with a mocked systemctl and a tmp XDG root.
+"""Integration tests for services/install.py::apply_install with a mocked systemd user manager and a tmp XDG root.
 
 Covers placement, the marker states, ownership refusals, upgrade cleanup, the failure phases, and the
 guarantee that install never starts, enables or stops anything.
@@ -18,15 +18,18 @@ from tests.integration._install_helpers import build_project, quadlet_payload
 pytestmark = mark.usefixtures("install_host")
 
 
-def _completed(returncode: int = 0, stderr: str = "") -> Any:
-    return type("Completed", (), {"returncode": returncode, "stdout": "", "stderr": stderr})()
-
-
 @fixture
 def systemctl(mocker: Any) -> Any:
-    """Mock every systemctl --user call as successful, recording the argv list."""
-    mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
-    return mocker.patch("margot.infra.systemd.run", return_value=_completed(0))
+    """The systemd user manager answers every call. The three systemd functions are children of one mock.
+
+    The order of calls is ``systemctl.mock_calls``; each entry's name is the function called.
+    """
+    manager = mocker.Mock()
+    manager.unit_is_known.return_value = True
+    mocker.patch("margot.infra.systemd.ensure_user_session", manager.ensure_user_session)
+    mocker.patch("margot.infra.systemd.daemon_reload", manager.daemon_reload)
+    mocker.patch("margot.infra.systemd.unit_is_known", manager.unit_is_known)
+    return manager
 
 
 @fixture
@@ -41,8 +44,9 @@ def _prepare(tmp_path: Path, **kwargs: Any) -> Any:
     return install_service.prepare_install(uri=None, project_dir=str(project), build_dir=str(build), profile_id=None, **kwargs)
 
 
-def _argv_list(systemctl: Any) -> list[list[str]]:
-    return [call.args[0] for call in systemctl.call_args_list]
+def _called(systemctl: Any) -> list[str]:
+    """The names of the systemd functions called, in order."""
+    return [call[0] for call in systemctl.mock_calls]
 
 
 class TestFreshInstall:
@@ -79,17 +83,16 @@ class TestFreshInstall:
         ]
         assert result.services == ("mosquitto.service",)
 
-    def test_only_daemon_reload_is_called_and_never_start_or_enable(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
-        """Should call systemctl with show-environment, daemon-reload and cat only, never start/enable/stop."""
+    def test_only_session_check_reload_and_service_check_reach_systemd(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
+        """Should call the session check, daemon-reload and one service check, in that order, and nothing else."""
         prepared = _prepare(tmp_path)
         try:
             install_service.apply_install(prepared, root=xdg)
         finally:
             prepared.cleanup()
 
-        verbs = [argv[2] for argv in _argv_list(systemctl)]
-        assert verbs == ["show-environment", "daemon-reload", "cat"]
-        assert not any(word in argv for argv in _argv_list(systemctl) for word in ("start", "enable", "stop", "restart"))
+        assert _called(systemctl) == ["ensure_user_session", "daemon_reload", "unit_is_known"]
+        assert systemctl.unit_is_known.call_args.args == ("mosquitto.service",)
 
     def test_start_targets_are_reported_for_printing_only(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should report the start commands without running them."""
@@ -118,7 +121,7 @@ class TestOwnership:
             prepared.cleanup()
 
         assert sorted(p.name for p in app.iterdir()) == ["hand-written.container"]
-        assert [argv[-1] for argv in _argv_list(systemctl)] == ["show-environment"]
+        assert _called(systemctl) == ["ensure_user_session"]
 
     def test_plan_prepared_for_another_root_is_refused(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should refuse to apply a plan whose QUADLET_DIR names another directory, so the drop-in always matches the install."""
@@ -213,10 +216,9 @@ class TestUpgrade:
 class TestFailurePhases:
     """Each failure phase reports what happened and changes nothing it should not."""
 
-    def test_unusable_user_session_writes_nothing(self, tmp_path: Path, mocker: Any, xdg: Path) -> None:
+    def test_unusable_user_session_writes_nothing(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should stop before any write when the systemd user session is not usable."""
-        mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
-        mocker.patch("margot.infra.systemd.run", return_value=_completed(1, "Failed to connect to bus"))
+        systemctl.ensure_user_session.side_effect = SystemdError("The systemd user session is not reachable (tried: x).")
         prepared = _prepare(tmp_path)
         try:
             with raises(SystemdError, match=r"user session"):
@@ -226,13 +228,9 @@ class TestFailurePhases:
 
         assert not xdg.exists()
 
-    def test_failed_reload_keeps_files_and_reports_them(self, tmp_path: Path, mocker: Any, xdg: Path) -> None:
+    def test_failed_reload_keeps_files_and_reports_them(self, tmp_path: Path, systemctl: Any, xdg: Path) -> None:
         """Should report the failed daemon-reload, keep the written files and not roll back."""
-        mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
-        mocker.patch(
-            "margot.infra.systemd.run",
-            side_effect=[_completed(0), _completed(1, "reload exploded")],
-        )
+        systemctl.daemon_reload.side_effect = SystemdError("systemd daemon-reload failed: reload exploded")
         prepared = _prepare(tmp_path)
         try:
             with raises(SystemdError, match=r"daemon-reload failed.*reload exploded.*nothing was rolled back"):

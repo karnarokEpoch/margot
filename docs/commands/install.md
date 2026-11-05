@@ -269,13 +269,14 @@ author's responsibility:
 
 ### Guard 3 — post-reload verification
 
-After `daemon-reload`, each expected service must be known to systemd
-(`systemctl --user cat <service>` exits 0). If a service is missing:
+After `daemon-reload`, each expected service must be known to systemd. systemd knows the service
+when the user manager answers over its D-Bus socket with a loaded unit. If a service is missing:
 
 - Explanation is reference-only (an unresolved unit from guard 2) → warning; service is
     deferred until the referenced unit is installed.
-- Any other reason → exit 1; the error names the service, the unit file, and the hint to
-    inspect with `QUADLET_UNIT_DIRS=<app-dir> /usr/libexec/podman/quadlet -dryrun -user` or
+- Any other reason → exit 1; the error names the service and the unit file. When the Quadlet
+    generator is installed, it also names the hint to inspect with
+    `QUADLET_UNIT_DIRS=<app-dir> /usr/libexec/podman/quadlet -dryrun -user`, and always names
     `journalctl --user -b -t quadlet-generator`. Files are **not** rolled back.
 
 ## Running the workload
@@ -334,8 +335,8 @@ per-application subdirectory layout and `podman quadlet install`'s flat layout c
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | Successful install, or `--dry-run` completed                                                                                                          |
 | `1`  | User declined confirmation ("Aborted: nothing was installed")                                                                                         |
-| `1`  | systemd user session is unusable                                                                                                                      |
-| `1`  | `daemon-reload` failed                                                                                                                                |
+| `1`  | systemd user manager not reachable over D-Bus (the message names `--no-reload`)                                                                       |
+| `1`  | `daemon-reload` failed (the user manager refused `Reload`, or the call timed out)                                                                     |
 | `1`  | Expected service unknown to systemd after `daemon-reload`                                                                                             |
 | `2`  | `URI` given with `--project-dir` or `--build-dir`                                                                                                     |
 | `2`  | `--build-dir` given outside project mode                                                                                                              |
