@@ -79,9 +79,7 @@ class TestNoReloadFlag:
         systemd_calls.reload.assert_not_called()
         systemd_calls.known.assert_not_called()
 
-    def test_no_reload_says_systemd_was_not_contacted(
-        self, tmp_path: Path, systemd_calls: SimpleNamespace, xdg: Path
-    ) -> None:
+    def test_no_reload_says_systemd_was_not_contacted(self, tmp_path: Path, systemd_calls: SimpleNamespace, xdg: Path) -> None:
         """Should say in the next steps that systemd was not contacted."""
         result = runner.invoke(app, ["install", *_project_args(tmp_path), "--yes", "--no-reload"])
 

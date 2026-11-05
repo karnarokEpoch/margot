@@ -184,8 +184,7 @@ def apply_install(prepared: PreparedInstall, *, root: Path, reload: bool = True)
             systemd.daemon_reload()
         except systemd.SystemdError as error:
             raise systemd.SystemdError(
-                f"{error} Files were written to {app_dir} and nothing was rolled back. "
-                "Fix the cause and run install again."
+                f"{error} Files were written to {app_dir} and nothing was rolled back. Fix the cause and run install again."
             ) from error
         warnings, deferred_now = _verify_services(app_dir, plan, prepared.deferred)
 

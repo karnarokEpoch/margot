@@ -18,7 +18,7 @@ from pytest import fixture, mark, raises
 from margot.domain.install import MARKER_FILENAME
 from margot.infra.systemd import SystemdError
 from margot.services import install as install_service
-from tests.integration._install_helpers import MOSQUITTO_CONTAINER, build_project, quadlet_payload
+from tests.integration._install_helpers import MOSQUITTO_CONTAINER, build_project
 
 pytestmark = mark.usefixtures("install_host")
 
