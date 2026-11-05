@@ -28,6 +28,7 @@ dependencies = [
     "linkml>=1.11.1",
     "podman>=5.8.0",
     "docker>=7.2.0",
+    "jeepney>=0.9.0",
 ]
 
 [project.urls]
