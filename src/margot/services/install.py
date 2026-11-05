@@ -520,10 +520,13 @@ def _missing_message(app_dir: Path, failing: list[domain.UnitFile], diagnosis: d
     details = [line for unit in failing for line in _errors_of(diagnosis, unit)]
     if details:
         lines.append(_trimmed("\n".join(details)))
-    lines.append(
-        f"The Quadlet generator probably rejected the file. Check it with: QUADLET_UNIT_DIRS={app_dir} "
-        "/usr/libexec/podman/quadlet -dryrun -user, or read journalctl --user -b -t quadlet-generator."
-    )
+    if systemd.quadlet_binary() is not None:
+        lines.append(
+            f"The Quadlet generator probably rejected the file. Check it with: QUADLET_UNIT_DIRS={app_dir} "
+            "/usr/libexec/podman/quadlet -dryrun -user, or read journalctl --user -b -t quadlet-generator."
+        )
+    else:
+        lines.append("The Quadlet generator probably rejected the file. Read journalctl --user -b -t quadlet-generator.")
     lines.append(f"Files were written to {app_dir} and nothing was rolled back. Fix the cause and run install again.")
     return "\n".join(lines)
 
