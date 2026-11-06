@@ -66,9 +66,19 @@ in-memory `SSLContext` on a small `requests` adapter (no temp bundle file, no `h
 Automatic only: no flag, env var or setting. Client certificates are deferred (see Backlog).
 Independent of Sprints 11–16. Full plan at [`.kiro/sprints/sprint-17.md`](.kiro/sprints/sprint-17.md).
 
+### Sprint 18 — `margot install` in a container: D-Bus transport and `--no-reload`
+
+`install` stops shelling out to `systemctl --user`: it talks to the systemd user manager over its D-Bus
+socket (`$XDG_RUNTIME_DIR/systemd/private`, then the session bus) with jeepney's sans-IO API, so the
+published image (no `systemctl`) can install onto the host when the socket is mounted and the container
+runs with `--userns=keep-id`. A new `--no-reload` flag places the files only and never contacts systemd
+(prints `systemctl --user daemon-reload` as the first next step). Documents the container contract
+(socket and Quadlet directory mounted at the host's paths). Independent of Sprints 14–17. Full plan at
+[`.kiro/sprints/sprint-18.md`](.kiro/sprints/sprint-18.md).
+
 ---
 
-## Backlog / Stack (Sprint 18+)
+## Backlog / Stack (Sprint 19+)
 
 Unordered within groups; sequencing decided at sprint planning.
 

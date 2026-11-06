@@ -2,8 +2,9 @@
 
 ``prepare_install`` resolves the source, selects the profile, stages every component archive and
 builds the plan. It never touches systemd or the Quadlet directory. ``apply_install`` is the only
-function that writes to the host: it checks the systemd user session and ownership, places the
-files, maintains the marker and reloads systemd. It never starts, enables or stops a unit.
+function that writes to the host: it checks ownership, places the files and maintains the marker.
+Unless ``reload`` is False (``--no-reload``), it also checks the systemd user session, reloads
+systemd and verifies that each expected service is known. It never starts, enables or stops a unit.
 """
 
 from collections.abc import Mapping
@@ -85,7 +86,8 @@ class InstallResult:
     """What apply_install did. ``services`` are the services generated now; deferred ones are not listed.
 
     ``warnings`` are the messages found after the write (a unit whose reference is missing on the host).
-    The command prints them.
+    The command prints them. ``reloaded`` is False when apply_install ran with ``reload=False``: systemd
+    was not contacted, so ``services`` are unverified and ``warnings`` is empty.
     """
 
     app_dir: Path
@@ -95,6 +97,7 @@ class InstallResult:
     wanted_services: tuple[str, ...]
     files: tuple[str, ...]
     warnings: tuple[str, ...] = ()
+    reloaded: bool = True
 
 
 def detect_source(uri: str | None, project_dir: str | None) -> str:
@@ -140,15 +143,20 @@ def prepare_install(
         raise
 
 
-def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
-    """Place the files under ``root/<application-id>/``, maintain the marker and reload systemd.
+def apply_install(prepared: PreparedInstall, *, root: Path, reload: bool = True) -> InstallResult:
+    """Place the files under ``root/<application-id>/`` and maintain the marker. Reload systemd unless told not to.
+
+    With ``reload=True`` (the default) the systemd user session is checked first, then systemd is reloaded
+    and every expected service is verified. With ``reload=False`` (``--no-reload``) systemd is not contacted
+    at all, and the services are reported as unverified.
 
     Raises:
-        systemd.SystemdError: Unusable user session, or daemon-reload failed (exit 1).
+        systemd.SystemdError: Unusable user session, or daemon-reload failed (exit 1). Only with ``reload=True``.
         ValueError: The application directory belongs to someone else or to another profile (exit 3).
     """
     plan = prepared.plan
-    systemd.ensure_user_session()
+    if reload:
+        systemd.ensure_user_session()
     app_dir = root / domain.application_dir_name(plan.app_id)
     if str(app_dir) != plan.target_dir:
         raise ValueError(
@@ -169,13 +177,16 @@ def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
     install_store.prune_empty_dirs(app_dir)
     install_store.write_marker(app_dir, _record(plan, "installed", installed_at))
 
-    try:
-        systemd.daemon_reload()
-    except systemd.SystemdError as error:
-        raise systemd.SystemdError(
-            f"{error} Files were written to {app_dir} and nothing was rolled back. Fix the cause and run install again."
-        ) from error
-    warnings, deferred_now = _verify_services(app_dir, plan, prepared.deferred)
+    warnings: tuple[str, ...] = ()
+    deferred_now: tuple[str, ...] = ()
+    if reload:
+        try:
+            systemd.daemon_reload()
+        except systemd.SystemdError as error:
+            raise systemd.SystemdError(
+                f"{error} Files were written to {app_dir} and nothing was rolled back. Fix the cause and run install again."
+            ) from error
+        warnings, deferred_now = _verify_services(app_dir, plan, prepared.deferred)
 
     not_generated = set(prepared.deferred) | set(deferred_now)
     generated = tuple(unit for unit in plan.units if unit.service not in not_generated)
@@ -187,6 +198,7 @@ def apply_install(prepared: PreparedInstall, *, root: Path) -> InstallResult:
         wanted_services=tuple(unit.service for unit in generated if unit.default_target),
         files=plan.files,
         warnings=warnings,
+        reloaded=reload,
     )
 
 
@@ -520,10 +532,13 @@ def _missing_message(app_dir: Path, failing: list[domain.UnitFile], diagnosis: d
     details = [line for unit in failing for line in _errors_of(diagnosis, unit)]
     if details:
         lines.append(_trimmed("\n".join(details)))
-    lines.append(
-        f"The Quadlet generator probably rejected the file. Check it with: QUADLET_UNIT_DIRS={app_dir} "
-        "/usr/libexec/podman/quadlet -dryrun -user, or read journalctl --user -b -t quadlet-generator."
-    )
+    if systemd.quadlet_binary() is not None:
+        lines.append(
+            f"The Quadlet generator probably rejected the file. Check it with: QUADLET_UNIT_DIRS={app_dir} "
+            "/usr/libexec/podman/quadlet -dryrun -user, or read journalctl --user -b -t quadlet-generator."
+        )
+    else:
+        lines.append("The Quadlet generator probably rejected the file. Read journalctl --user -b -t quadlet-generator.")
     lines.append(f"Files were written to {app_dir} and nothing was rolled back. Fix the cause and run install again.")
     return "\n".join(lines)
 

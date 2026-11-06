@@ -106,7 +106,7 @@ def install_host(tmp_path: Path, monkeypatch: Any, mocker: Any) -> SimpleNamespa
     XDG_CONFIG_HOME points at <tmp>/xdg, XDG_RUNTIME_DIR is unset, the four system roots move under
     <tmp>/system, and the generator is "found" and accepts every tree (``generator`` is its mock).
     Tests that need the generator to fail, or be absent, change the mock's return value or
-    ``binary``. The systemctl wrapper is not mocked here; each module mocks it as it needs.
+    ``binary``. The systemd user manager is not mocked here; each module mocks the systemd functions as it needs.
     """
     xdg = tmp_path / "xdg"
     system = tmp_path / "system"

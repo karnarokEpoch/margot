@@ -5,25 +5,27 @@ Install one quadlet deployment profile of a Margo application on this host.
 ```text
 margot install [URI] [--project-dir DIR] [--build-dir DIR] [--profile ID]
                [--set NAME=VALUE]...
-               [--yes|-y] [--dry-run]
+               [--yes|-y] [--dry-run] [--no-reload]
 ```
 
 `install` places the unit files and bundled resources of one quadlet deployment profile into
 `~/.config/containers/systemd/<application-id>/` and reloads systemd. It never starts,
 enables, stops, or restarts any service: after a successful install it prints the
-`systemctl --user start` commands for you to run.
+`systemctl --user start` commands for you to run. With `--no-reload`, systemd is not contacted
+at all.
 
 ## Flags
 
-| Argument / option   | Default | Description                                                                          |
-| ------------------- | ------- | ------------------------------------------------------------------------------------ |
-| `URI`               | —       | OCI reference of a margo artifact (`oci://` optional). Selects remote mode.          |
-| `--project-dir DIR` | `.`     | Project directory. Mutually exclusive with `URI`.                                    |
-| `--build-dir DIR`   | `.dist` | Build output directory for project mode. Rejected with `URI`; exit 2 in static mode. |
-| `--profile ID`      | auto    | Deployment profile `id` to install.                                                  |
-| `--set NAME=VALUE`  | —       | Value for a descriptor parameter (repeatable; last value wins).                      |
-| `--yes`, `-y`       | off     | Skip the confirmation prompt.                                                        |
-| `--dry-run`         | off     | Resolve, stage, and validate; show the plan; change nothing on the host. Exits 0.    |
+| Argument / option   | Default | Description                                                                                         |
+| ------------------- | ------- | --------------------------------------------------------------------------------------------------- |
+| `URI`               | —       | OCI reference of a margo artifact (`oci://` optional). Selects remote mode.                         |
+| `--project-dir DIR` | `.`     | Project directory. Mutually exclusive with `URI`.                                                   |
+| `--build-dir DIR`   | `.dist` | Build output directory for project mode. Rejected with `URI`; exit 2 in static mode.                |
+| `--profile ID`      | auto    | Deployment profile `id` to install.                                                                 |
+| `--set NAME=VALUE`  | —       | Value for a descriptor parameter (repeatable; last value wins).                                     |
+| `--yes`, `-y`       | off     | Skip the confirmation prompt.                                                                       |
+| `--dry-run`         | off     | Resolve, stage, and validate; show the plan; change nothing on the host. Exits 0.                   |
+| `--no-reload`       | off     | Place the files only. Do not contact systemd: no session check, no daemon-reload, no service check. |
 
 ## Source detection
 
@@ -269,13 +271,14 @@ author's responsibility:
 
 ### Guard 3 — post-reload verification
 
-After `daemon-reload`, each expected service must be known to systemd
-(`systemctl --user cat <service>` exits 0). If a service is missing:
+After `daemon-reload`, each expected service must be known to systemd. systemd knows the service
+when the user manager answers over its D-Bus socket with a loaded unit. If a service is missing:
 
 - Explanation is reference-only (an unresolved unit from guard 2) → warning; service is
     deferred until the referenced unit is installed.
-- Any other reason → exit 1; the error names the service, the unit file, and the hint to
-    inspect with `QUADLET_UNIT_DIRS=<app-dir> /usr/libexec/podman/quadlet -dryrun -user` or
+- Any other reason → exit 1; the error names the service and the unit file. When the Quadlet
+    generator is installed, it also names the hint to inspect with
+    `QUADLET_UNIT_DIRS=<app-dir> /usr/libexec/podman/quadlet -dryrun -user`, and always names
     `journalctl --user -b -t quadlet-generator`. Files are **not** rolled back.
 
 ## Running the workload
@@ -302,6 +305,17 @@ lingering (loginctl enable-linger).
 `install` never runs `systemctl enable`. The Quadlet generator creates the
 `default.target.wants/` symlink itself; `systemctl --user is-enabled <service>` reports
 `generated`.
+
+With `--no-reload`, `install` does not contact systemd. It places the files and prints the
+daemon-reload command first. Run that command yourself before the start commands, because
+systemd does not know the new units until it reloads:
+
+```text
+Next steps. systemd was not contacted (--no-reload), so reload it first. install did not start anything; run these yourself:
+  systemctl --user daemon-reload
+  systemctl --user start nginx.service
+  systemctl --user status nginx.service
+```
 
 ### Tips (not shown by install)
 
@@ -334,8 +348,8 @@ per-application subdirectory layout and `podman quadlet install`'s flat layout c
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | Successful install, or `--dry-run` completed                                                                                                          |
 | `1`  | User declined confirmation ("Aborted: nothing was installed")                                                                                         |
-| `1`  | systemd user session is unusable                                                                                                                      |
-| `1`  | `daemon-reload` failed                                                                                                                                |
+| `1`  | systemd user manager not reachable over D-Bus (the message names `--no-reload`)                                                                       |
+| `1`  | `daemon-reload` failed (the user manager refused `Reload`, or the call timed out)                                                                     |
 | `1`  | Expected service unknown to systemd after `daemon-reload`                                                                                             |
 | `2`  | `URI` given with `--project-dir` or `--build-dir`                                                                                                     |
 | `2`  | `--build-dir` given outside project mode                                                                                                              |
@@ -379,6 +393,9 @@ margot install --profile com-example-nginx-quadlet
 
 # Non-interactive install (CI / scripts)
 margot install --yes
+
+# Place the files without contacting systemd; run daemon-reload yourself afterwards
+margot install --yes --no-reload
 ```
 
 ## Limitations
@@ -393,6 +410,9 @@ margot install --yes
 - An `${NAME}` in a unit file that has no value expands silently to the empty string at
     start time. The unit still starts and no warning is printed.
 - The descriptor is not schema-validated by `install`. Run `margot verify` first.
+- With `--no-reload`, systemd is not contacted, so the services are unverified: `install` does not
+    check that systemd knows them. Run `systemctl --user daemon-reload` and then
+    `systemctl --user status <service>` to confirm each one.
 - Rootless user session only. Root and system-wide installs are not supported.
 - Parameter values are clear text. There is no secret store.
 - There is no `uninstall`, `list`, or `status` command yet. To remove an installed application:
