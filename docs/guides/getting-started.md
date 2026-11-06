@@ -48,6 +48,11 @@ podman run --rm -v "$PWD":/workspace ghcr.io/karnarokepoch/margot:0.9.0 --help
 To force a specific architecture (e.g. on a machine where both are available), pass
 `--platform linux/arm64` or `--platform linux/amd64`.
 
+`margot install` can also run from the container image, but it needs extra flags and bind-mounts
+to reach the host systemd user manager. See
+[Running in a container](../commands/install.md#running-in-a-container) for the full contract and
+example commands.
+
 ### From source
 
 With uv:
