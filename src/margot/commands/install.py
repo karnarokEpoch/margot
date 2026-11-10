@@ -2,6 +2,7 @@
 
 Files go to ``$XDG_CONFIG_HOME/containers/systemd/<application-id>/`` and systemd reloads them.
 The command never starts, enables or stops a unit. It prints the systemctl commands for the user.
+With ``--no-reload`` it places the files only and does not contact systemd at all.
 """
 
 from typing import Annotated
@@ -38,6 +39,11 @@ def install_cmd(  # noqa: PLR0913 - one parameter per documented option
     profile: str | None = Option(None, "--profile", help="Deployment profile id to install."),
     yes: bool = Option(False, "--yes", "-y", help="Do not ask for confirmation."),
     dry_run: bool = Option(False, "--dry-run", help="Show the plan and change nothing on this host."),
+    no_reload: bool = Option(
+        False,
+        "--no-reload",
+        help="Place the files only. Do not contact systemd: no session check, no daemon-reload, no service check.",
+    ),
     set_values: Annotated[
         list[str] | None,
         Option(
@@ -51,7 +57,8 @@ def install_cmd(  # noqa: PLR0913 - one parameter per documented option
 
     Use a built project, a pulled static folder, or a remote OCI artifact. Files are placed in
     ~/.config/containers/systemd/<application-id>/ and systemd reloads them. install does not start
-    anything: it prints the systemctl commands to run.
+    anything: it prints the systemctl commands to run. With --no-reload, systemd is not contacted
+    at all: the files are placed, and you run the daemon-reload yourself.
     """
     if uri is not None and (project_dir is not None or build_dir is not None):
         console.fatal(
@@ -77,7 +84,7 @@ def install_cmd(  # noqa: PLR0913 - one parameter per documented option
             return
         if not yes and not console.confirm(f"Install {len(prepared.plan.components)} component(s) on this host? [y/N]"):
             console.fatal("Aborted: nothing was installed", code=1)
-        _report(_apply(prepared))
+        _report(_apply(prepared, reload=not no_reload))
     finally:
         prepared.cleanup()
 
@@ -116,9 +123,9 @@ def _prepare(
         console.fatal(escape(f"Install failed: {error}"), code=1)
 
 
-def _apply(prepared: PreparedInstall) -> InstallResult:
+def _apply(prepared: PreparedInstall, *, reload: bool) -> InstallResult:
     try:
-        return install_service.apply_install(prepared, root=quadlet_root())
+        return install_service.apply_install(prepared, root=quadlet_root(), reload=reload)
     except systemd.SystemdError as error:
         console.fatal(escape(str(error)), code=1, verbatim=True)
     except (ValueError, TypeError) as error:
@@ -196,8 +203,22 @@ def _report(result: InstallResult) -> None:
 
 
 def _next_steps(result: InstallResult) -> list[Text]:
-    """The commands and timing notes margot prints. It never runs them."""
-    lines = [Text("Next steps. install did not start anything; run these yourself:", style="bold")]
+    """The commands and timing notes margot prints. It never runs them.
+
+    With ``reloaded`` False, systemd was not contacted, so the first lines say so and give the
+    daemon-reload command. With ``reloaded`` True the output is unchanged.
+    """
+    if result.reloaded:
+        lines = [Text("Next steps. install did not start anything; run these yourself:", style="bold")]
+    else:
+        lines = [
+            Text(
+                "Next steps. systemd was not contacted (--no-reload), so reload it first. "
+                "install did not start anything; run these yourself:",
+                style="bold",
+            ),
+            Text("  systemctl --user daemon-reload"),
+        ]
     if result.start_services:
         for service in result.start_services:
             lines.append(Text(f"  systemctl --user start {service}"))

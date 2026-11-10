@@ -1,7 +1,7 @@
 """Integration tests for parameters as unit environment: drop-ins written by apply_install,
 the marker that holds parameter names only, upgrade cleanup, and the refusals of prepare_install.
 
-systemctl is mocked and the Quadlet root is a tmp_path. Nothing touches the real user session.
+systemd is mocked (the user manager is never contacted) and the Quadlet root is a tmp_path.
 """
 
 import json
@@ -40,12 +40,13 @@ NO_VALUE_PARAMETER = """parameters:
 
 @fixture
 def systemctl(mocker: Any) -> Any:
-    """Every systemctl --user call succeeds."""
-    mocker.patch("margot.infra.systemd.which", return_value="/usr/bin/systemctl")
-    return mocker.patch(
-        "margot.infra.systemd.run",
-        return_value=type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
-    )
+    """The systemd user manager answers every call. The three systemd functions are children of one mock."""
+    manager = mocker.Mock()
+    manager.unit_is_known.return_value = True
+    mocker.patch("margot.infra.systemd.ensure_user_session", manager.ensure_user_session)
+    mocker.patch("margot.infra.systemd.daemon_reload", manager.daemon_reload)
+    mocker.patch("margot.infra.systemd.unit_is_known", manager.unit_is_known)
+    return manager
 
 
 @fixture
