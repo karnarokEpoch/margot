@@ -271,15 +271,18 @@ author's responsibility:
 
 ### Guard 3 — post-reload verification
 
-After `daemon-reload`, each expected service must be known to systemd. systemd knows the service
-when the user manager answers over its D-Bus socket with a loaded unit. If a service is missing:
+After `daemon-reload`, each expected service must be known to systemd. margot calls
+`Manager.LoadUnit(<service>)` over D-Bus and reads the unit `LoadState` property; a value of
+`not-found` means the service is missing. If a service is missing:
 
 - Explanation is reference-only (an unresolved unit from guard 2) → warning; service is
     deferred until the referenced unit is installed.
 - Any other reason → exit 1; the error names the service and the unit file. When the Quadlet
     generator is installed, it also names the hint to inspect with
     `QUADLET_UNIT_DIRS=<app-dir> /usr/libexec/podman/quadlet -dryrun -user`, and always names
-    `journalctl --user -b -t quadlet-generator`. Files are **not** rolled back.
+    `journalctl --user -b -t quadlet-generator`. When no Quadlet generator is installed (as in
+    the container image), the failure message has no dry-run hint lines. Files are **not** rolled
+    back.
 
 ## Running the workload
 
@@ -396,6 +399,74 @@ margot install --yes
 
 # Place the files without contacting systemd; run daemon-reload yourself afterwards
 margot install --yes --no-reload
+```
+
+## Running in a container
+
+The published image (`ghcr.io/karnarokepoch/margot:latest`, python:3.12-alpine) has `margot` as
+its entrypoint and `/workspace` as its working directory. It contains no `systemctl` binary and no
+Quadlet generator. `install` connects to the host systemd user manager directly over D-Bus; the
+socket and the correct environment variables must be available inside the container.
+
+**`--userns=keep-id` (required)** — In a rootless container with the default user namespace the
+process is uid 0. The D-Bus `EXTERNAL` auth credential is uid 0 and the host user manager answers
+`REJECTED`. With this flag the in-container uid matches the host uid and auth succeeds. Without it,
+`install` exits 1 before writing anything; the message names `XDG_RUNTIME_DIR` and `--no-reload`.
+
+**`--security-opt label=disable`** — Required on SELinux-enforcing hosts. A socket bind-mount is
+otherwise denied by the default SELinux policy.
+
+**`--yes` or `-it`** — Without a terminal the confirmation prompt cannot be answered; `install`
+exits 2. Pass `--yes` for scripts; use `-it` for interactive sessions.
+
+**`XDG_RUNTIME_DIR` and the user manager socket** — Set `-e XDG_RUNTIME_DIR=/run/user/$(id -u)`
+and mount the private user manager socket at the same path on both sides:
+`-v /run/user/$(id -u)/systemd/private:/run/user/$(id -u)/systemd/private`.
+
+**Same-path Quadlet directory and `XDG_CONFIG_HOME`** — margot writes
+`Environment="QUADLET_DIR=<path>"` into every unit's drop-in. systemd reads this value on the
+host, so the path must be identical inside and outside the container. Mount the real Quadlet
+directory at the same absolute path:
+`-v $HOME/.config/containers/systemd:$HOME/.config/containers/systemd`,
+and set `-e XDG_CONFIG_HOME=$HOME/.config`. A different in-container path produces units that
+reference a directory that does not exist on the host.
+
+**Optional: read-only mounts for a complete guard 1 scan** — Guard 1 scans six roots; unmounted
+roots are silently absent from the scan:
+
+- `-v /run/user/$(id -u)/containers/systemd:/run/user/$(id -u)/containers/systemd:ro`
+- `-v /etc/containers/systemd/users:/etc/containers/systemd/users:ro`
+- `-v /usr/share/containers/systemd/users:/usr/share/containers/systemd/users:ro`
+
+Guard 2 always prints its "generator not found" warning in the image (no generator binary). Guard 3
+(post-reload verification) still works over D-Bus.
+
+### Example: full D-Bus install
+
+```bash
+podman run --rm --userns=keep-id --security-opt label=disable \
+  -e XDG_RUNTIME_DIR=/run/user/$(id -u) \
+  -e XDG_CONFIG_HOME=$HOME/.config \
+  -v /run/user/$(id -u)/systemd/private:/run/user/$(id -u)/systemd/private \
+  -v $HOME/.config/containers/systemd:$HOME/.config/containers/systemd \
+  -v "$PWD":/workspace \
+  ghcr.io/karnarokepoch/margot:latest install --yes
+```
+
+On success: `Installed N unit(s) into: <config home>/containers/systemd/<application-id>`.
+
+### Example: file placement only (`--no-reload`)
+
+Omit the socket mount; systemd is not contacted. Run `systemctl --user daemon-reload` on the
+host after the container exits:
+
+```bash
+podman run --rm --userns=keep-id --security-opt label=disable \
+  -e XDG_RUNTIME_DIR=/run/user/$(id -u) \
+  -e XDG_CONFIG_HOME=$HOME/.config \
+  -v $HOME/.config/containers/systemd:$HOME/.config/containers/systemd \
+  -v "$PWD":/workspace \
+  ghcr.io/karnarokepoch/margot:latest install --yes --no-reload
 ```
 
 ## Limitations
