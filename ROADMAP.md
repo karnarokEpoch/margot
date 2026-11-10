@@ -80,6 +80,12 @@ Unordered within groups; sequencing decided at sprint planning.
   `--password` (insecure, warns; mutually exclusive with `--password-stdin`) and a hidden prompt on a
   terminal. Full plan at
   [`.kiro/sprints/fix-auth-login-password.md`](.kiro/sprints/fix-auth-login-password.md).
+- **fix:** variant version build metadata is not built from the component name. A variant without
+  `version` gets `<version>+<type>-<variant.name>` (tag `1.1.3_quadlet-with-bis`) while its Margo
+  component name is `variants[].component` (`bhdo-quadlet-with-bis`). Plan: derive the metadata from the
+  component (`<version>+<component>`), through one shared helper instead of four copies. Breaks the
+  default tag of existing variant projects. Full plan at
+  [`.kiro/sprints/fix-variant-version-from-component.md`](.kiro/sprints/fix-variant-version-from-component.md).
 - **fix:** registry HTTP 401 without a `WWW-Authenticate` header exits 3, not 4. oras-py raises a plain
   `ValueError` before `_check_200_response`, so the shared remote path maps it to exit 3 (429 responses
   fail the same way). Fix in `infra/oci.py`.
